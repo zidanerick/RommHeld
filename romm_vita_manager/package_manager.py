@@ -3,14 +3,15 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
-import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from .archive_utils import ArchiveEntry, list_archive
+
 
 CACHE_DIR = Path.home() / ".cache" / "romm-vita-manager" / "packages"
-USER_AGENT = "RomM-Vita-Manager/0.8"
+USER_AGENT = "RomM-Vita-Manager/0.9"
 
 
 @dataclass(frozen=True)
@@ -24,74 +25,51 @@ class PackageSpec:
     destination: str
     sha256: str | None = None
     install_notes: str = ""
+    package_type: str = "file"
+    archive_destination: str | None = None
+    archive_source_prefix: str | None = None
+    requires_archive_review: bool = False
 
 
 PACKAGES = {
     "retroflow": PackageSpec(
-        "retroflow",
-        "RetroFlow",
+        "retroflow", "RetroFlow",
         "Frontend/launcher. It does not provide the emulator cores or RetroAchievements implementation.",
-        "github:hamadrehman/RetroFlow-Launcher",
-        "RetroFlow_emu4vita.vpk",
-        "RetroFlow_emu4vita.vpk",
-        "root",
+        "github:hamadrehman/RetroFlow-Launcher", "RetroFlow_emu4vita.vpk", "RetroFlow_emu4vita.vpk", "root",
         "839819018f77148ebb2cc497f91edb52a8e6046f16b0871c63f14ea3bc622320",
         "Install the VPK with VitaShell. The current upstream release is the Emu4Vita build.",
     ),
     "adrenaline": PackageSpec(
-        "adrenaline",
-        "Adrenaline",
-        "PSP/PS1 environment for the Vita.",
-        "github:TheOfficialFloW/Adrenaline",
-        "Adrenaline.vpk",
-        "Adrenaline.vpk",
-        "root",
-        None,
+        "adrenaline", "Adrenaline", "PSP/PS1 environment for the Vita.",
+        "github:TheOfficialFloW/Adrenaline", "Adrenaline.vpk", "Adrenaline.vpk", "root", None,
         "Install the VPK with VitaShell. Existing installations may require the upstream update procedure.",
     ),
     "dsvita": PackageSpec(
-        "dsvita",
-        "DSVita",
-        "Nintendo DS emulator for Vita.",
-        "github:Grarak/DSVita",
-        "dsvita.vpk",
-        "dsvita.vpk",
-        "root",
+        "dsvita", "DSVita", "Nintendo DS emulator for Vita.",
+        "github:Grarak/DSVita", "dsvita.vpk", "dsvita.vpk", "root",
         "cdf71cb6ef514c7b4f49d532457514f235ddb7129ac0130b9e41270c731ff8a5",
-        "Install the VPK with VitaShell. Additional DSVita data/dependencies may be required by the installed build.",
+        "Install the VPK with VitaShell. libshacccg.suprx and kubridge >= 0.3.1 are also required. ROMs belong in ux0:/data/dsvita/.",
     ),
     "daedalusx64": PackageSpec(
-        "daedalusx64",
-        "DaedalusX64",
-        "Nintendo 64 emulator. Keep separate from the RetroAchievements-first RetroArch route.",
-        "github:DaedalusX64/daedalus",
-        "DaedalusX64_1_1_8.zip",
-        "DaedalusX64_1_1_8.zip",
-        "root",
-        None,
-        "The upstream release is an archive rather than a VPK. Review/extract its Vita content before installation.",
+        "daedalusx64", "DaedalusX64",
+        "Nintendo 64 emulator package. Keep separate from the RetroAchievements-first RetroArch route.",
+        "github:DaedalusX64/daedalus", "DaedalusX64_1_1_8.zip", "DaedalusX64_1_1_8.zip", "root", None,
+        "The upstream release is a multi-platform archive. Inspect its contents before extracting anything onto the Vita.",
+        package_type="zip", requires_archive_review=True,
     ),
     "retroarch": PackageSpec(
-        "retroarch",
-        "RetroArch",
+        "retroarch", "RetroArch",
         "Libretro frontend and core platform. Preferred route for supported RetroAchievements systems.",
         "direct:https://buildbot.libretro.com/stable/1.22.1/playstation/vita/RetroArch.vpk",
-        "RetroArch.vpk",
-        "RetroArch.vpk",
-        "root",
-        None,
-        "Install the VPK with VitaShell, then stage RetroArch_data.7z separately and extract its contents into ux0:/data/retroarch/.",
+        "RetroArch.vpk", "RetroArch.vpk", "root", None,
+        "Install the VPK with VitaShell. The companion data archive is handled separately.",
     ),
     "retroarch-data": PackageSpec(
-        "retroarch-data",
-        "RetroArch data",
-        "RetroArch assets/data package used with the Vita build.",
+        "retroarch-data", "RetroArch data", "RetroArch assets/data package used with the Vita build.",
         "direct:https://buildbot.libretro.com/stable/1.22.1/playstation/vita/RetroArch_data.7z",
-        "RetroArch_data.7z",
-        "RetroArch_data.7z",
-        "root",
-        None,
-        "This is data, not a VPK. After transferring it, use VitaShell to extract the contents into ux0:/data/retroarch/.",
+        "RetroArch_data.7z", "RetroArch_data.7z", "root", None,
+        "This is data, not a VPK. Inspect/extract it according to the upstream Vita installation layout.",
+        package_type="archive", requires_archive_review=True,
     ),
 }
 
@@ -103,13 +81,11 @@ def _request(url: str) -> bytes:
 
 
 def resolve_package(package: PackageSpec) -> tuple[str, str | None]:
-    """Return a download URL and the release-provided digest when available."""
     if package.source.startswith("direct:"):
         return package.source.removeprefix("direct:"), package.sha256
     if package.source.startswith("github:"):
         repository = package.source.removeprefix("github:")
-        raw = _request(f"https://api.github.com/repos/{repository}/releases/latest")
-        release = json.loads(raw.decode("utf-8"))
+        release = json.loads(_request(f"https://api.github.com/repos/{repository}/releases/latest").decode("utf-8"))
         for asset in release.get("assets", []):
             if asset.get("name") == package.asset_name:
                 digest = asset.get("digest")
@@ -125,7 +101,6 @@ def package_path(package: PackageSpec) -> Path:
 
 
 def download_package(package: PackageSpec, progress=None) -> Path:
-    """Download a package into the user cache and verify its expected digest when known."""
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     url, digest = resolve_package(package)
     destination = package_path(package)
@@ -155,15 +130,23 @@ def download_package(package: PackageSpec, progress=None) -> Path:
     return destination
 
 
-def stage_package(package: PackageSpec, vita: Path) -> Path:
-    """Copy a downloaded package to the Vita staging/root area without installing it."""
+def inspect_package(package: PackageSpec) -> list[ArchiveEntry]:
     source = package_path(package)
     if not source.is_file():
         raise FileNotFoundError(f"Package has not been downloaded yet: {source}")
-    if package.destination == "root":
-        target = vita / package.stage_name
-    else:
-        target = vita / "data" / package.destination / package.stage_name
+    return list_archive(source)
+
+
+def stage_package(package: PackageSpec, vita: Path) -> Path:
+    """Stage a normal file/VPK. Archive packages must be inspected first."""
+    source = package_path(package)
+    if not source.is_file():
+        raise FileNotFoundError(f"Package has not been downloaded yet: {source}")
+    if package.requires_archive_review:
+        raise RuntimeError(
+            f"{package.name} is an archive package. Inspect its contents before choosing a Vita destination."
+        )
+    target = vita / package.stage_name if package.destination == "root" else vita / "data" / package.destination / package.stage_name
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
     return target
