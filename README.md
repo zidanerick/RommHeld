@@ -16,6 +16,8 @@ Early development. The current prototype provides:
 - transfer progress and cancellation
 - post-copy file-size verification
 - list and tile browsing modes
+- Vita free-space display
+- pre-transfer capacity checks
 
 ## Default paths
 
@@ -71,6 +73,14 @@ Put the Vita into USB mode using VitaShell, connect it to Linux, and press **Ref
 
 The manager detects the mounted filesystem rather than relying on a fixed mount point or storage UUID.
 
+## Transfer behaviour
+
+The manager skips a destination file when it already exists with the expected size. This makes interrupted bulk transfers safe to resume.
+
+New copies are verified by comparing the resulting file size with the source. A full checksum is not calculated by default because that would require another complete read of every transferred file.
+
+Before a transfer begins, the manager checks the mounted Vita's free space and blocks the operation when the selected files cannot fit.
+
 ## Safety
 
 Unknown platform mappings are not copied automatically. Native Vita VPK files are treated separately from ordinary ROM files and are not silently written to `ux0:/app`.
@@ -79,4 +89,4 @@ The repository is intended to remain free of personal paths, credentials, ROM fi
 
 ## Roadmap
 
-Planned areas include better RomM platform matching, artwork, richer transfer queues, free-space checks, improved Vita game handling, and automated discovery of the installed RetroFlow configuration.
+Planned areas include better RomM platform matching, artwork, richer transfer queues, improved Vita game handling, automated discovery of the installed RetroFlow configuration, and a cleaner separation between the GUI and transfer/mapping logic.
