@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+import shutil
+import subprocess
 import tarfile
 import zipfile
 
@@ -18,16 +20,36 @@ def list_archive(archive: Path) -> list[ArchiveEntry]:
     suffix = archive.suffix.lower()
     if suffix == ".zip":
         with zipfile.ZipFile(archive) as zf:
-            return [
-                ArchiveEntry(info.filename, info.file_size, info.is_dir())
-                for info in zf.infolist()
-            ]
+            return [ArchiveEntry(info.filename, info.file_size, info.is_dir()) for info in zf.infolist()]
     if suffix in {".tar", ".tgz", ".gz", ".bz2", ".xz"} or archive.name.endswith(".tar.gz"):
         with tarfile.open(archive, "r:*") as tf:
-            return [
-                ArchiveEntry(member.name, member.size, member.isdir())
-                for member in tf.getmembers()
-            ]
+            return [ArchiveEntry(member.name, member.size, member.isdir()) for member in tf.getmembers()]
+    if suffix == ".7z":
+        seven_zip = shutil.which("7z") or shutil.which("7zz")
+        if not seven_zip:
+            raise RuntimeError("7z/7zz is required to inspect .7z packages. On Arch/CachyOS install the '7zip' package.")
+        result = subprocess.run(
+            [seven_zip, "l", "-slt", str(archive)],
+            capture_output=True, text=True, check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "7z could not inspect the archive.")
+        entries: list[ArchiveEntry] = []
+        current: dict[str, str] = {}
+        for raw_line in result.stdout.splitlines():
+            line = raw_line.strip()
+            if not line:
+                if "Path" in current:
+                    name = current["Path"]
+                    is_dir = current.get("Folder") == "+"
+                    size = 0 if is_dir else int(current.get("Size", "0"))
+                    entries.append(ArchiveEntry(name, size, is_dir))
+                current = {}
+                continue
+            if " = " in line:
+                key, value = line.split(" = ", 1)
+                current[key] = value
+        return entries
     raise ValueError(f"Unsupported archive format: {archive.name}")
 
 
@@ -47,16 +69,10 @@ def _match_prefix(name: str, prefix: str | None) -> str | None:
     return None
 
 
-def extract_archive(
-    archive: Path,
-    destination: Path,
-    *,
-    source_prefix: str | None = None,
-) -> list[Path]:
-    """Safely extract an archive, optionally stripping a known source prefix."""
+def extract_archive(archive: Path, destination: Path, *, source_prefix: str | None = None) -> list[Path]:
+    """Safely extract ZIP/TAR archives with traversal protection."""
     destination = destination.resolve()
     written: list[Path] = []
-    suffix = archive.suffix.lower()
 
     def target_for(name: str) -> Path | None:
         matched = _match_prefix(name, source_prefix)
@@ -70,6 +86,7 @@ def extract_archive(
             raise ValueError(f"Archive member escapes destination: {name}")
         return target
 
+    suffix = archive.suffix.lower()
     if suffix == ".zip":
         with zipfile.ZipFile(archive) as zf:
             for info in zf.infolist():
@@ -107,4 +124,4 @@ def extract_archive(
                 written.append(target)
         return written
 
-    raise ValueError(f"Unsupported archive format: {archive.name}")
+    raise ValueError(f"Extraction is not yet enabled for archive format: {archive.name}")
