@@ -45,6 +45,29 @@ PSP and PS1 EBOOT.PBP games through Adrenaline:
 ux0:/pspemu/PSP/GAME/<Game>/EBOOT.PBP
 ```
 
+## RomM platform mapping
+
+RomM commonly uses short platform IDs while RetroFlow uses descriptive folder names. The manager maps supported IDs to the actual RetroFlow folder names discovered on the target Vita.
+
+Examples:
+
+```text
+roms/gb/   -> Nintendo - Game Boy
+roms/gbc/  -> Nintendo - Game Boy Color
+roms/gba/  -> Nintendo - Game Boy Advance
+roms/n64/  -> Nintendo - Nintendo 64
+roms/nes/  -> Nintendo - Nintendo Entertainment System
+roms/snes/ -> Nintendo - Super Nintendo Entertainment System
+roms/amiga/ -> Commodore - Amiga
+roms/c64/  -> Commodore - 64
+roms/msx/  -> Microsoft - MSX
+roms/sms/  -> Sega - Master System - Mark III
+roms/md/   -> Sega - Mega Drive - Genesis
+roms/dc/   -> Sega - Dreamcast
+```
+
+Platforms for which the current Vita does not have a matching RetroFlow directory are deliberately marked as unsupported instead of being copied into a guessed location.
+
 ## Requirements
 
 Designed for Arch-based Linux distributions such as CachyOS.
@@ -89,4 +112,13 @@ The repository is intended to remain free of personal paths, credentials, ROM fi
 
 ## Roadmap
 
-Planned areas include better RomM platform matching, artwork, richer transfer queues, improved Vita game handling, automated discovery of the installed RetroFlow configuration, and a cleaner separation between the GUI and transfer/mapping logic.
+Planned areas include:
+
+- better RomM platform matching and automatic discovery
+- artwork from RomM metadata
+- a richer transfer queue with per-file state
+- smarter duplicate detection
+- free-space-aware bulk selection
+- automated discovery of the installed RetroFlow configuration
+- cleaner separation between GUI, mapping, filesystem, and transfer logic
+- proper native Vita VPK handling
