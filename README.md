@@ -6,8 +6,10 @@ A Linux desktop utility for managing game transfers from a local RomM library to
 
 Early development. The current prototype provides:
 
+- first-run setup wizard
+- configurable main RomM ROM directory
+- persistent per-user platform mappings
 - automatic Vita mount detection
-- configurable RomM library location
 - platform filtering and search
 - installed-state detection
 - automatic RetroFlow and Adrenaline destinations
@@ -16,12 +18,27 @@ Early development. The current prototype provides:
 - transfer progress and cancellation
 - post-copy file-size verification
 - list and tile browsing modes
-- Vita free-space display
-- pre-transfer capacity checks
+- Vita free-space display and pre-transfer capacity checks
+
+## First-run setup
+
+The application does not assume the developer's local filesystem layout.
+
+On first launch it asks for the main RomM ROM directory. It then discovers the top-level platform directories and presents a mapping table where each RomM platform can be mapped to a RetroFlow destination or disabled.
+
+The configuration is stored locally at:
+
+```text
+~/.config/romm-vita-manager/config.json
+```
+
+This file is deliberately outside the Git repository so personal paths and settings are not published.
+
+The mapping can be revisited later through **Setup / Settings**.
 
 ## Default paths
 
-RomM library:
+The initial suggested RomM path is:
 
 ```text
 ~/RomM/roms/roms/
@@ -45,34 +62,9 @@ PSP and PS1 EBOOT.PBP games through Adrenaline:
 ux0:/pspemu/PSP/GAME/<Game>/EBOOT.PBP
 ```
 
-## RomM platform mapping
-
-RomM commonly uses short platform IDs while RetroFlow uses descriptive folder names. The manager maps supported IDs to the actual RetroFlow folder names discovered on the target Vita.
-
-Examples:
-
-```text
-roms/gb/   -> Nintendo - Game Boy
-roms/gbc/  -> Nintendo - Game Boy Color
-roms/gba/  -> Nintendo - Game Boy Advance
-roms/n64/  -> Nintendo - Nintendo 64
-roms/nes/  -> Nintendo - Nintendo Entertainment System
-roms/snes/ -> Nintendo - Super Nintendo Entertainment System
-roms/amiga/ -> Commodore - Amiga
-roms/c64/  -> Commodore - 64
-roms/msx/  -> Microsoft - MSX
-roms/sms/  -> Sega - Master System - Mark III
-roms/md/   -> Sega - Mega Drive - Genesis
-roms/dc/   -> Sega - Dreamcast
-```
-
-Platforms for which the current Vita does not have a matching RetroFlow directory are deliberately marked as unsupported instead of being copied into a guessed location.
-
 ## Requirements
 
 Designed for Arch-based Linux distributions such as CachyOS.
-
-Install the required packages with:
 
 ```fish
 sudo pacman -S --needed python pyside6
@@ -98,7 +90,7 @@ The manager detects the mounted filesystem rather than relying on a fixed mount 
 
 ## Transfer behaviour
 
-The manager skips a destination file when it already exists with the expected size. This makes interrupted bulk transfers safe to resume.
+The manager skips destination files when they already exist with the expected size. This makes interrupted bulk transfers safe to resume.
 
 New copies are verified by comparing the resulting file size with the source. A full checksum is not calculated by default because that would require another complete read of every transferred file.
 
@@ -106,7 +98,7 @@ Before a transfer begins, the manager checks the mounted Vita's free space and b
 
 ## Safety
 
-Unknown platform mappings are not copied automatically. Native Vita VPK files are treated separately from ordinary ROM files and are not silently written to `ux0:/app`.
+Unknown or disabled platform mappings are not copied automatically. Native Vita VPK files are staged separately rather than being silently written into `ux0:/app`.
 
 The repository is intended to remain free of personal paths, credentials, ROM files, Vita dumps, and other machine-specific data.
 
@@ -114,11 +106,12 @@ The repository is intended to remain free of personal paths, credentials, ROM fi
 
 Planned areas include:
 
-- better RomM platform matching and automatic discovery
-- artwork from RomM metadata
-- a richer transfer queue with per-file state
-- smarter duplicate detection
-- free-space-aware bulk selection
-- automated discovery of the installed RetroFlow configuration
-- cleaner separation between GUI, mapping, filesystem, and transfer logic
-- proper native Vita VPK handling
+- better platform detection and aliases
+- automatic RetroFlow directory discovery
+- artwork and richer tile browsing
+- a detailed transfer queue
+- smarter duplicate/hash handling
+- Vita free-space and transfer planning tools
+- emulator/component setup assistance
+- RetroAchievements-aware emulator/core recommendations
+- improved native Vita VPK installation workflow
