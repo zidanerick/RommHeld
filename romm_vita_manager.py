@@ -17,7 +17,7 @@ from pathlib import Path
 from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QFileDialog, QFormLayout, QGroupBox,
-    QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
+    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
     QProgressBar, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget, QHeaderView,
 )
@@ -290,14 +290,20 @@ class CopyWorker(QThread):
             total = sum(game.size for game, *_ in self.jobs) or 1
             completed = 0
             for game, destination, mode, label in self.jobs:
-                if self.cancel_event.is_set(): cancelled += 1; break
+                if self.cancel_event.is_set():
+                    cancelled += 1; break
                 destination.mkdir(parents=True, exist_ok=True)
-                target = destination / sanitize_name(game.name) / "EBOOT.PBP" if mode == "game-folder" else destination / game.path.name
+                if mode == "game-folder":
+                    target = destination / sanitize_name(game.name) / "EBOOT.PBP"
+                else:
+                    target = destination / game.path.name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 if target.exists() and target.is_file() and target.stat().st_size == game.size:
                     skipped += 1; completed += game.size
                     self.progress.emit(int(completed * 100 / total), game.name, "Already present")
                     continue
+                target.unlink(missing_ok=True)
+                bytes_done = 0
                 with game.path.open("rb") as source, target.open("wb") as dest:
                     while True:
                         if self.cancel_event.is_set():
@@ -306,10 +312,12 @@ class CopyWorker(QThread):
                             cancelled += 1; break
                         chunk = source.read(8 * 1024 * 1024)
                         if not chunk: break
-                        dest.write(chunk); completed += len(chunk)
-                        self.progress.emit(int(completed * 100 / total), game.name, f"{human_size(completed)} / {human_size(total)} → {label}")
+                        dest.write(chunk); bytes_done += len(chunk); completed += len(chunk)
+                        self.progress.emit(int(completed * 100 / total), game.name,
+                                           f"{human_size(bytes_done)} / {human_size(game.size)} → {label}")
                 if cancelled: break
-                if target.stat().st_size != game.size: raise IOError(f"Size verification failed for {game.name}")
+                if target.stat().st_size != game.size:
+                    raise IOError(f"Size verification failed for {game.name}")
                 copied += 1
             self.finished_ok.emit(copied, skipped, cancelled)
         except Exception as exc:
@@ -318,70 +326,90 @@ class CopyWorker(QThread):
 
 class MainWindow(QMainWindow):
     def __init__(self, config: dict):
-        super().__init__(); self.setWindowTitle("RomM Vita Manager"); self.resize(1280, 800)
-        self.config = config; self.romm_root = Path(config.get("romm_root", DEFAULT_ROMM_ROOT)).expanduser(); self.mappings = config.get("platform_mappings", {})
-        self.vita = None; self.games = []; self.worker = None
+        super().__init__()
+        self.config = config
+        self.romm_root = Path(config.get("romm_root", DEFAULT_ROMM_ROOT)).expanduser()
+        self.mappings = config.get("platform_mappings", {})
+        self.vita = None
+        self.games = []
+        self.filtered_games = []
+        self.worker = None
+        self.setWindowTitle("RomM Vita Manager")
+        self.resize(1250, 760)
 
         self.search = QLineEdit(); self.search.setPlaceholderText("Search games…")
-        self.platforms = QComboBox(); self.status_filter = QComboBox(); self.status_filter.addItems(["All statuses", "Not installed", "Installed", "Different", "Unknown"])
+        self.platforms = QComboBox(); self.platforms.addItem("All platforms")
+        self.status_filter = QComboBox(); self.status_filter.addItems(["All games", "Not installed", "Installed", "Different", "Unknown"])
         self.view_mode = QComboBox(); self.view_mode.addItems(["List", "Tiles"])
-        self.refresh_button = QPushButton("Refresh"); self.settings_button = QPushButton("Setup / Settings")
-        top = QHBoxLayout(); top.addWidget(QLabel("Search:")); top.addWidget(self.search, 1); top.addWidget(QLabel("Platform:")); top.addWidget(self.platforms); top.addWidget(QLabel("Show:")); top.addWidget(self.status_filter); top.addWidget(QLabel("View:")); top.addWidget(self.view_mode); top.addWidget(self.refresh_button); top.addWidget(self.settings_button)
+        self.game_list = QListWidget(); self.game_list.setSelectionMode(QListWidget.ExtendedSelection)
+        self.game_list.itemSelectionChanged.connect(self.update_summary)
+        self.vita_label = QLabel("Not detected")
+        self.source_label = QLabel(); self.selection_label = QLabel("0 selected")
+        self.destination_label = QLabel("Select a game to see its destination.")
+        self.progress = QProgressBar(); self.status = QLabel("Ready.")
+        self.refresh_button = QPushButton("Refresh"); self.settings_button = QPushButton("Settings")
+        self.copy_button = QPushButton("Copy selected → Vita"); self.cancel_button = QPushButton("Cancel transfer")
+        self.cancel_button.setEnabled(False); self.destination_button = QPushButton("Show destination")
+        self.refresh_button.clicked.connect(self.refresh_all); self.settings_button.clicked.connect(self.open_settings)
+        self.copy_button.clicked.connect(self.copy_selected); self.cancel_button.clicked.connect(self.cancel_copy)
+        self.destination_button.clicked.connect(self.show_game_destination)
+        self.search.textChanged.connect(self.refresh_games); self.platforms.currentIndexChanged.connect(self.refresh_games)
+        self.status_filter.currentIndexChanged.connect(self.refresh_games); self.view_mode.currentIndexChanged.connect(self.apply_view_mode)
 
-        library = QGroupBox("RomM Library"); ll = QVBoxLayout(library); self.source_label = QLabel(); self.game_list = QListWidget(); self.game_list.setSelectionMode(QListWidget.ExtendedSelection); self.selection_label = QLabel("0 selected")
-        ll.addWidget(self.source_label); ll.addWidget(self.game_list, 1); ll.addWidget(self.selection_label); ll.addWidget(QLabel("✓ Installed   ↓ New   ↻ Different   ? Unknown"))
-
-        vita = QGroupBox("Vita"); vl = QVBoxLayout(vita); self.vita_label = QLabel(); self.storage_label = QLabel(); self.destination_label = QLabel("Select a game to see its automatic destination."); self.destination_label.setWordWrap(True); self.destination_button = QPushButton("Show destination"); self.copy_button = QPushButton("Copy selected → Vita"); self.cancel_button = QPushButton("Cancel transfer"); self.cancel_button.setEnabled(False); self.progress = QProgressBar(); self.status = QLabel("Ready")
-        for w in (self.vita_label, self.storage_label, QLabel("Automatic destination:"), self.destination_label, self.destination_button): vl.addWidget(w)
-        vl.addStretch(); vl.addWidget(self.progress); vl.addWidget(self.status); vl.addWidget(self.copy_button); vl.addWidget(self.cancel_button)
-
-        splitter = QSplitter(Qt.Horizontal); splitter.addWidget(library); splitter.addWidget(vita); splitter.setSizes([880, 400]); central = QWidget(); layout = QVBoxLayout(central); layout.addLayout(top); layout.addWidget(splitter, 1); self.setCentralWidget(central)
-        self.refresh_button.clicked.connect(self.refresh_all); self.settings_button.clicked.connect(self.open_settings); self.search.textChanged.connect(self.refresh_games); self.platforms.currentTextChanged.connect(self.refresh_games); self.status_filter.currentTextChanged.connect(self.refresh_games); self.view_mode.currentTextChanged.connect(self.apply_view_mode); self.game_list.itemSelectionChanged.connect(self.update_summary); self.destination_button.clicked.connect(self.show_game_destination); self.copy_button.clicked.connect(self.copy_selected); self.cancel_button.clicked.connect(self.cancel_copy)
+        top = QHBoxLayout(); top.addWidget(QLabel("Search:")); top.addWidget(self.search, 1); top.addWidget(self.refresh_button); top.addWidget(self.settings_button)
+        library_box = QGroupBox("RomM Library"); library_layout = QVBoxLayout(library_box)
+        filter_row = QHBoxLayout(); filter_row.addWidget(QLabel("Platform:")); filter_row.addWidget(self.platforms, 1); filter_row.addWidget(QLabel("Show:")); filter_row.addWidget(self.status_filter); filter_row.addWidget(QLabel("View:")); filter_row.addWidget(self.view_mode); library_layout.addLayout(filter_row)
+        library_layout.addWidget(self.source_label); library_layout.addWidget(self.game_list, 1); library_layout.addWidget(self.selection_label); library_layout.addWidget(QLabel("✓ Installed   ↓ New   ↻ Different   ? Unknown"))
+        vita_box = QGroupBox("Vita"); vita_layout = QVBoxLayout(vita_box); vita_layout.addWidget(self.vita_label); vita_layout.addWidget(QLabel("Automatic destination:")); vita_layout.addWidget(self.destination_label); vita_layout.addWidget(self.destination_button); vita_layout.addStretch(); vita_layout.addWidget(self.progress); vita_layout.addWidget(self.status); vita_layout.addWidget(self.copy_button); vita_layout.addWidget(self.cancel_button)
+        splitter = QSplitter(Qt.Horizontal); splitter.addWidget(library_box); splitter.addWidget(vita_box); splitter.setSizes([850, 400])
+        central = QWidget(); layout = QVBoxLayout(central); layout.addLayout(top); layout.addWidget(splitter, 1); self.setCentralWidget(central)
         self.refresh_all()
 
     def refresh_all(self): self.detect_vita(); self.refresh_games()
 
     def detect_vita(self):
         mounts = find_vita_mounts(); self.vita = mounts[0] if mounts else None
-        if self.vita:
-            self.vita_label.setText(f"Connected: {self.vita}")
-            try:
-                u = shutil.disk_usage(self.vita); self.storage_label.setText(f"Storage: {human_size(u.free)} free of {human_size(u.total)}")
-            except OSError as exc: self.storage_label.setText(f"Storage unavailable: {exc}")
-        else: self.vita_label.setText("No Vita detected. Connect VitaShell in USB mode, then press Refresh."); self.storage_label.setText("")
+        self.vita_label.setText(f"Connected: {self.vita}" if self.vita else "No Vita detected. Connect VitaShell in USB mode, then press Refresh.")
 
     def refresh_games(self):
-        self.games = scan_games(self.romm_root); current = self.platforms.currentText(); self.platforms.blockSignals(True); self.platforms.clear(); self.platforms.addItem("All platforms"); self.platforms.addItems(sorted({g.source_platform for g in self.games}, key=lambda x: platform_label(x).lower())); idx = self.platforms.findText(current); self.platforms.setCurrentIndex(idx if idx >= 0 else 0); self.platforms.blockSignals(False)
-        query = self.search.text().strip().lower(); platform = self.platforms.currentText(); wanted = self.status_filter.currentText(); self.game_list.clear()
-        shown = 0
+        self.games = scan_games(self.romm_root); current = self.platforms.currentText(); self.platforms.blockSignals(True); self.platforms.clear(); self.platforms.addItem("All platforms")
+        self.platforms.addItems(sorted({g.source_platform for g in self.games}, key=lambda s: platform_label(s).lower()))
+        idx = self.platforms.findText(current); self.platforms.setCurrentIndex(idx if idx >= 0 else 0); self.platforms.blockSignals(False)
+        query = self.search.text().strip().lower(); platform = self.platforms.currentText(); wanted = self.status_filter.currentText()
+        self.filtered_games = []
         for game in self.games:
             if query and query not in game.name.lower(): continue
             if platform != "All platforms" and game.source_platform != platform: continue
-            state, detail = game_status(self.vita, game, self.mappings)
+            state, _ = game_status(self.vita, game, self.mappings)
             if wanted == "Not installed" and state != "NEW": continue
             if wanted == "Installed" and state != "INSTALLED": continue
             if wanted == "Different" and state != "DIFFERENT": continue
             if wanted == "Unknown" and state != "UNKNOWN": continue
-            item = QListWidgetItem(f"{STATUS_SYMBOLS.get(state, '?')} {game.name}\n{platform_label(game.source_platform)} • {human_size(game.size)} • {detail}"); item.setData(Qt.UserRole, game); self.game_list.addItem(item); shown += 1
-        self.source_label.setText(f"{self.romm_root} • {shown} games shown"); self.apply_view_mode(); self.update_summary()
+            self.filtered_games.append(game)
+        self.game_list.clear()
+        for game in self.filtered_games:
+            state, detail = game_status(self.vita, game, self.mappings); symbol = STATUS_SYMBOLS[state]
+            item = QListWidgetItem(f"{symbol} {game.name}\n{platform_label(game.source_platform)} • {human_size(game.size)} • {detail}"); item.setData(Qt.UserRole, game); self.game_list.addItem(item)
+        self.apply_view_mode(); self.source_label.setText(f"{self.romm_root} • {len(self.filtered_games)} games shown"); self.update_summary()
 
     def apply_view_mode(self):
-        if self.view_mode.currentText() == "Tiles": self.game_list.setViewMode(QListWidget.IconMode); self.game_list.setResizeMode(QListWidget.Adjust); self.game_list.setMovement(QListWidget.Static); self.game_list.setGridSize(QSize(260, 75))
-        else: self.game_list.setViewMode(QListWidget.ListMode); self.game_list.setResizeMode(QListWidget.Fixed); self.game_list.setMovement(QListWidget.Static)
+        if self.view_mode.currentText() == "Tiles":
+            self.game_list.setViewMode(QListWidget.IconMode); self.game_list.setResizeMode(QListWidget.Adjust); self.game_list.setMovement(QListWidget.Static); self.game_list.setGridSize(QSize(250, 90)); self.game_list.setIconSize(QSize(32, 32))
+        else:
+            self.game_list.setViewMode(QListWidget.ListMode); self.game_list.setResizeMode(QListWidget.Fixed); self.game_list.setMovement(QListWidget.Static)
 
     def update_summary(self):
         selected = self.game_list.selectedItems(); total = sum(item.data(Qt.UserRole).size for item in selected); self.selection_label.setText(f"{len(selected)} selected • {human_size(total)}")
         if len(selected) == 1: self.set_destination_for_game(selected[0].data(Qt.UserRole))
-        elif selected: self.destination_label.setText("Multiple games selected.")
-        else: self.destination_label.setText("Select a game to see its automatic destination.")
+        else: self.destination_label.setText("Multiple games selected." if selected else "Select a game to see its destination.")
 
     def set_destination_for_game(self, game):
         if not self.vita: self.destination_label.setText("No Vita connected."); return
-        label, target, mode = destination_target(self.vita, game, self.mappings); self.destination_label.setText(f"{label}\n{target}")
+        label, path, mode = destination_for_game(self.vita, game, self.mappings); self.destination_label.setText(f"{label}\n{path}")
 
     def show_game_destination(self):
         selected = self.game_list.selectedItems()
-        if len(selected) != 1: QMessageBox.information(self, "Select one game", "Select exactly one game to see its destination."); return
+        if len(selected) != 1: QMessageBox.information(self, "Select one game", "Select exactly one game to see its automatic destination."); return
         self.set_destination_for_game(selected[0].data(Qt.UserRole))
 
     def open_settings(self):
@@ -397,32 +425,31 @@ class MainWindow(QMainWindow):
             game = item.data(Qt.UserRole); state, _ = game_status(self.vita, game, self.mappings)
             if state == "INSTALLED": continue
             label, destination, mode = destination_for_game(self.vita, game, self.mappings)
-            if mode == "unknown": review.append(f"{game.name} ({platform_label(game.source_platform)})"); continue
+            if mode == "unknown": review.append(f"{game.name} ({game.source_platform})"); continue
             jobs.append((game, destination, mode, label))
-        if review: QMessageBox.warning(self, "Destination review required", "These games are not mapped safely and were skipped:\n\n" + "\n".join(review[:25]) + ("\n…" if len(review) > 25 else ""))
-        if not jobs: QMessageBox.information(self, "Nothing to copy", "Everything selected is already installed or has no safe destination mapping."); return
-        size = sum(j[0].size for j in jobs)
-        try: free = shutil.disk_usage(self.vita).free
-        except OSError: free = None
-        if free is not None and size > free: QMessageBox.warning(self, "Not enough Vita space", f"Selected transfer: {human_size(size)}\nAvailable: {human_size(free)}"); return
-        if QMessageBox.question(self, "Confirm transfer", f"Copy {len(jobs)} game(s), {human_size(size)}?\n\nAlready-present games will be skipped.") != QMessageBox.StandardButton.Yes: return
-        self.copy_button.setEnabled(False); self.cancel_button.setEnabled(True); self.refresh_button.setEnabled(False); self.settings_button.setEnabled(False); self.progress.setValue(0); self.status.setText("Starting transfer…")
+        if review: QMessageBox.warning(self, "Destination review required", "These games could not be mapped safely and were not queued:\n\n" + "\n".join(review[:20]) + ("\n…" if len(review) > 20 else ""))
+        if not jobs: QMessageBox.information(self, "Nothing to copy", "Everything selected is already present or unmapped."); return
+        total = sum(game.size for game, *_ in jobs)
+        if QMessageBox.question(self, "Confirm copy", f"Process {len(jobs)} game(s), {human_size(total)}?\n\nAlready-complete files will be skipped.") != QMessageBox.StandardButton.Yes: return
+        self.copy_button.setEnabled(False); self.cancel_button.setEnabled(True); self.refresh_button.setEnabled(False); self.settings_button.setEnabled(False); self.progress.setValue(0)
         self.worker = CopyWorker(jobs); self.worker.progress.connect(self.on_progress); self.worker.finished_ok.connect(self.copy_finished); self.worker.failed.connect(self.copy_failed); self.worker.start()
-
-    def on_progress(self, value, message, detail): self.progress.setValue(value); self.status.setText(f"{message} • {detail}")
 
     def cancel_copy(self):
         if self.worker and self.worker.isRunning(): self.worker.cancel(); self.cancel_button.setEnabled(False); self.status.setText("Cancelling transfer…")
 
+    def on_progress(self, value, message, detail): self.progress.setValue(value); self.status.setText(f"{message} • {detail}")
+
     def copy_finished(self, copied, skipped, cancelled):
-        self.copy_button.setEnabled(True); self.cancel_button.setEnabled(False); self.refresh_button.setEnabled(True); self.settings_button.setEnabled(True); self.refresh_all(); self.status.setText("Transfer cancelled." if cancelled else "Transfer complete."); QMessageBox.information(self, "Transfer summary", f"Copied: {copied}\nSkipped: {skipped}\nCancelled: {cancelled}")
+        self.copy_button.setEnabled(True); self.cancel_button.setEnabled(False); self.refresh_button.setEnabled(True); self.settings_button.setEnabled(True); self.status.setText("Transfer cancelled." if cancelled else "Transfer complete."); self.refresh_games(); QMessageBox.information(self, "Transfer summary", f"Copied: {copied}\nSkipped: {skipped}\nCancelled: {cancelled}")
 
     def copy_failed(self, message):
         self.copy_button.setEnabled(True); self.cancel_button.setEnabled(False); self.refresh_button.setEnabled(True); self.settings_button.setEnabled(True); self.status.setText("Transfer failed."); QMessageBox.critical(self, "Transfer failed", message)
 
 
 def main():
-    app = QApplication(sys.argv); app.setApplicationName("RomM Vita Manager"); config = load_config()
+    app = QApplication(sys.argv)
+    app.setApplicationName("RomM Vita Manager"); app.setApplicationVersion("0.5")
+    config = load_config()
     if not config.get("setup_complete"):
         wizard = SetupWizard(config)
         if wizard.exec() != QDialog.DialogCode.Accepted: return
@@ -430,4 +457,5 @@ def main():
     window = MainWindow(config); window.show(); sys.exit(app.exec())
 
 
-if __name__ == "__main__": main()
+if __name__ == "__main__":
+    main()
