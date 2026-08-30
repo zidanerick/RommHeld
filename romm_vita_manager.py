@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""RomM Vita Manager."""
+"""RomM Vita Manager.
+
+Linux GUI for transferring games from a local RomM library to a USB-mounted
+PS Vita using the RetroFlow and Adrenaline directory conventions.
+"""
 from __future__ import annotations
 
 import os
@@ -12,35 +16,64 @@ from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QFileDialog, QFormLayout, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMainWindow,
-    QMessageBox, QProgressBar, QPushButton, QSplitter, QVBoxLayout, QWidget,
+    QApplication,
+    QComboBox,
+    QDialog,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
 )
 
 DEFAULT_ROMM_ROOT = Path.home() / "RomM" / "roms" / "roms"
 
-# These names were taken from the RetroFlow directory structure observed on
-# the target Vita. RomM platform names can be mapped to one of these folders.
+# Exact RetroFlow directory names observed on the target Vita.
 RETROFLOW_FOLDERS = {
-    "Atari - 2600": "Atari - 2600", "Atari - 5200": "Atari - 5200",
-    "Atari - 7800": "Atari - 7800", "Atari - Lynx": "Atari - Lynx",
-    "Atari - ST": "Atari - ST", "Bandai - WonderSwan": "Bandai - WonderSwan",
+    "Atari - 2600": "Atari - 2600",
+    "Atari - 5200": "Atari - 5200",
+    "Atari - 7800": "Atari - 7800",
+    "Atari - Lynx": "Atari - Lynx",
+    "Atari - ST": "Atari - ST",
+    "Bandai - WonderSwan": "Bandai - WonderSwan",
     "Bandai - WonderSwan Color": "Bandai - WonderSwan Color",
-    "Coleco - ColecoVision": "Coleco - ColecoVision", "Commodore - 64": "Commodore - 64",
-    "Commodore - Amiga": "Commodore - Amiga", "DOS": "DOS", "EasyRPG": "EasyRPG",
-    "FBA 2012": "FBA 2012", "GCE - Vectrex": "GCE - Vectrex",
-    "Lexaloffle Games - Pico-8": "Lexaloffle Games - Pico-8", "MAME 2000": "MAME 2000",
-    "MAME 2003 Plus": "MAME 2003 Plus", "Microsoft - MSX": "Microsoft - MSX",
-    "Microsoft - MSX2": "Microsoft - MSX2", "NEC - PC Engine": "NEC - PC Engine",
-    "NEC - PC Engine CD": "NEC - PC Engine CD", "NEC - TurboGrafx 16": "NEC - TurboGrafx 16",
-    "NEC - TurboGrafx CD": "NEC - TurboGrafx CD", "Nintendo - Game Boy": "Nintendo - Game Boy",
+    "Coleco - ColecoVision": "Coleco - ColecoVision",
+    "Commodore - 64": "Commodore - 64",
+    "Commodore - Amiga": "Commodore - Amiga",
+    "DOS": "DOS",
+    "EasyRPG": "EasyRPG",
+    "FBA 2012": "FBA 2012",
+    "GCE - Vectrex": "GCE - Vectrex",
+    "Lexaloffle Games - Pico-8": "Lexaloffle Games - Pico-8",
+    "MAME 2000": "MAME 2000",
+    "MAME 2003 Plus": "MAME 2003 Plus",
+    "Microsoft - MSX": "Microsoft - MSX",
+    "Microsoft - MSX2": "Microsoft - MSX2",
+    "NEC - PC Engine": "NEC - PC Engine",
+    "NEC - PC Engine CD": "NEC - PC Engine CD",
+    "NEC - TurboGrafx 16": "NEC - TurboGrafx 16",
+    "NEC - TurboGrafx CD": "NEC - TurboGrafx CD",
+    "Nintendo - Game Boy": "Nintendo - Game Boy",
     "Nintendo - Game Boy Advance": "Nintendo - Game Boy Advance",
     "Nintendo - Game Boy Color": "Nintendo - Game Boy Color",
     "Nintendo - Nintendo 64": "Nintendo - Nintendo 64",
     "Nintendo - Nintendo Entertainment System": "Nintendo - Nintendo Entertainment System",
     "Nintendo - Super Nintendo Entertainment System": "Nintendo - Super Nintendo Entertainment System",
-    "ScummVM": "ScummVM", "Sega - 32X": "Sega - 32X", "Sega - Dreamcast": "Sega - Dreamcast",
-    "Sega - Game Gear": "Sega - Game Gear", "Sega - Master System - Mark III": "Sega - Master System - Mark III",
+    "ScummVM": "ScummVM",
+    "Sega - 32X": "Sega - 32X",
+    "Sega - Dreamcast": "Sega - Dreamcast",
+    "Sega - Game Gear": "Sega - Game Gear",
+    "Sega - Master System - Mark III": "Sega - Master System - Mark III",
     "Sega - Mega-CD - Sega CD": "Sega - Mega-CD - Sega CD",
     "Sega - Mega Drive - Genesis": "Sega - Mega Drive - Genesis",
     "Sinclair - ZX Spectrum": "Sinclair - ZX Spectrum",
@@ -49,16 +82,92 @@ RETROFLOW_FOLDERS = {
     "Sony - PlayStation - RetroArch": "Sony - PlayStation - RetroArch",
 }
 
-ALIASES = {
-    "nintendo entertainment system": "Nintendo - Nintendo Entertainment System",
+# RomM uses short platform IDs. Map those IDs to the descriptive RetroFlow
+# directory names. Entries set to None are intentionally unsupported with the
+# current RetroFlow layout discovered on the target Vita.
+ROMM_TO_RETROFLOW = {
     "nes": "Nintendo - Nintendo Entertainment System",
-    "super nintendo": "Nintendo - Super Nintendo Entertainment System",
+    "famicom": "Nintendo - Nintendo Entertainment System",
+    "gb": "Nintendo - Game Boy",
+    "gbc": "Nintendo - Game Boy Color",
+    "gba": "Nintendo - Game Boy Advance",
+    "n64": "Nintendo - Nintendo 64",
     "snes": "Nintendo - Super Nintendo Entertainment System",
-    "game boy": "Nintendo - Game Boy", "game boy color": "Nintendo - Game Boy Color",
-    "game boy advance": "Nintendo - Game Boy Advance", "n64": "Nintendo - Nintendo 64",
-    "mega drive": "Sega - Mega Drive - Genesis", "genesis": "Sega - Mega Drive - Genesis",
-    "master system": "Sega - Master System - Mark III", "game gear": "Sega - Game Gear",
-    "dreamcast": "Sega - Dreamcast", "32x": "Sega - 32X",
+    "super-famicom": "Nintendo - Super Nintendo Entertainment System",
+    "atari2600": "Atari - 2600",
+    "atari5200": "Atari - 5200",
+    "atari7800": "Atari - 7800",
+    "lynx": "Atari - Lynx",
+    "atari-st": "Atari - ST",
+    "c64": "Commodore - 64",
+    "amiga": "Commodore - Amiga",
+    "dos": "DOS",
+    "scummvm": "ScummVM",
+    "colecovision": "Coleco - ColecoVision",
+    "msx": "Microsoft - MSX",
+    "sms": "Sega - Master System - Mark III",
+    "gg": "Sega - Game Gear",
+    "md": "Sega - Mega Drive - Genesis",
+    "genesis": "Sega - Mega Drive - Genesis",
+    "dc": "Sega - Dreamcast",
+    "32x": "Sega - 32X",
+    "pcengine": "NEC - PC Engine",
+    "pce": "NEC - PC Engine",
+    "pcengine-cd": "NEC - PC Engine CD",
+    "mame2000": "MAME 2000",
+    "mame2003-plus": "MAME 2003 Plus",
+    "fba2012": "FBA 2012",
+    "atari-jaguar-cd": None,
+    "jaguar": None,
+    "arcade": None,
+    "acpc": None,
+    "gc": None,
+    "wii": None,
+    "nds": None,
+    "3ds": None,
+    "3do": None,
+    "ps2": None,
+}
+
+PLATFORM_LABELS = {
+    "gb": "Nintendo Game Boy",
+    "gbc": "Nintendo Game Boy Color",
+    "gba": "Nintendo Game Boy Advance",
+    "n64": "Nintendo 64",
+    "nes": "Nintendo Entertainment System",
+    "famicom": "Nintendo / Famicom",
+    "snes": "Super Nintendo Entertainment System",
+    "amiga": "Commodore Amiga",
+    "c64": "Commodore 64",
+    "msx": "Microsoft MSX",
+    "dos": "DOS",
+    "scummvm": "ScummVM",
+    "atari2600": "Atari 2600",
+    "atari5200": "Atari 5200",
+    "atari7800": "Atari 7800",
+    "lynx": "Atari Lynx",
+    "atari-st": "Atari ST",
+    "sms": "Sega Master System",
+    "gg": "Sega Game Gear",
+    "md": "Sega Mega Drive / Genesis",
+    "dc": "Sega Dreamcast",
+    "32x": "Sega 32X",
+    "mame2000": "MAME 2000",
+    "mame2003-plus": "MAME 2003 Plus",
+    "fba2012": "FinalBurn Alpha 2012",
+    "pcengine": "PC Engine",
+    "pce": "PC Engine",
+    "pcengine-cd": "PC Engine CD",
+    "arcade": "Arcade",
+    "gc": "Nintendo GameCube",
+    "wii": "Nintendo Wii",
+    "nds": "Nintendo DS",
+    "3ds": "Nintendo 3DS",
+    "3do": "3DO",
+    "ps2": "PlayStation 2",
+    "jaguar": "Atari Jaguar",
+    "atari-jaguar-cd": "Atari Jaguar CD",
+    "acpc": "Amstrad CPC",
 }
 
 ROM_EXTENSIONS = {
@@ -67,6 +176,9 @@ ROM_EXTENSIONS = {
     ".gg", ".32x", ".pce", ".sg", ".a26", ".a52", ".a78", ".lnx", ".nds", ".n64",
     ".z64", ".v64", ".wbfs", ".rvz", ".gdi", ".cdi", ".tap", ".dsk", ".hdf", ".3do",
 }
+
+STATUS_SYMBOLS = {"INSTALLED": "✓", "NEW": "↓", "DIFFERENT": "↻", "UNKNOWN": "?"}
+
 
 @dataclass(frozen=True)
 class Game:
@@ -90,6 +202,10 @@ def sanitize_name(name: str) -> str:
     name = re.sub(r'[<>:"/\\|?*]', "_", name)
     name = re.sub(r"\s+", " ", name).strip().rstrip(".")
     return name or "Game"
+
+
+def platform_label(platform: str) -> str:
+    return PLATFORM_LABELS.get(platform.lower(), platform)
 
 
 def find_vita_mounts() -> list[Path]:
@@ -120,7 +236,7 @@ def scan_games(root: Path) -> list[Game]:
         relative = path.relative_to(root)
         platform = relative.parts[0] if len(relative.parts) > 1 else "Uncategorised"
         games.append(Game(path, path.stem, platform, size, relative))
-    return sorted(games, key=lambda g: (g.source_platform.lower(), g.name.lower()))
+    return sorted(games, key=lambda g: (platform_label(g.source_platform).lower(), g.name.lower()))
 
 
 def normalise_platform(text: str) -> str:
@@ -137,18 +253,23 @@ def normalise_platform(text: str) -> str:
 def destination_for_game(vita: Path, game: Game) -> tuple[str, Path, str]:
     platform = normalise_platform(game.source_platform)
     retro_root = vita / "data" / "RetroFlow" / "ROMS"
+
     if platform == "psp":
         return "PSP / Adrenaline ISO", vita / "pspemu" / "ISO", "file"
     if platform == "playstation":
         return "PS1 / Adrenaline GAME", vita / "pspemu" / "PSP" / "GAME", "game-folder"
     if platform == "vita":
         return "PS Vita VPK staging", retro_root, "staging"
-    if game.source_platform in RETROFLOW_FOLDERS:
-        folder = RETROFLOW_FOLDERS[game.source_platform]
-        return f"RetroFlow / {folder}", retro_root / folder, "file"
-    alias = ALIASES.get(platform)
-    if alias:
-        return f"RetroFlow / {alias}", retro_root / alias, "file"
+
+    source_key = game.source_platform.lower()
+    mapped = ROMM_TO_RETROFLOW.get(source_key)
+    if mapped and mapped in RETROFLOW_FOLDERS:
+        return f"RetroFlow / {mapped}", retro_root / mapped, "file"
+
+    direct = next((name for name in RETROFLOW_FOLDERS if name.lower() == source_key), None)
+    if direct:
+        return f"RetroFlow / {direct}", retro_root / direct, "file"
+
     return "Needs destination review", retro_root, "unknown"
 
 
@@ -162,26 +283,17 @@ def destination_target(vita: Path, game: Game) -> tuple[str, Path, str]:
 def game_status(vita: Path | None, game: Game) -> tuple[str, str]:
     if vita is None:
         return "UNKNOWN", "Vita not connected"
-    _, target, mode = destination_target(vita, game)
+    label, target, mode = destination_target(vita, game)
     if mode == "unknown":
         return "UNKNOWN", "No safe destination mapping"
     try:
         if not target.exists():
-            return "NEW", "Not on Vita"
+            return "NEW", f"→ {label}"
         if target.is_file() and target.stat().st_size == game.size:
             return "INSTALLED", "Same-size file already present"
         return "DIFFERENT", "Destination exists with different size"
     except OSError as exc:
         return "UNKNOWN", str(exc)
-
-
-def required_copy_bytes(vita: Path, games: list[Game]) -> int:
-    needed = 0
-    for game in games:
-        state, _ = game_status(vita, game)
-        if state in {"NEW", "DIFFERENT"}:
-            needed += game.size
-    return needed
 
 
 class CopyWorker(QThread):
@@ -202,6 +314,7 @@ class CopyWorker(QThread):
         try:
             total = sum(game.size for game, *_ in self.jobs) or 1
             completed = 0
+
             for game, destination, mode, label in self.jobs:
                 if self.cancel_event.is_set():
                     cancelled += 1
@@ -258,7 +371,7 @@ class SettingsDialog(QDialog):
     def __init__(self, current: Path, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(680, 120)
+        self.resize(720, 120)
         self.root_edit = QLineEdit(str(current))
         browse = QPushButton("Browse…")
         browse.clicked.connect(self.browse)
@@ -289,7 +402,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RomM Vita Manager")
-        self.resize(1280, 780)
+        self.resize(1320, 800)
         self.romm_root = DEFAULT_ROMM_ROOT
         self.vita: Path | None = None
         self.games: list[Game] = []
@@ -354,7 +467,7 @@ class MainWindow(QMainWindow):
         splitter = QSplitter(Qt.Horizontal)
         splitter.addWidget(library_box)
         splitter.addWidget(vita_box)
-        splitter.setSizes([880, 400])
+        splitter.setSizes([900, 420])
 
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -390,31 +503,40 @@ class MainWindow(QMainWindow):
                     f"Storage: {human_size(usage.free)} free of {human_size(usage.total)}"
                 )
             except OSError as exc:
-                self.storage_label.setText(f"Storage information unavailable: {exc}")
+                self.storage_label.setText(f"Storage unavailable: {exc}")
         else:
-            self.vita_label.setText("No Vita detected. Connect VitaShell in USB mode, then press Refresh.")
+            self.vita_label.setText(
+                "No Vita detected. Connect VitaShell in USB mode, then press Refresh."
+            )
             self.storage_label.setText("")
 
     def refresh_games(self):
         self.games = scan_games(self.romm_root)
         current = self.platforms.currentText()
+
         self.platforms.blockSignals(True)
         self.platforms.clear()
         self.platforms.addItem("All platforms")
-        self.platforms.addItems(sorted({g.source_platform for g in self.games}, key=str.lower))
-        idx = self.platforms.findText(current)
-        self.platforms.setCurrentIndex(idx if idx >= 0 else 0)
+        for platform in sorted(
+            {g.source_platform for g in self.games},
+            key=lambda x: platform_label(x).lower(),
+        ):
+            self.platforms.addItem(platform_label(platform), platform)
+        if current:
+            idx = self.platforms.findText(current)
+            if idx >= 0:
+                self.platforms.setCurrentIndex(idx)
         self.platforms.blockSignals(False)
 
         query = self.search.text().strip().lower()
-        platform = self.platforms.currentText()
+        platform_data = self.platforms.currentData()
         wanted = self.status_filter.currentText()
-
         filtered = []
+
         for game in self.games:
             if query and query not in game.name.lower():
                 continue
-            if platform != "All platforms" and game.source_platform != platform:
+            if platform_data and game.source_platform != platform_data:
                 continue
             state, _ = game_status(self.vita, game)
             if wanted == "Not installed" and state != "NEW":
@@ -428,12 +550,11 @@ class MainWindow(QMainWindow):
             filtered.append(game)
 
         self.game_list.clear()
-        symbols = {"INSTALLED": "✓", "NEW": "↓", "DIFFERENT": "↻", "UNKNOWN": "?"}
         for game in filtered:
             state, detail = game_status(self.vita, game)
             item = QListWidgetItem(
-                f"{symbols.get(state, '?')} {game.name}\n"
-                f"{game.source_platform} • {human_size(game.size)} • {detail}"
+                f"{STATUS_SYMBOLS.get(state, '?')} {game.name}\n"
+                f"{platform_label(game.source_platform)} • {human_size(game.size)} • {detail}"
             )
             item.setData(Qt.UserRole, game)
             self.game_list.addItem(item)
@@ -447,7 +568,7 @@ class MainWindow(QMainWindow):
             self.game_list.setViewMode(QListWidget.IconMode)
             self.game_list.setResizeMode(QListWidget.Adjust)
             self.game_list.setMovement(QListWidget.Static)
-            self.game_list.setGridSize(QSize(260, 75))
+            self.game_list.setGridSize(QSize(280, 80))
         else:
             self.game_list.setViewMode(QListWidget.ListMode)
             self.game_list.setResizeMode(QListWidget.Fixed)
@@ -469,12 +590,19 @@ class MainWindow(QMainWindow):
             self.destination_label.setText("No Vita connected.")
             return
         label, target, mode = destination_target(self.vita, game)
-        self.destination_label.setText(f"{label}\n{target}")
+        if mode == "unknown":
+            self.destination_label.setText(f"⚠ {label}\n{target}")
+        else:
+            self.destination_label.setText(f"{label}\n{target}")
 
     def show_game_destination(self):
         selected = self.game_list.selectedItems()
         if len(selected) != 1:
-            QMessageBox.information(self, "Select one game", "Select exactly one game to see its destination.")
+            QMessageBox.information(
+                self,
+                "Select one game",
+                "Select exactly one game to see its destination.",
+            )
             return
         self.set_destination_for_game(selected[0].data(Qt.UserRole))
 
@@ -486,60 +614,82 @@ class MainWindow(QMainWindow):
 
     def copy_selected(self):
         if not self.vita:
-            QMessageBox.warning(self, "Vita not connected", "Connect the Vita in VitaShell USB mode first.")
+            QMessageBox.warning(
+                self,
+                "Vita not connected",
+                "Connect the Vita in VitaShell USB mode first.",
+            )
             return
 
         selected = self.game_list.selectedItems()
         if not selected:
-            QMessageBox.information(self, "Nothing selected", "Select one or more games first.")
+            QMessageBox.information(
+                self,
+                "Nothing selected",
+                "Select one or more games first.",
+            )
             return
 
         games = [item.data(Qt.UserRole) for item in selected]
-        review = []
         jobs = []
+        review = []
+        skipped_existing = 0
+
         for game in games:
             state, _ = game_status(self.vita, game)
+            if state == "INSTALLED":
+                skipped_existing += 1
+                continue
+
             label, destination, mode = destination_for_game(self.vita, game)
             if mode == "unknown":
-                review.append(f"{game.name} ({game.source_platform})")
+                review.append(f"{game.name} ({platform_label(game.source_platform)})")
                 continue
-            if state == "INSTALLED":
-                continue
+
             jobs.append((game, destination, mode, label))
 
         if review:
             QMessageBox.warning(
                 self,
                 "Destination review required",
-                "These games could not be mapped safely and were not queued:\n\n"
-                + "\n".join(review[:20]) + ("\n..." if len(review) > 20 else ""),
+                "These games were not queued because their platform is not mapped "
+                "to a known Vita destination:\n\n"
+                + "\n".join(review[:25])
+                + ("\n..." if len(review) > 25 else ""),
             )
+
         if not jobs:
-            QMessageBox.information(self, "Nothing to copy", "Everything selected is already present or requires destination review.")
+            if skipped_existing:
+                QMessageBox.information(
+                    self,
+                    "Nothing to copy",
+                    f"{skipped_existing} selected game(s) are already installed.",
+                )
             return
 
-        needed = required_copy_bytes(self.vita, [job[0] for job in jobs])
+        total_size = sum(game.size for game, *_ in jobs)
         try:
             free = shutil.disk_usage(self.vita).free
         except OSError as exc:
             QMessageBox.critical(self, "Storage check failed", str(exc))
             return
 
-        if needed > free:
+        if total_size > free:
             QMessageBox.critical(
                 self,
-                "Not enough Vita storage",
-                f"The selected transfer needs about {human_size(needed)}, but only "
-                f"{human_size(free)} is free on the Vita.",
+                "Not enough Vita space",
+                f"Selected transfer: {human_size(total_size)}\n"
+                f"Vita free space: {human_size(free)}\n\n"
+                "Remove some files or reduce the selection before copying.",
             )
             return
 
         answer = QMessageBox.question(
             self,
             "Confirm transfer",
-            f"Copy {len(jobs)} game(s), {human_size(needed)}?\n\n"
-            f"Vita free space after transfer: approximately {human_size(free - needed)}\n\n"
-            "Already-complete files will be skipped.",
+            f"Copy {len(jobs)} game(s), {human_size(total_size)}, to the Vita?\n\n"
+            f"Already-installed files skipped: {skipped_existing}\n"
+            f"Vita space after transfer: approximately {human_size(free - total_size)}",
         )
         if answer != QMessageBox.StandardButton.Yes:
             return
@@ -548,7 +698,6 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(True)
         self.refresh_button.setEnabled(False)
         self.settings_button.setEnabled(False)
-        self.status_filter.setEnabled(False)
         self.progress.setValue(0)
         self.status.setText("Starting transfer…")
 
@@ -559,36 +708,41 @@ class MainWindow(QMainWindow):
         self.worker.start()
 
     def cancel_copy(self):
-        if self.worker and self.worker.isRunning():
+        if not self.worker or not self.worker.isRunning():
+            return
+        if QMessageBox.question(
+            self,
+            "Cancel transfer",
+            "Stop the transfer? The current file will be interrupted at the next "
+            "chunk and its partial copy removed.",
+        ) == QMessageBox.StandardButton.Yes:
             self.worker.cancel()
             self.cancel_button.setEnabled(False)
             self.status.setText("Cancelling…")
 
-    def on_progress(self, value, message, detail):
+    def on_progress(self, value: int, message: str, detail: str):
         self.progress.setValue(value)
         self.status.setText(f"{message} • {detail}")
 
-    def copy_finished(self, copied, skipped, cancelled):
+    def copy_finished(self, copied: int, skipped: int, cancelled: int):
         self.copy_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.refresh_button.setEnabled(True)
         self.settings_button.setEnabled(True)
-        self.status_filter.setEnabled(True)
+        self.status.setText("Transfer cancelled." if cancelled else "Transfer complete.")
         self.detect_vita()
         self.refresh_games()
-        self.status.setText("Transfer cancelled." if cancelled else "Transfer complete.")
         QMessageBox.information(
             self,
             "Transfer summary",
-            f"Copied: {copied}\nSkipped: {skipped}\nCancelled: {cancelled}",
+            f"Copied: {copied}\nSkipped (already present): {skipped}\nCancelled: {cancelled}",
         )
 
-    def copy_failed(self, message):
+    def copy_failed(self, message: str):
         self.copy_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.refresh_button.setEnabled(True)
         self.settings_button.setEnabled(True)
-        self.status_filter.setEnabled(True)
         self.status.setText("Transfer failed.")
         QMessageBox.critical(self, "Transfer failed", message)
 
@@ -596,6 +750,7 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("RomM Vita Manager")
+    app.setApplicationVersion("0.5")
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
