@@ -27,7 +27,9 @@ Transfer queue
     |          |
     |          +----> SHA-256 verification when available
     |          |
-    |          +----> user cache / staging
+    |          +----> local cache / staging
+    |          |
+    |          +----> archive inspection before extraction
     |
     v
 USB-mounted Vita
@@ -42,6 +44,7 @@ USB-mounted Vita
 - `vita.py`: dynamic Vita mount detection and storage information.
 - `transfers.py`: reusable cancellable chunked file copying.
 - `emulators.py`: component definitions, detection patterns, package references, and RetroAchievements roles.
+- `archive_utils.py`: safe archive listing and extraction helpers with path traversal checks.
 - `package_manager.py`: official package metadata, release resolution, downloads, digest verification, and Vita staging.
 - `vita_setup.py`: Vita Setup UI and package actions.
 - `ui.py`: PySide6 setup, library, transfer, and settings UI.
@@ -53,11 +56,13 @@ USB-mounted Vita
 3. Package downloads are staged before installation.
 4. VPK installation remains an explicit VitaShell action rather than being silently automated.
 5. Data archives such as RetroArch's data package are treated separately from VPK installation.
-6. Unsupported or unverified packages must remain unavailable rather than falling back to arbitrary mirrors.
+6. Multi-platform archives are inspected before extraction. The manager must not assume that a ZIP belongs in `ux0:/data/`.
+7. Archive extraction rejects absolute paths and `..` traversal entries.
+8. Unsupported or unverified packages must remain unavailable rather than falling back to arbitrary mirrors.
 
 ## RetroAchievements
 
-RetroFlow is treated as a frontend. Achievement compatibility belongs to the emulator/core actually running the game. For supported systems, RetroArch and an appropriate libretro core are the preferred achievement-first route. N64 remains an explicit choice between ordinary DaedalusX64 use and an achievement-oriented RetroArch setup.
+RetroFlow is treated as a frontend. Achievement compatibility belongs to the emulator/core actually running the game. For supported systems, RetroArch and an appropriate libretro core are the preferred achievement-first route. N64 remains an explicit choice between ordinary DaedalusX64 use and an achievement-oriented RetroArch setup. RetroFlow 8.2.0 also documents support for Emu4Vita++ 0.71 or newer, with global and per-game core selection, so Emu4Vita++ is represented as a separate emulator path rather than replacing RetroArch implicitly. citeturn733973search1turn733973search4
 
 ## Design rules
 
