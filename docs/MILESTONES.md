@@ -35,8 +35,9 @@ RommHeld is a Linux desktop application for managing a local RomM library across
 - [x] Manual physical FTP connection test.
 - [x] Manual physical file-upload test.
 - [x] Removable-storage transport design.
-- [ ] Validate a real 3DS SD card from a mounted filesystem.
-- [ ] Automatic 3DS SD-card detection and signature validation.
+- [x] Gather real 3DS SD-card signatures from a mounted test card.
+- [ ] Implement automatic 3DS SD-card signature validation.
+- [ ] Automatic 3DS SD-card detection.
 - [ ] Automatic platform directory discovery.
 - [ ] Confirm ROM targets and build mappings from observed layouts.
 - [ ] Test real ROM transfers.
@@ -54,6 +55,8 @@ The 3DS should support multiple target profiles rather than treating every file 
 - [ ] Official Virtual Console match/link workflow where an official title exists.
 - [ ] Explicit user-configurable target overrides.
 - [ ] Read-only storage validation with confidence levels.
+- [x] Record observed R4/flashcart signatures without claiming a specific hardware model.
+- [x] Research 3DS/DS runtime and RetroAchievements capabilities.
 
 ## 4. Vita target profiles
 
@@ -70,12 +73,13 @@ The 3DS should support multiple target profiles rather than treating every file 
 - [x] Persistent Devices area.
 - [x] Separate Vita and 3DS management sections.
 - [x] Independent 3DS FTP window.
-- [ ] Persistent device status bar.
-- [ ] Device-specific icons.
-- [ ] Console-inspired but original device card styling.
-- [ ] Simultaneous device management without modal blocking.
+- [x] Persistent device status bar design and implementation.
+- [x] Device-specific iconography.
+- [x] Console-inspired but original device card styling.
+- [x] Non-modal 3DS management so Vita controls remain available.
 - [ ] Device selection for transfer destinations.
 - [ ] Storage/target profile selector.
+- [ ] Polish responsive layout and accessibility across larger/smaller desktop sizes.
 
 ## 6. Emulator and frontend awareness
 
@@ -118,3 +122,7 @@ Potential future targets include other handhelds or consoles supported by RomM a
 ## Current development rule
 
 Do not make a milestone depend on assumptions about a user's filesystem. Discover the device or let the user select its root, validate it using safe signatures, and keep all machine-specific state outside Git.
+
+## Current research references
+
+The current capability matrix is maintained in `docs/3DS_CAPABILITY_MATRIX.md`. It records conclusions from upstream project documentation and current RetroAchievements support information. When implementation choices change, update the matrix first and then update the corresponding code/milestone.
