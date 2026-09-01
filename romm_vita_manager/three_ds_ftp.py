@@ -60,6 +60,10 @@ class ThreeDSFtpBackend:
     def connected(self) -> bool:
         return self.ftp is not None
 
+    def _rooted_path(self, path: str) -> str:
+        """Resolve a path under the configured remote root."""
+        return join_remote_path(self.settings.remote_root, path)
+
     def connect(self) -> str:
         if not self.settings.host.strip():
             raise ValueError("3DS FTP host is required.")
@@ -87,9 +91,9 @@ class ThreeDSFtpBackend:
             raise RuntimeError("3DS FTP is not connected.")
         return self.ftp
 
-    def list_directory(self, path: str = "/") -> list[dict[str, str | int]]:
+    def list_directory(self, path: str = "") -> list[dict[str, str | int]]:
         ftp = self._require_connection()
-        normalized = normalize_remote_path(path)
+        normalized = self._rooted_path(path)
         try:
             rows: list[dict[str, str | int]] = []
             for name, facts in ftp.mlsd(normalized):
@@ -109,6 +113,10 @@ class ThreeDSFtpBackend:
             raw_name = str(raw_name)
             name = raw_name.rstrip("/").split("/")[-1] or raw_name
             candidate = normalize_remote_path(raw_name)
+            if self.settings.remote_root != "/":
+                root = normalize_remote_path(self.settings.remote_root)
+                if candidate != root and not candidate.startswith(root.rstrip("/") + "/"):
+                    continue
             is_dir = False
             current = ftp.pwd()
             try:
@@ -133,7 +141,7 @@ class ThreeDSFtpBackend:
 
     def remote_size(self, path: str) -> int | None:
         ftp = self._require_connection()
-        normalized = normalize_remote_path(path)
+        normalized = self._rooted_path(path)
         try:
             value = ftp.size(normalized)
             return int(value) if value is not None else None
@@ -152,7 +160,7 @@ class ThreeDSFtpBackend:
 
     def ensure_directory(self, path: str) -> None:
         ftp = self._require_connection()
-        target = normalize_remote_path(path)
+        target = self._rooted_path(path)
         if target == "/":
             return
         current = ftp.pwd()
@@ -186,10 +194,10 @@ class ThreeDSFtpBackend:
         if not local_path.is_file():
             raise FileNotFoundError(f"Source file does not exist: {local_path}")
 
-        remote = normalize_remote_path(remote_path)
+        remote = self._rooted_path(remote_path)
         self.ensure_directory(posixpath.dirname(remote))
         source_size = local_path.stat().st_size
-        remote_existing = self.remote_size(remote)
+        remote_existing = self.remote_size(remote_path)
 
         if remote_existing == source_size:
             return "skipped", source_size
@@ -229,7 +237,7 @@ class ThreeDSFtpBackend:
                 pass
             return "cancelled", transferred
 
-        final_size = self.remote_size(remote)
+        final_size = self.remote_size(remote_path)
         if final_size != source_size:
             raise IOError(
                 f"FTP size verification failed for {remote}: expected {source_size} bytes, got {final_size}"
