@@ -4,7 +4,11 @@ This document covers the first physical test of the RommHeld 3DS backend.
 
 ## 3DS side
 
-RommHeld expects an FTP server running on the 3DS. The `mtheall/ftpd` project is a suitable upstream option and normally listens on port `5000`; use the host and port displayed/configured by the FTP server rather than assuming a fixed address. citeturn426879search0turn426879search8
+RommHeld expects an FTP server running on the 3DS. The `mtheall/ftpd` project is a suitable upstream option and normally uses port `5000`; use the host and port displayed/configured by the FTP server rather than assuming a fixed address.
+
+Upstream FTPD:
+
+`https://github.com/mtheall/ftpd`
 
 For a first test, run the regular FTPD homebrew application rather than installing the background sysmodule. The goal is only to prove the Linux-to-3DS transfer path.
 
@@ -12,7 +16,7 @@ The Linux computer and 3DS should be on the same local network.
 
 ## RommHeld side
 
-Use the modular GUI branch that contains the 3DS FTP feature.
+Use the feature branch that contains the 3DS FTP implementation.
 
 ```fish
 cd ~/romm-vita-manager
@@ -69,11 +73,11 @@ After the first successful transfer:
 
 ## Notes about FTP server compatibility
 
-RommHeld intentionally does not depend on optional FTP commands such as `MDTM`. The 3DS `ftpd` project has an open issue showing that `MDTM` can return `502 Command not implemented` on current 3DS builds. citeturn426879search5
+RommHeld intentionally does not depend on optional FTP commands such as `MDTM`. The 3DS `ftpd` project has an open issue showing that `MDTM` can return `502 Command not implemented` on current 3DS builds.
 
 The backend prefers `MLSD` directory listings but falls back to `NLST` and directory probing for servers that do not provide `MLSD`.
 
-FTP is unencrypted. Use it on a trusted local network and do not expose the 3DS FTP server directly to the Internet. citeturn426879search1
+FTP is unencrypted. Use it on a trusted local network and do not expose the 3DS FTP server directly to the Internet.
 
 ## Expected result
 
