@@ -2,7 +2,7 @@
 """RommHeld application launcher."""
 from __future__ import annotations
 
-from romm_vita_manager.app import main
+from romm_vita_manager.device_dashboard import main
 
 
 if __name__ == "__main__":
