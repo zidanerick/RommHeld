@@ -19,9 +19,14 @@ class PlatformAssets:
     decorative_only: bool
     source_url: str
     license_note: str
+    logo_simpleicons: str | None = None
+    logo_simpleicons_dark: str | None = None
 
     def path(self, kind: str) -> Path:
-        return ASSET_ROOT / self.key / getattr(self, kind)
+        value = getattr(self, kind)
+        if value is None:
+            raise ValueError(f"Asset '{kind}' is not defined for platform '{self.key}'")
+        return ASSET_ROOT / self.key / value
 
 
 PLATFORM_ASSETS = {
@@ -36,6 +41,7 @@ PLATFORM_ASSETS = {
         "#25a6c9", "#d12228", True,
         "https://www.nintendo.de/",
         "Platform mark uses the Nintendo 3DS Simple Icons rendering, whose source metadata points to Nintendo branding. Nintendo 3DS is a trademark of Nintendo; use remains subject to applicable trademark rules.",
+        "logo_simpleicons.svg", "logo_simpleicons_dark.svg",
     ),
     "ds": PlatformAssets(
         "nintendo_ds", "Nintendo DS", "device_large.svg", "device_small.svg", "logo.svg", "logo_dark.svg",
