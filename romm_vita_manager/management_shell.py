@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import QSize, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
@@ -51,7 +51,14 @@ class ManagementShell(QWidget):
         if assets:
             logo_path = assets.path("logo_dark")
             if logo_path.is_file():
-                logo.setPixmap(QPixmap(str(logo_path)).scaled(145, 42, aspectMode=1, mode=1))
+                logo.setPixmap(
+                    QPixmap(str(logo_path)).scaled(
+                        145,
+                        42,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
         header_layout.addWidget(logo)
         title_layout = QVBoxLayout()
         title = QLabel(profile.name.upper())
