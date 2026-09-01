@@ -5,7 +5,6 @@ from PySide6.QtWidgets import QGroupBox, QLabel, QPushButton, QVBoxLayout
 
 from .app import MainWindow as BaseMainWindow, ThreeDSFtpDialog
 from .config import load_config
-from .vita import find_vita_mounts
 
 
 class DeviceDashboardWindow(BaseMainWindow):
@@ -14,9 +13,9 @@ class DeviceDashboardWindow(BaseMainWindow):
     def __init__(self, config: dict):
         super().__init__(config)
         self._three_ds_dialog: ThreeDSFtpDialog | None = None
-        self._replace_right_panel()
+        self._build_device_panel()
 
-    def _replace_right_panel(self) -> None:
+    def _build_device_panel(self) -> None:
         central = self.centralWidget()
         if central is None:
             return
@@ -27,13 +26,35 @@ class DeviceDashboardWindow(BaseMainWindow):
         if splitter is None or splitter.count() < 2:
             return
 
-        vita_box = splitter.widget(1)
-        if vita_box is None:
+        old_vita_box = splitter.widget(1)
+        if old_vita_box is None:
             return
 
         devices_box = QGroupBox("Devices")
         devices_layout = QVBoxLayout(devices_box)
-        splitter.replaceWidget(1, devices_box)
+
+        vita_box = QGroupBox("PlayStation Vita")
+        vita_layout = QVBoxLayout(vita_box)
+        for widget in (
+            self.vita_label,
+            self.destination_label,
+            self.destination_button,
+            self.progress,
+            self.status,
+            self.copy_button,
+            self.cancel_button,
+        ):
+            widget.setParent(vita_box)
+
+        vita_layout.addWidget(self.vita_label)
+        vita_layout.addWidget(QLabel("Automatic destination:"))
+        vita_layout.addWidget(self.destination_label)
+        vita_layout.addWidget(self.destination_button)
+        vita_layout.addStretch()
+        vita_layout.addWidget(self.progress)
+        vita_layout.addWidget(self.status)
+        vita_layout.addWidget(self.copy_button)
+        vita_layout.addWidget(self.cancel_button)
         devices_layout.addWidget(vita_box)
 
         three_ds_box = QGroupBox("Nintendo 3DS")
@@ -50,13 +71,14 @@ class DeviceDashboardWindow(BaseMainWindow):
         three_ds_layout.addStretch()
         devices_layout.addWidget(three_ds_box)
 
-        self.refresh_device_cards()
+        splitter.replaceWidget(1, devices_box)
+        old_vita_box.deleteLater()
         splitter.setSizes([850, 400])
+        self.refresh_device_cards()
 
     def refresh_device_cards(self) -> None:
         if not hasattr(self, "three_ds_status"):
             return
-
         config = load_config()
         saved = config.get("devices", {}).get("3ds", {})
         host = str(saved.get("host", "")).strip()
@@ -65,10 +87,6 @@ class DeviceDashboardWindow(BaseMainWindow):
         self.three_ds_endpoint.setText(
             f"FTP endpoint: {host}:{port}" if host else "FTP endpoint: not configured"
         )
-
-        mounts = find_vita_mounts()
-        if not mounts:
-            return
 
     def open_3ds(self) -> None:
         if self._three_ds_dialog is None:
