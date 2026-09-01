@@ -48,6 +48,7 @@ PLATFORM_ASSETS = {
         "#dfe3e8", "#4b83b5", True,
         "https://commons.wikimedia.org/wiki/File:Nintendo_DS_Logo.svg",
         "Logo source reviewed on Wikimedia Commons; source is a Nintendo DS manual and the page identifies the text logo as public domain for copyright purposes while separately noting trademark restrictions.",
+        "logo.svg", "logo_dark.svg",
     ),
 }
 
