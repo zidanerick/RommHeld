@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import urllib.error
-import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,8 +7,8 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QDialog,
     QFileDialog,
-    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -21,12 +19,11 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QSizePolicy,
     QVBoxLayout,
-    QWidget,
-    QDialog,
 )
 
 from .config import load_config, save_config
 from .library_sources import LibrarySource, get_library_source, save_library_source
+from .romm_api import RomMApiError, normalize_romm_url, test_connection
 
 
 @dataclass(frozen=True)
@@ -242,25 +239,14 @@ class PlatformSelectorDialog(QDialog):
             self.source_status.setText("RomM server credentials are stored locally and used by the API provider.")
 
     def test_romm_server(self) -> None:
-        url = self.url_edit.text().strip().rstrip("/")
-        token = self.token_edit.text().strip()
-        if not url or not token:
-            self.source_status.setText("Enter the RomM server URL and Client API Token first.")
-            return
-        request = urllib.request.Request(
-            f"{url}/api/platforms",
-            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-        )
         try:
-            with urllib.request.urlopen(request, timeout=8) as response:
-                if 200 <= response.status < 300:
-                    self.source_status.setText("RomM API connection successful.")
-                else:
-                    self.source_status.setText(f"RomM API returned HTTP {response.status}.")
-        except urllib.error.HTTPError as exc:
-            self.source_status.setText(f"RomM API rejected the request: HTTP {exc.code}.")
-        except (urllib.error.URLError, TimeoutError) as exc:
-            self.source_status.setText(f"RomM API connection failed: {exc.reason if hasattr(exc, 'reason') else exc}")
+            instance_url = normalize_romm_url(self.url_edit.text())
+            test_connection(instance_url, self.token_edit.text())
+            self.source_status.setText("RomM API connection successful. platforms.read is available.")
+        except RomMApiError as exc:
+            self.source_status.setText(str(exc))
+        except ValueError as exc:
+            self.source_status.setText(str(exc))
 
     def continue_selected(self) -> None:
         if self.selected_profile is None:
@@ -273,10 +259,14 @@ class PlatformSelectorDialog(QDialog):
                 return
             source = LibrarySource(mode="local", local_root=str(root))
         else:
-            url = self.url_edit.text().strip().rstrip("/")
+            try:
+                url = normalize_romm_url(self.url_edit.text())
+            except ValueError as exc:
+                QMessageBox.warning(self, "RomM configuration", str(exc))
+                return
             token = self.token_edit.text().strip()
-            if not url or not token:
-                QMessageBox.warning(self, "RomM configuration", "Enter the RomM server URL and Client API Token.")
+            if not token:
+                QMessageBox.warning(self, "RomM configuration", "Enter the RomM Client API Token.")
                 return
             source = LibrarySource(mode="romm_api", romm_url=url, api_token=token)
 
