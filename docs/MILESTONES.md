@@ -1,6 +1,6 @@
 # RommHeld Development Milestones
 
-RommHeld is a Linux desktop application for managing a local RomM library across multiple handheld targets. GitHub is the source of truth. Device-specific paths, IP addresses, credentials, ROMs, and removable-media contents belong only in local configuration or test environments.
+RommHeld is a cross-platform desktop application for managing a local RomM library across multiple handheld targets. GitHub is the source of truth. Device-specific paths, IP addresses, credentials, ROMs, and removable-media contents belong only in local configuration or test environments.
 
 ## 0. Foundation
 
@@ -9,7 +9,9 @@ RommHeld is a Linux desktop application for managing a local RomM library across
 - [x] Establish a device/backend architecture.
 - [x] Keep the existing Vita implementation working while adding new device targets.
 - [x] Move application configuration outside the repository.
+- [x] Add cross-platform configuration-path handling for Windows, macOS, and Linux/Unix.
 - [ ] Complete the internal Python package namespace migration from `romm_vita_manager` to a neutral RommHeld namespace.
+- [ ] Establish repeatable Windows/macOS/Linux development and packaging workflows.
 
 ## 1. Core transfer system
 
@@ -85,6 +87,7 @@ The 3DS should support multiple target profiles rather than treating every file 
 - [ ] Replace legacy management layout with a fully console-themed management shell.
 - [ ] Device selection for transfer destinations.
 - [ ] Storage/target profile selector.
+- [ ] Platform-specific runtime preference controls.
 - [ ] Polish responsive layout and accessibility across larger/smaller desktop sizes.
 
 ## 6. Emulator and frontend awareness
@@ -118,16 +121,29 @@ RetroAchievements must remain a capability rather than an assumption about a fro
 - [ ] Device-specific installed-state detection.
 - [ ] Transfer planning against available storage.
 - [ ] Multi-device comparison and recommended target.
+- [ ] Full RomM API library provider.
 
 ## 9. Future devices
 
 New consoles should be added as device/transport/target-profile implementations rather than separate applications.
 
-Potential future targets include other handhelds or consoles supported by RomM and accessible through a safe local transport.
+Potential future targets include PSP and Mobile as placeholders, followed by other handhelds or consoles supported by RomM and accessible through a safe local transport.
 
-## Current development rule
+## 10. Format and container tools
+
+- [ ] Target-specific preparation pipeline.
+- [ ] ROM format conversion where technically appropriate.
+- [ ] Package/container creation for supported targets.
+- [ ] Official Virtual Console matching and package workflow where legally and technically appropriate.
+- [ ] Keep format conversion separate from device transport.
+
+## Current development rules
 
 Do not make a milestone depend on assumptions about a user's filesystem. Discover the device or let the user select its root, validate it using safe signatures, and keep all machine-specific state outside Git.
+
+Keep global functionality separate from device-specific implementations. Each handheld should provide its own target profiles, transports, capabilities, runtime preferences, and management screens behind a shared application shell.
+
+Use platform-neutral Python and Qt APIs in shared code. Linux-specific paths, shell commands, mount detection, and executables must be isolated behind platform-specific adapters. Build and packaging should target Windows, macOS, and Linux/Unix separately without changing the core application model.
 
 ## Current research references
 
@@ -136,6 +152,10 @@ The current capability matrix is maintained in `docs/3DS_CAPABILITY_MATRIX.md`. 
 ## Runtime preference rule
 
 Runtime preference expresses what the user values most. It must never force an unavailable or incompatible runtime. Platform routing should intersect the user's preference with the target's detected capabilities and present the resulting recommendation transparently.
+
+## RomM API authentication rule
+
+RomM Client API Tokens are bearer credentials. The token must be stored only in local configuration and never committed to Git. Platform discovery requires the `platforms.read` scope, while ROM browsing requires `roms.read`. A 403 means the identity is authenticated but does not hold a required scope, so UI diagnostics should name the missing capability where it is known.
 
 ## UI redesign rule
 
