@@ -32,16 +32,16 @@ PLATFORM_ASSETS = {
         "Logo source reviewed on Wikimedia Commons; page identifies the image as public domain for copyright purposes and separately notes trademark restrictions.",
     ),
     "3ds": PlatformAssets(
-        "nintendo_3ds", "Nintendo 3DS", "device_large.svg", "device_small.svg", "logo.svg", "logo_dark.svg",
+        "nintendo_3ds", "Nintendo 3DS", "device_large.svg", "device_small.svg", "logo_simpleicons.svg", "logo_simpleicons_dark.svg",
         "#25a6c9", "#d12228", True,
-        "https://commons.wikimedia.org/wiki/File:Nintendo_3DS_logo.svg",
-        "Logo source reviewed on Wikimedia Commons; page identifies the image as public domain for copyright purposes and separately notes trademark restrictions.",
+        "https://www.nintendo.de/",
+        "Platform mark uses the Nintendo 3DS Simple Icons rendering, whose source metadata points to Nintendo branding. Nintendo 3DS is a trademark of Nintendo; use remains subject to applicable trademark rules.",
     ),
     "ds": PlatformAssets(
         "nintendo_ds", "Nintendo DS", "device_large.svg", "device_small.svg", "logo.svg", "logo_dark.svg",
-        "#dfe3e8", "#54b8ff", True,
+        "#dfe3e8", "#4b83b5", True,
         "https://commons.wikimedia.org/wiki/File:Nintendo_DS_Logo.svg",
-        "Logo source reviewed on Wikimedia Commons; page identifies the image as public domain for copyright purposes and separately notes trademark restrictions.",
+        "Logo source reviewed on Wikimedia Commons; source is a Nintendo DS manual and the page identifies the text logo as public domain for copyright purposes while separately noting trademark restrictions.",
     ),
 }
 
