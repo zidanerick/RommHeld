@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QGroupBox, QLabel, QPushButton, QVBoxLayout
 
 from .app import MainWindow as BaseMainWindow, ThreeDSFtpDialog
 from .config import load_config
+from .local_storage_ui import MountedStorageDialog
 
 
 class DeviceDashboardWindow(BaseMainWindow):
@@ -14,6 +15,8 @@ class DeviceDashboardWindow(BaseMainWindow):
         super().__init__(config)
         self.setWindowTitle("RommHeld")
         self._three_ds_dialog: ThreeDSFtpDialog | None = None
+        self._vita_storage_dialog: MountedStorageDialog | None = None
+        self._three_ds_storage_dialog: MountedStorageDialog | None = None
         self._build_device_sections()
 
     def _build_device_sections(self) -> None:
@@ -35,10 +38,15 @@ class DeviceDashboardWindow(BaseMainWindow):
         if not isinstance(vita_box, QGroupBox):
             return
 
-        vita_box.setTitle("Devices")
+        vita_box.setTitle("PlayStation Vita")
         device_layout = vita_box.layout()
         if device_layout is None:
             return
+
+        vita_storage_button = QPushButton("Manage SD / Local Storage")
+        vita_storage_button.clicked.connect(self.open_vita_storage)
+        insert_at = max(0, device_layout.count() - 4)
+        device_layout.insertWidget(insert_at, vita_storage_button)
 
         three_ds_box = QGroupBox("Nintendo 3DS")
         three_ds_layout = QVBoxLayout(three_ds_box)
@@ -48,10 +56,14 @@ class DeviceDashboardWindow(BaseMainWindow):
 
         manage_button = QPushButton("Manage 3DS FTP")
         manage_button.clicked.connect(self.open_3ds)
+        storage_button = QPushButton("Manage SD / Local Storage")
+        storage_button.clicked.connect(self.open_3ds_storage)
 
         three_ds_layout.addWidget(self.three_ds_status)
         three_ds_layout.addWidget(self.three_ds_endpoint)
         three_ds_layout.addWidget(manage_button)
+        three_ds_layout.addWidget(storage_button)
+        three_ds_layout.addStretch()
         device_layout.addWidget(three_ds_box)
 
         self.refresh_device_sections()
@@ -64,9 +76,7 @@ class DeviceDashboardWindow(BaseMainWindow):
         saved = config.get("devices", {}).get("3ds", {})
         host = str(saved.get("host", "")).strip()
         port = saved.get("port", 5000)
-        self.three_ds_status.setText(
-            "Configured" if host else "Not configured"
-        )
+        self.three_ds_status.setText("Configured" if host else "Not configured")
         self.three_ds_endpoint.setText(
             f"FTP endpoint: {host}:{port}" if host else "FTP endpoint: not configured"
         )
@@ -83,13 +93,39 @@ class DeviceDashboardWindow(BaseMainWindow):
         self._three_ds_dialog = None
         self.refresh_device_sections()
 
+    def open_vita_storage(self) -> None:
+        if self._vita_storage_dialog is None:
+            self._vita_storage_dialog = MountedStorageDialog(
+                self.config, "vita", "PlayStation Vita", self
+            )
+            self._vita_storage_dialog.finished.connect(self._vita_storage_closed)
+        self._vita_storage_dialog.show()
+        self._vita_storage_dialog.raise_()
+        self._vita_storage_dialog.activateWindow()
+
+    def _vita_storage_closed(self, _result: int) -> None:
+        self._vita_storage_dialog = None
+
+    def open_3ds_storage(self) -> None:
+        if self._three_ds_storage_dialog is None:
+            self._three_ds_storage_dialog = MountedStorageDialog(
+                self.config, "3ds", "Nintendo 3DS", self
+            )
+            self._three_ds_storage_dialog.finished.connect(self._three_ds_storage_closed)
+        self._three_ds_storage_dialog.show()
+        self._three_ds_storage_dialog.raise_()
+        self._three_ds_storage_dialog.activateWindow()
+
+    def _three_ds_storage_closed(self, _result: int) -> None:
+        self._three_ds_storage_dialog = None
+
 
 def main() -> None:
     from PySide6.QtWidgets import QApplication, QDialog
 
     app = QApplication.instance() or QApplication([])
     app.setApplicationName("RommHeld")
-    app.setApplicationVersion("0.9")
+    app.setApplicationVersion("0.10")
     config = load_config()
     if not config.get("setup_complete"):
         from .ui import SetupWizard
