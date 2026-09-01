@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import sys
 import threading
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -17,10 +19,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from .config import DEFAULT_ROMM_ROOT, load_config
+from .config import load_config
 from .file_transfer import transfer_file
 from .ui import MainWindow as BaseMainWindow, SetupWizard
-from .vita import find_vita_mounts, free_space
+from .vita import free_space
 
 
 def _human_size(value: int) -> str:
@@ -59,19 +61,21 @@ class SendFileDialog(QDialog):
         self.send_button = QPushButton("Send File")
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.setEnabled(False)
-        self.send_button.clicked.connect(self.accept)
-        self.cancel_button.clicked.connect(self.reject)
-
-        buttons = QHBoxLayout()
-        buttons.addStretch()
-        buttons.addWidget(self.cancel_button)
-        buttons.addWidget(self.send_button)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(self.status)
         layout.addWidget(self.progress)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        buttons.addWidget(self.cancel_button)
+        buttons.addWidget(self.send_button)
         layout.addLayout(buttons)
+
+        self.send_button.clicked.connect(self.start_transfer)
+        self.cancel_button.clicked.connect(self.cancel_transfer)
+        self.worker: SendFileWorker | None = None
 
     def choose_source(self):
         path, _ = QFileDialog.getOpenFileName(self, "Choose file")
@@ -86,73 +90,65 @@ class SendFileDialog(QDialog):
         if text.startswith("ux0:/"):
             text = text.removeprefix("ux0:/")
         text = text.lstrip("/")
-        return (self.vita or Path("/")) / text
-
-
-class MainWindow(BaseMainWindow):
-    def __init__(self, config: dict):
-        super().__init__(config)
-        self.send_file_button = QPushButton("Send File")
-        self.send_file_button.clicked.connect(self.open_send_file)
-        top = self.centralWidget().layout().itemAt(0).layout()
-        top.insertWidget(top.count() - 1, self.send_file_button)
-
-    def open_send_file(self):
         if self.vita is None:
-            QMessageBox.warning(self, "No Vita detected", "Connect the Vita in VitaShell USB mode first.")
-            return
+            raise RuntimeError("Vita is not connected")
+        return self.vita / text
 
-        dialog = SendFileDialog(self.vita, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-
-        source = dialog.selected_source()
-        if not source.is_file():
-            QMessageBox.warning(self, "File not found", "Choose an existing local file.")
-            return
-
-        destination = dialog.selected_destination()
-        if not destination.parent.exists():
-            destination.parent.mkdir(parents=True, exist_ok=True)
-
-        required = source.stat().st_size
+    def start_transfer(self):
         try:
-            available = free_space(self.vita)
-        except OSError:
+            source = self.selected_source()
+            if not source.is_file():
+                raise FileNotFoundError("Choose an existing local file.")
+            destination = self.selected_destination()
+            required = source.stat().st_size
             available = None
-        if available is not None and destination.stat().st_size if destination.exists() else False:
-            pass
-        if available is not None and required > available:
-            QMessageBox.warning(
-                self,
-                "Not enough free space",
-                f"The selected file requires {_human_size(required)} but the Vita reports only {_human_size(available)} free.",
+            try:
+                available = free_space(self.vita) if self.vita else None
+            except OSError:
+                pass
+            existing_size = destination.stat().st_size if destination.is_file() else 0
+            needed = max(0, required - existing_size)
+            if available is not None and needed > available:
+                raise OSError(
+                    f"The selected file requires {_human_size(needed)} of additional space, "
+                    f"but the Vita reports {_human_size(available)} free."
+                )
+
+            self.send_button.setEnabled(False)
+            self.cancel_button.setEnabled(True)
+            self.status.setText(f"Transferring {_human_size(required)}…")
+            self.progress.setValue(0)
+            self.worker = SendFileWorker(source, destination)
+            self.worker.progress.connect(
+                lambda done: self.progress.setValue(int(done * 100 / required) if required else 100)
             )
-            return
+            self.worker.status.connect(self.status.setText)
+            self.worker.completed.connect(self.transfer_finished)
+            self.worker.failed.connect(self.transfer_failed)
+            self.worker.start()
+        except Exception as exc:
+            QMessageBox.warning(self, "Unable to send file", str(exc))
 
-        worker = SendFileWorker(source, destination)
-        worker.progress.connect(lambda done: dialog.progress.setValue(int(done * 100 / required) if required else 100))
-        worker.status.connect(dialog.status.setText)
-        worker.completed.connect(lambda result: self._send_file_finished(dialog, source, destination, result))
-        worker.failed.connect(lambda message: QMessageBox.critical(dialog, "Transfer failed", message))
-        dialog.send_button.setEnabled(False)
-        dialog.cancel_button.setEnabled(True)
-        dialog.cancel_button.clicked.disconnect()
-        dialog.cancel_button.clicked.connect(worker.cancel)
-        dialog.show()
-        self.send_file_worker = worker
-        worker.start()
+    def cancel_transfer(self):
+        if self.worker:
+            self.worker.cancel()
+            self.status.setText("Cancelling…")
 
-    def _send_file_finished(self, dialog, source, destination, result):
-        dialog.cancel_button.setEnabled(False)
+    def transfer_finished(self, result: str):
+        self.cancel_button.setEnabled(False)
         if result == "copied":
-            dialog.status.setText(f"Transferred {_human_size(source.stat().st_size)} successfully.")
+            self.status.setText("Transfer completed and size verified.")
         elif result == "skipped":
-            dialog.status.setText("Destination already contains the same-size file. Nothing copied.")
+            self.status.setText("Destination already contains the same-size file.")
         else:
-            dialog.status.setText("Transfer cancelled.")
-        QMessageBox.information(dialog, "Send File", dialog.status.text())
-        dialog.accept()
+            self.status.setText("Transfer cancelled.")
+        QMessageBox.information(self, "Send File", self.status.text())
+        self.accept()
+
+    def transfer_failed(self, message: str):
+        self.send_button.setEnabled(True)
+        self.cancel_button.setEnabled(False)
+        QMessageBox.critical(self, "Transfer failed", message)
 
 
 class SendFileWorker(QThread):
@@ -172,27 +168,36 @@ class SendFileWorker(QThread):
 
     def run(self):
         try:
-            total = self.source.stat().st_size
-            self.status.emit(f"Transferring {_human_size(total)}…")
-            result, written = transfer_file(
+            result, _ = transfer_file(
                 self.source,
                 self.destination,
                 self.cancel_event,
-                progress=lambda done: self.progress.emit(done),
+                progress=self.progress.emit,
             )
             self.completed.emit(result)
         except Exception as exc:
             self.failed.emit(str(exc))
 
 
-def main() -> None:
-    import sys
-    from PySide6.QtWidgets import QApplication
+class MainWindow(BaseMainWindow):
+    def __init__(self, config: dict):
+        super().__init__(config)
+        self.send_file_button = QPushButton("Send File")
+        self.send_file_button.clicked.connect(self.open_send_file)
+        top = self.centralWidget().layout().itemAt(0).layout()
+        top.insertWidget(top.count() - 1, self.send_file_button)
 
+    def open_send_file(self):
+        if self.vita is None:
+            QMessageBox.warning(self, "No Vita detected", "Connect the Vita in VitaShell USB mode first.")
+            return
+        SendFileDialog(self.vita, self).exec()
+
+
+def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("RommHeld")
     app.setApplicationVersion("0.7")
-
     config = load_config()
     if not config.get("setup_complete"):
         wizard = SetupWizard(config)
