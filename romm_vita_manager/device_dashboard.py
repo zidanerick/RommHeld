@@ -4,13 +4,21 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QRadioButton, QStatusBar, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QRadioButton,
+    QStatusBar,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .app import MainWindow as BaseMainWindow, ThreeDSFtpDialog
 from .config import load_config, save_config
 from .preferences import get_device_preference, preference_options, set_device_preference
 from .vita import find_vita_mounts, free_space
-
 
 ASSET_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 
@@ -22,15 +30,24 @@ class DeviceDashboardWindow(BaseMainWindow):
         super().__init__(config)
         self.setWindowTitle("RommHeld")
         self._three_ds_dialog: ThreeDSFtpDialog | None = None
-        self._build_device_sections()
         self._build_status_bar()
+        self._build_device_sections()
+        self.refresh_device_sections()
 
     def _build_device_sections(self) -> None:
         central = self.centralWidget()
         if central is None or central.layout() is None:
             return
         layout = central.layout()
-        splitter_item = next((layout.itemAt(i) for i in range(layout.count()) if layout.itemAt(i).widget() is not None and hasattr(layout.itemAt(i).widget(), "count")), None)
+        splitter_item = next(
+            (
+                layout.itemAt(i)
+                for i in range(layout.count())
+                if layout.itemAt(i).widget() is not None
+                and hasattr(layout.itemAt(i).widget(), "count")
+            ),
+            None,
+        )
         splitter = splitter_item.widget() if splitter_item else None
         if splitter is None or splitter.count() < 2:
             return
@@ -66,18 +83,19 @@ class DeviceDashboardWindow(BaseMainWindow):
         three_ds_layout.addStretch()
         device_layout.addWidget(three_ds_box)
 
-        vita_box.setStyleSheet("""
+        vita_box.setStyleSheet(
+            """
             QGroupBox#devicesPanel { border: 1px solid #3c67d6; border-radius: 10px; margin-top: 8px; padding-top: 8px; }
             QGroupBox#devicesPanel::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #3c67d6; font-weight: 700; }
             QLabel#vitaHeading { color: #3157b7; font-size: 16px; font-weight: 700; padding: 3px 2px 8px 2px; }
             QGroupBox#threeDsCard { border: 1px solid #d93636; border-radius: 10px; margin-top: 10px; padding-top: 8px; }
             QGroupBox#threeDsCard::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #c72d2d; font-weight: 700; }
             QGroupBox#threeDsCard QPushButton { min-height: 30px; }
-        """)
+            """
+        )
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         splitter.setSizes([850, 400])
-        self.refresh_device_sections()
 
     def _build_preference_box(self, device_key: str, title: str) -> QGroupBox:
         box = QGroupBox(title)
@@ -116,7 +134,6 @@ class DeviceDashboardWindow(BaseMainWindow):
         self.three_ds_status_widget = self._make_status_widget("3ds.svg", "3DS", "Not configured")
         status_bar.addPermanentWidget(self.vita_status_widget)
         status_bar.addPermanentWidget(self.three_ds_status_widget)
-        self.refresh_status_bar()
 
     def _make_status_widget(self, icon_name: str, label: str, text: str) -> QWidget:
         container = QWidget(self)
@@ -129,7 +146,6 @@ class DeviceDashboardWindow(BaseMainWindow):
             icon.setPixmap(QIcon(str(icon_path)).pixmap(20, 20))
         row.addWidget(icon)
         value = QLabel(f"{label}: {text}")
-        value.setObjectName(f"status_{label.lower()}")
         row.addWidget(value)
         row.addStretch()
         container.setMinimumWidth(190)
@@ -175,7 +191,9 @@ class DeviceDashboardWindow(BaseMainWindow):
         host = str(saved.get("host", "")).strip()
         port = saved.get("port", 5000)
         self.three_ds_status.setText("Configured" if host else "Not configured")
-        self.three_ds_endpoint.setText(f"FTP endpoint: {host}:{port}" if host else "FTP endpoint: not configured")
+        self.three_ds_endpoint.setText(
+            f"FTP endpoint: {host}:{port}" if host else "FTP endpoint: not configured"
+        )
         self.refresh_status_bar()
 
     def open_3ds(self) -> None:
