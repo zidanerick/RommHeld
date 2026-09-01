@@ -34,6 +34,25 @@ def _human_size(value: int) -> str:
     return f"{value} B"
 
 
+def _vita_target(vita: Path, remote_path: str) -> Path:
+    """Resolve an explicit ux0:/ path below the mounted Vita's ux0 directory."""
+    raw = remote_path.strip().replace("\\", "/")
+    if raw.startswith("ux0:/"):
+        raw = raw.removeprefix("ux0:/")
+    elif raw == "ux0":
+        raw = ""
+    elif raw.startswith("ux0/"):
+        raw = raw.removeprefix("ux0/")
+
+    base = (vita / "ux0").resolve()
+    target = (base / Path(raw)).resolve()
+    try:
+        target.relative_to(base)
+    except ValueError as exc:
+        raise ValueError("Destination must remain inside the Vita ux0 filesystem.") from exc
+    return target
+
+
 class SendFileDialog(QDialog):
     def __init__(self, vita: Path | None, parent=None):
         super().__init__(parent)
@@ -46,7 +65,7 @@ class SendFileDialog(QDialog):
         source_button.clicked.connect(self.choose_source)
 
         self.destination_edit = QLineEdit("ux0:/")
-        self.status = QLabel("Choose a file and a destination on the connected Vita.")
+        self.status = QLabel("Choose a file and an explicit destination on the connected Vita.")
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
 
@@ -56,7 +75,7 @@ class SendFileDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("Local file:", row)
-        form.addRow("Remote path:", self.destination_edit)
+        form.addRow("Remote file path:", self.destination_edit)
 
         self.send_button = QPushButton("Send File")
         self.cancel_button = QPushButton("Cancel")
@@ -86,13 +105,9 @@ class SendFileDialog(QDialog):
         return Path(self.source_edit.text()).expanduser()
 
     def selected_destination(self) -> Path:
-        text = self.destination_edit.text().strip()
-        if text.startswith("ux0:/"):
-            text = text.removeprefix("ux0:/")
-        text = text.lstrip("/")
         if self.vita is None:
             raise RuntimeError("Vita is not connected")
-        return self.vita / text
+        return _vita_target(self.vita, self.destination_edit.text())
 
     def start_transfer(self):
         try:
@@ -122,7 +137,6 @@ class SendFileDialog(QDialog):
             self.worker.progress.connect(
                 lambda done: self.progress.setValue(int(done * 100 / required) if required else 100)
             )
-            self.worker.status.connect(self.status.setText)
             self.worker.completed.connect(self.transfer_finished)
             self.worker.failed.connect(self.transfer_failed)
             self.worker.start()
@@ -153,7 +167,6 @@ class SendFileDialog(QDialog):
 
 class SendFileWorker(QThread):
     progress = Signal(int)
-    status = Signal(str)
     completed = Signal(str)
     failed = Signal(str)
 
