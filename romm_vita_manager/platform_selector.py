@@ -288,6 +288,7 @@ class PlatformSelectorDialog(QDialog):
 
         self.test_button.setText("Testing…")
         self.test_button.setEnabled(False)
+        self.test_button.setStyleSheet("background: #343943; color: #eef1f5; border-radius: 8px; padding: 9px 16px; font-weight: 700;")
         self.test_button.setToolTip("RomM connection test in progress")
         self._romm_thread = QThread(self)
         self._romm_worker = RomMConnectionWorker(url, token)
