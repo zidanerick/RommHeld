@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 
@@ -23,6 +24,9 @@ WORKSPACE_PROFILES = {
 
 class ManagementShell(QWidget):
     """Shared game-like management shell for device-specific workspaces."""
+
+    navigation_requested = Signal(str)
+    change_handheld_requested = Signal()
 
     def __init__(self, profile: WorkspaceProfile, parent: QWidget | None = None):
         super().__init__(parent)
@@ -46,6 +50,10 @@ class ManagementShell(QWidget):
         title_layout.addWidget(title)
         title_layout.addWidget(subtitle)
         header_layout.addLayout(title_layout, 1)
+        change = QPushButton("CHANGE HANDHELD")
+        change.setObjectName("changeButton")
+        change.clicked.connect(self.change_handheld_requested.emit)
+        header_layout.addWidget(change)
         root.addWidget(header)
 
         nav = QFrame()
@@ -53,14 +61,18 @@ class ManagementShell(QWidget):
         nav_layout = QHBoxLayout(nav)
         nav_layout.setContentsMargins(8, 6, 8, 6)
         for label in ("LIBRARY", "DEVICE", "SETUP", "QUEUE", "TOOLS", "SETTINGS"):
+            key = label.lower()
             button = QPushButton(label)
             button.setObjectName("navButton")
+            button.clicked.connect(lambda _checked=False, value=key: self.navigation_requested.emit(value))
             nav_layout.addWidget(button)
         nav_layout.addStretch()
         root.addWidget(nav)
 
         self.content = QFrame()
         self.content.setObjectName("workspaceContent")
+        self.content_layout = QVBoxLayout(self.content)
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
         root.addWidget(self.content, 1)
 
         footer = QFrame()
@@ -71,6 +83,13 @@ class ManagementShell(QWidget):
         footer_layout.addStretch()
         root.addWidget(footer)
 
+    def set_content(self, widget: QWidget) -> None:
+        while self.content_layout.count():
+            item = self.content_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().setParent(None)
+        self.content_layout.addWidget(widget)
+
     def _stylesheet(self) -> str:
         p = self.profile
         return f"""
@@ -78,6 +97,8 @@ class ManagementShell(QWidget):
         QFrame#workspaceHeader {{ background: {p.secondary}; border: 2px solid {p.accent}; border-radius: 16px; }}
         QLabel#workspaceTitle {{ color: {p.accent}; font-size: 20px; font-weight: 900; letter-spacing: 2px; }}
         QLabel#workspaceSubtitle {{ color: #abb4c0; font-size: 11px; }}
+        QPushButton#changeButton {{ background: transparent; border: 1px solid {p.accent}; color: #eef1f5; padding: 7px 11px; border-radius: 8px; font-weight: 800; }}
+        QPushButton#changeButton:hover {{ background: {p.accent}; color: #081019; }}
         QFrame#workspaceNav {{ background: #12161c; border: 1px solid #2a3039; border-radius: 12px; }}
         QPushButton#navButton {{ background: transparent; border: 1px solid transparent; color: #b9c0ca; padding: 7px 12px; font-weight: 800; border-radius: 8px; }}
         QPushButton#navButton:hover {{ color: #ffffff; border-color: {p.accent}; }}
