@@ -84,6 +84,9 @@ The 3DS should support multiple target profiles rather than treating every file 
 - [x] Handheld selection launch screen.
 - [x] Library source selection shell.
 - [x] Active handheld workspace context.
+- [x] Data-driven platform artwork registry.
+- [x] Local bundled handheld illustrations and logo variants.
+- [x] RommHeld application branding asset.
 - [ ] Replace legacy management layout with a fully console-themed management shell.
 - [ ] Device selection for transfer destinations.
 - [ ] Storage/target profile selector.
@@ -149,6 +152,8 @@ Do not make a milestone depend on assumptions about a user's filesystem. Discove
 Do not assume one emulator is best for a platform. Runtime selection should be based on detected capabilities and explicit user preference.
 
 Do not make transport logic responsible for emulator, frontend, or format-conversion decisions.
+
+Keep platform artwork data-driven and independent from backend logic. Missing artwork must never break functionality.
 
 ## Current research references
 
