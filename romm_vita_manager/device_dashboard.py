@@ -30,12 +30,7 @@ class DeviceDashboardWindow(BaseMainWindow):
         if old_vita_box is None:
             return
 
-        devices_box = QGroupBox("Devices")
-        devices_layout = QVBoxLayout(devices_box)
-
-        vita_box = QGroupBox("PlayStation Vita")
-        vita_layout = QVBoxLayout(vita_box)
-        for widget in (
+        named_vita_widgets = (
             self.vita_label,
             self.destination_label,
             self.destination_button,
@@ -43,7 +38,24 @@ class DeviceDashboardWindow(BaseMainWindow):
             self.status,
             self.copy_button,
             self.cancel_button,
-        ):
+        )
+
+        # Explicitly detach the existing Vita widgets from the old layout before
+        # replacing the container. This keeps their Python wrappers valid.
+        old_vita_layout = old_vita_box.layout()
+        if old_vita_layout is not None:
+            while old_vita_layout.count():
+                item = old_vita_layout.takeAt(0)
+                widget = item.widget()
+                if widget in named_vita_widgets:
+                    widget.setParent(None)
+
+        devices_box = QGroupBox("Devices")
+        devices_layout = QVBoxLayout(devices_box)
+
+        vita_box = QGroupBox("PlayStation Vita")
+        vita_layout = QVBoxLayout(vita_box)
+        for widget in named_vita_widgets:
             widget.setParent(vita_box)
 
         vita_layout.addWidget(self.vita_label)
