@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QSize, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+
+from .platform_assets import get_platform_assets
 
 
 @dataclass(frozen=True)
@@ -17,7 +20,7 @@ class WorkspaceProfile:
 
 WORKSPACE_PROFILES = {
     "vita": WorkspaceProfile("vita", "PlayStation Vita", "#41a6f6", "#17324d", "USB / VitaShell, RetroFlow and Adrenaline"),
-    "3ds": WorkspaceProfile("3ds", "Nintendo 3DS", "#e53935", "#4a1212", "FTP / SD card and native 3DS runtimes"),
+    "3ds": WorkspaceProfile("3ds", "Nintendo 3DS", "#d12228", "#4a1212", "FTP / SD card and native 3DS runtimes"),
     "ds": WorkspaceProfile("ds", "Nintendo DS", "#54b8ff", "#122a45", "TWiLight Menu++, nds-bootstrap and flashcards"),
 }
 
@@ -42,6 +45,14 @@ class ManagementShell(QWidget):
         header.setObjectName("workspaceHeader")
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(16, 12, 16, 12)
+        logo = QLabel()
+        logo.setFixedSize(QSize(150, 46))
+        assets = get_platform_assets(profile.key)
+        if assets:
+            logo_path = assets.path("logo_dark")
+            if logo_path.is_file():
+                logo.setPixmap(QPixmap(str(logo_path)).scaled(145, 42, aspectMode=1, mode=1))
+        header_layout.addWidget(logo)
         title_layout = QVBoxLayout()
         title = QLabel(profile.name.upper())
         title.setObjectName("workspaceTitle")
@@ -93,15 +104,15 @@ class ManagementShell(QWidget):
     def _stylesheet(self) -> str:
         p = self.profile
         return f"""
-        QWidget#managementShell {{ background: #0a0d12; color: #eef1f5; }}
-        QFrame#workspaceHeader {{ background: {p.secondary}; border: 2px solid {p.accent}; border-radius: 16px; }}
-        QLabel#workspaceTitle {{ color: {p.accent}; font-size: 20px; font-weight: 900; letter-spacing: 2px; }}
-        QLabel#workspaceSubtitle {{ color: #abb4c0; font-size: 11px; }}
-        QPushButton#changeButton {{ background: transparent; border: 1px solid {p.accent}; color: #eef1f5; padding: 7px 11px; border-radius: 8px; font-weight: 800; }}
-        QPushButton#changeButton:hover {{ background: {p.accent}; color: #081019; }}
-        QFrame#workspaceNav {{ background: #12161c; border: 1px solid #2a3039; border-radius: 12px; }}
-        QPushButton#navButton {{ background: transparent; border: 1px solid transparent; color: #b9c0ca; padding: 7px 12px; font-weight: 800; border-radius: 8px; }}
-        QPushButton#navButton:hover {{ color: #ffffff; border-color: {p.accent}; }}
-        QFrame#workspaceContent {{ background: #0f1319; border: 1px solid #292f38; border-radius: 14px; }}
-        QFrame#workspaceFooter {{ background: #12161c; border-top: 2px solid {p.accent}; }}
+        QWidget#managementShell {{ background:#0a0d12; color:#eef1f5; }}
+        QFrame#workspaceHeader {{ background:{p.secondary}; border:2px solid {p.accent}; border-radius:16px; }}
+        QLabel#workspaceTitle {{ color:{p.accent}; font-size:20px; font-weight:900; letter-spacing:2px; }}
+        QLabel#workspaceSubtitle {{ color:#abb4c0; font-size:11px; }}
+        QPushButton#changeButton {{ background:transparent; border:1px solid {p.accent}; color:#eef1f5; padding:7px 11px; border-radius:8px; font-weight:800; }}
+        QPushButton#changeButton:hover {{ background:{p.accent}; color:#081019; }}
+        QFrame#workspaceNav {{ background:#12161c; border:1px solid #2a3039; border-radius:12px; }}
+        QPushButton#navButton {{ background:transparent; border:1px solid transparent; color:#b9c0ca; padding:7px 12px; font-weight:800; border-radius:8px; }}
+        QPushButton#navButton:hover {{ color:#ffffff; border-color:{p.accent}; }}
+        QFrame#workspaceContent {{ background:#0f1319; border:1px solid #292f38; border-radius:14px; }}
+        QFrame#workspaceFooter {{ background:#12161c; border-top:2px solid {p.accent}; }}
         """
