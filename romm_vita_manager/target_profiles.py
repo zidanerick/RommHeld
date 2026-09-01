@@ -60,7 +60,7 @@ TARGET_PROFILES = (
             RuntimeCapability("twilight", "TWiLight Menu++", "frontend"),
             RuntimeCapability("nds-bootstrap", "nds-bootstrap", "loader", notes="B4DS/native DS loader depending on target."),
             RuntimeCapability("flashcard-kernel", "Flashcard kernel", "loader"),
-            RuntimeCapability("gb arunner2", "GBARunner2", "runtime"),
+            RuntimeCapability("gbarunner2", "GBARunner2", "runtime"),
         ),
         notes="Exact flashcard hardware model should remain unknown unless hardware-specific evidence is available.",
     ),
