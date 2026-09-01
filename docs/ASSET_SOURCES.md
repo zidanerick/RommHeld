@@ -2,23 +2,35 @@
 
 ## Generic UI assets
 
-Kenney Game Icons and UI Pack are licensed CC0 and may be redistributed and modified. Attribution is not required by the asset author, although optional credit may be given.
+Kenney Game Icons and UI Pack are CC0 and may be redistributed and modified.
 
 - https://kenney.nl/assets/game-icons
 - https://kenney.nl/assets/ui-pack
 
-## Console logos
+## Platform logos
 
-The launch selector may use console wordmarks/logos sourced from Wikimedia Commons where the individual file page documents the relevant public-domain or other redistribution status. Trademark rights are separate from copyright and are not granted by a copyright license.
+The repository keeps platform logos separate from device illustrations. The selected launch-screen logo files are based on sources whose individual pages identify the logo artwork as public domain for copyright purposes, while noting that trademark rights remain separate.
 
-Current references reviewed:
+- PlayStation Vita: https://commons.wikimedia.org/wiki/File:PlayStation_Vita_logo.svg
+- Nintendo 3DS: https://commons.wikimedia.org/wiki/File:Nintendo_3DS_logo.svg
+- Nintendo DS: https://commons.wikimedia.org/wiki/File:Nintendo_DS_Logo.svg
 
-- PlayStation Vita logo: Wikimedia Commons file page identifies the logo as public domain for copyright purposes and notes trademark restrictions.
-- Nintendo 3DS logo: Wikimedia Commons file page identifies the text logo as public domain for copyright purposes and notes trademark restrictions.
-- Nintendo DS logo: Wikimedia Commons file page identifies the text logo as public domain for copyright purposes and notes trademark restrictions.
+The PlayStation Vita wordmark path was cross-checked against the Simple Icons PlayStation Vita asset: https://github.com/simple-icons/simple-icons/blob/develop/icons/playstationvita.svg
 
-For bundled assets, record the source URL and the license/trademark note in this document before committing the binary/vector asset.
+## Device illustrations
 
-## Prohibited by default
+The current handheld illustrations in `assets/handhelds/` are original RommHeld SVG artwork created for the application. They are not copies of console manufacturer interface artwork or product photography.
+
+- PlayStation Vita: original simplified black-hardware illustration.
+- Nintendo 3DS: original simplified Aqua Blue clamshell illustration.
+- Nintendo DS: original simplified light-gray clamshell illustration.
+
+These illustrations are decorative and have no effect on compatibility, routing, or transfer logic.
+
+## Asset policy
+
+Platform/device definitions should reference artwork through the data-driven asset registry in `romm_vita_manager/platform_assets.py`. Do not scatter asset paths through device or transfer code.
+
+Missing artwork must fall back gracefully. UI functionality must never depend on an asset being present.
 
 Do not bundle screenshots of proprietary console interfaces, commercial fonts, game box art, copyrighted game artwork, or manufacturer UI assets unless a clear redistribution license or permission is documented.
