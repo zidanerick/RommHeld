@@ -23,34 +23,20 @@ from .vita import find_vita_mounts, free_space
 ASSET_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 
 WORKSPACES = {
-    "vita": {
-        "name": "PlayStation Vita",
-        "accent": "#4ca8ff",
-        "deep": "#17314c",
-        "icon": "vita.svg",
-    },
-    "3ds": {
-        "name": "Nintendo 3DS",
-        "accent": "#ef3b3b",
-        "deep": "#421517",
-        "icon": "3ds.svg",
-    },
-    "ds": {
-        "name": "Nintendo DS",
-        "accent": "#63c2ff",
-        "deep": "#15334a",
-        "icon": "ds.svg",
-    },
+    "vita": {"name": "PlayStation Vita", "accent": "#4ca8ff", "icon": "vita.svg"},
+    "3ds": {"name": "Nintendo 3DS", "accent": "#ef3b3b", "icon": "3ds.svg"},
+    "ds": {"name": "Nintendo DS", "accent": "#63c2ff", "icon": "ds.svg"},
 }
 
 
 class DeviceDashboardWindow(BaseMainWindow):
-    """RommHeld management workspace with persistent per-device sections."""
+    """RommHeld management workspace with persistent device management sections."""
 
     def __init__(self, config: dict):
         super().__init__(config)
         self.setWindowTitle("RommHeld")
         self._three_ds_dialog: ThreeDSFtpDialog | None = None
+        self._next_workspace_window: DeviceDashboardWindow | None = None
         self.workspace_key = str(config.get("active_console", "vita"))
         if self.workspace_key not in WORKSPACES:
             self.workspace_key = "vita"
@@ -120,7 +106,6 @@ class DeviceDashboardWindow(BaseMainWindow):
         self.three_ds_status = QLabel()
         self.three_ds_endpoint = QLabel()
         self.three_ds_endpoint.setTextInteractionFlags(Qt.TextSelectableByMouse)
-
         three_ds_layout.addWidget(self.three_ds_status)
         three_ds_layout.addWidget(self.three_ds_endpoint)
         three_ds_layout.addWidget(self._build_preference_box("3ds", "3DS runtime priority"))
@@ -129,7 +114,6 @@ class DeviceDashboardWindow(BaseMainWindow):
         three_ds_layout.addWidget(manage_button)
         three_ds_layout.addStretch()
         device_layout.addWidget(three_ds_box)
-
         device_layout.addStretch()
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
@@ -144,65 +128,27 @@ class DeviceDashboardWindow(BaseMainWindow):
         self.workspace_heading.setText(profile["name"])
         self.setStyleSheet(
             f"""
-            QGroupBox#devicesPanel {{
-                border: 1px solid {profile['accent']};
-                border-radius: 12px;
-                margin-top: 8px;
-                padding-top: 8px;
-            }}
-            QGroupBox#devicesPanel::title {{
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 6px;
-                color: {profile['accent']};
-                font-weight: 700;
-            }}
-            QLabel#workspaceHeading {{
-                color: {profile['accent']};
-                font-size: 18px;
-                font-weight: 800;
-                padding: 0;
-            }}
-            QLabel#workspaceSubtitle {{
-                color: #8d97a5;
-                font-size: 10px;
-            }}
-            QLabel#vitaHeading {{
-                color: #86bfff;
-                font-size: 15px;
-                font-weight: 700;
-                padding: 3px 2px 8px 2px;
-            }}
-            QGroupBox#threeDsCard {{
-                border: 1px solid #d93636;
-                border-radius: 10px;
-                margin-top: 10px;
-                padding-top: 8px;
-            }}
-            QGroupBox#threeDsCard::title {{
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 6px;
-                color: #e04444;
-                font-weight: 700;
-            }}
-            QGroupBox#threeDsCard QPushButton {{
-                min-height: 30px;
-            }}
+            QGroupBox#devicesPanel {{ border: 1px solid {profile['accent']}; border-radius: 12px; margin-top: 8px; padding-top: 8px; }}
+            QGroupBox#devicesPanel::title {{ subcontrol-origin: margin; left: 12px; padding: 0 6px; color: {profile['accent']}; font-weight: 700; }}
+            QLabel#workspaceHeading {{ color: {profile['accent']}; font-size: 18px; font-weight: 800; padding: 0; }}
+            QLabel#workspaceSubtitle {{ color: #8d97a5; font-size: 10px; }}
+            QLabel#vitaHeading {{ color: #86bfff; font-size: 15px; font-weight: 700; padding: 3px 2px 8px 2px; }}
+            QGroupBox#threeDsCard {{ border: 1px solid #d93636; border-radius: 10px; margin-top: 10px; padding-top: 8px; }}
+            QGroupBox#threeDsCard::title {{ subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #e04444; font-weight: 700; }}
+            QGroupBox#threeDsCard QPushButton {{ min-height: 30px; }}
             """
         )
 
     def change_workspace(self) -> None:
-        self.close()
         from .platform_selector import PlatformSelectorDialog
 
-        dialog = PlatformSelectorDialog(load_config(), self.parentWidget())
+        dialog = PlatformSelectorDialog(load_config(), self)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
         config = load_config()
-        window = DeviceDashboardWindow(config)
-        window.show()
-        self._next_workspace_window = window
+        self._next_workspace_window = DeviceDashboardWindow(config)
+        self._next_workspace_window.show()
+        self.hide()
 
     def _build_preference_box(self, device_key: str, title: str) -> QGroupBox:
         box = QGroupBox(title)
@@ -314,23 +260,3 @@ class DeviceDashboardWindow(BaseMainWindow):
     def _three_ds_closed(self, _result: int) -> None:
         self._three_ds_dialog = None
         self.refresh_device_sections()
-
-
-def main() -> None:
-    from PySide6.QtWidgets import QApplication
-
-    app = QApplication.instance() or QApplication([])
-    app.setApplicationName("RommHeld")
-    app.setApplicationVersion("1.0")
-    config = load_config()
-    if not config.get("setup_complete"):
-        # The selector is responsible for first-run source configuration.
-        from .platform_selector import PlatformSelectorDialog
-
-        selector = PlatformSelectorDialog(config)
-        if selector.exec() != selector.DialogCode.Accepted:
-            return
-        config = load_config()
-    window = DeviceDashboardWindow(config)
-    window.show()
-    app.exec()
