@@ -4,7 +4,15 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QStatusBar, QVBoxLayout
+from PySide6.QtWidgets import (
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QStatusBar,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .app import MainWindow as BaseMainWindow, ThreeDSFtpDialog
 from .config import load_config
@@ -129,16 +137,31 @@ class DeviceDashboardWindow(BaseMainWindow):
         status_bar.addPermanentWidget(self.three_ds_status_widget)
         self.refresh_status_bar()
 
-    def _make_status_widget(self, icon_name: str, label: str, text: str) -> QLabel:
-        path = ASSET_DIR / icon_name
-        widget = QLabel(f"  {label}: {text}")
-        widget.setToolTip(f"{label} device status")
-        if path.is_file():
-            widget.setPixmap(QIcon(str(path)).pixmap(20, 20))
-            widget.setText(f"  {label}: {text}")
-        widget.setMinimumWidth(185)
-        widget.setStyleSheet("padding: 0 6px; font-weight: 600;")
-        return widget
+    def _make_status_widget(self, icon_name: str, label: str, text: str) -> QWidget:
+        container = QWidget(self)
+        row = QHBoxLayout(container)
+        row.setContentsMargins(4, 0, 4, 0)
+        row.setSpacing(5)
+
+        icon = QLabel()
+        icon_path = ASSET_DIR / icon_name
+        if icon_path.is_file():
+            icon.setPixmap(QIcon(str(icon_path)).pixmap(20, 20))
+        row.addWidget(icon)
+
+        value = QLabel(f"{label}: {text}")
+        value.setObjectName(f"status_{label.lower()}")
+        row.addWidget(value)
+        row.addStretch()
+        container.setMinimumWidth(190)
+        container.setToolTip(f"{label} device status")
+        return container
+
+    @staticmethod
+    def _set_status_text(container: QWidget, text: str) -> None:
+        labels = container.findChildren(QLabel)
+        if labels:
+            labels[-1].setText(text)
 
     def refresh_status_bar(self) -> None:
         mounts = find_vita_mounts()
@@ -157,8 +180,8 @@ class DeviceDashboardWindow(BaseMainWindow):
         port = saved.get("port", 5000)
         three_ds_text = f"FTP {host}:{port}" if host else "Not configured"
 
-        self.vita_status_widget.setText(f"  Vita: {vita_text}")
-        self.three_ds_status_widget.setText(f"  3DS: {three_ds_text}")
+        self._set_status_text(self.vita_status_widget, f"Vita: {vita_text}")
+        self._set_status_text(self.three_ds_status_widget, f"3DS: {three_ds_text}")
 
     @staticmethod
     def _human_size(value: int) -> str:
