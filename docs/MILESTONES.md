@@ -57,6 +57,8 @@ The 3DS should support multiple target profiles rather than treating every file 
 - [ ] Read-only storage validation with confidence levels.
 - [x] Record observed R4/flashcart signatures without claiming a specific hardware model.
 - [x] Research 3DS/DS runtime and RetroAchievements capabilities.
+- [x] Add user runtime preference model: prefer native, prefer RetroAchievements, or prefer compatibility.
+- [ ] Apply runtime preferences per platform/target when making route recommendations.
 
 ## 4. Vita target profiles
 
@@ -126,3 +128,7 @@ Do not make a milestone depend on assumptions about a user's filesystem. Discove
 ## Current research references
 
 The current capability matrix is maintained in `docs/3DS_CAPABILITY_MATRIX.md`. It records conclusions from upstream project documentation and current RetroAchievements support information. When implementation choices change, update the matrix first and then update the corresponding code/milestone.
+
+## Runtime preference rule
+
+Runtime preference expresses what the user values most. It must never force an unavailable or incompatible runtime. Platform routing should intersect the user's preference with the target's detected capabilities and present the resulting recommendation transparently.
