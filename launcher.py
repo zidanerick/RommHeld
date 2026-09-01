@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from romm_vita_manager.config import load_config
+from romm_vita_manager.console_selector import PlatformSelectorDialog
 from romm_vita_manager.device_dashboard import DeviceDashboardWindow
-from romm_vita_manager.platform_selector import PlatformSelectorDialog
 
 
 def main() -> None:
