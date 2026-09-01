@@ -1,71 +1,81 @@
-# RomM Vita Manager
+# RommHeld
 
-A Linux desktop utility for managing game transfers from a local RomM library to a USB-mounted modded PlayStation Vita.
+A Linux desktop application for managing a local RomM library across supported handheld devices.
 
 ## Current status
 
-Early development. The current prototype provides:
+RommHeld is transitioning from a Vita-focused prototype into a multi-device handheld manager.
 
-- first-run setup wizard
-- configurable main RomM ROM directory
-- persistent per-user platform mappings
-- automatic Vita mount detection
-- platform filtering and search
-- installed-state detection
-- automatic RetroFlow and Adrenaline destinations
-- multi-selection for bulk transfers
-- resumable batch behaviour by skipping same-size files
-- transfer progress and cancellation
-- post-copy file-size verification
-- list and tile browsing modes
-- Vita free-space display and pre-transfer capacity checks
-- Vita Setup component detection
-- official-source package download and staging for selected Vita components
-- RetroAchievements-aware emulator roles
+Current capabilities on the modular Vita implementation include:
 
-The UI implementation now lives in `romm_vita_manager/ui.py`. The root Python entry point remains as a compatibility launcher.
+- first-run setup and configurable RomM library root
+- automatic top-level platform discovery
+- persistent platform mappings
+- PlayStation Vita detection through VitaShell USB mounts
+- RetroFlow and Adrenaline destination handling
+- platform filtering, search, and installed-state detection
+- list and tile browsing
+- bulk selection and cancellable transfers
+- resume-friendly same-size skipping
+- post-transfer size verification
+- Vita free-space reporting and pre-transfer capacity checks
+- Vita component detection and setup information
+- RetroAchievements-aware emulator role information
+- generic Send File support for arbitrary files on the Vita
 
-## First-run setup
+The application architecture is being separated into device backends so additional handhelds can share the same RomM library and transfer machinery.
 
-The application does not assume the developer's local filesystem layout.
+## Devices
 
-On first launch it asks for the main RomM ROM directory. It then discovers the top-level platform directories and presents a mapping table where each RomM platform can be mapped to a RetroFlow destination or disabled.
+### PlayStation Vita
 
-The configuration is stored locally at:
+Current supported device.
+
+Transport:
+
+```text
+USB / VitaShell mounted filesystem
+```
+
+Typical destinations include RetroFlow, Adrenaline PSP/PS1 locations, and other explicitly configured paths.
+
+### Nintendo 3DS
+
+Next device backend.
+
+Transport:
+
+```text
+FTP
+```
+
+The planned 3DS backend will provide configurable FTP connection details, remote filesystem browsing, explicit destination selection, arbitrary file transfer, verification, and resume where the server supports it.
+
+## RomM library
+
+RommHeld treats the first directory below the configured RomM root as the RomM platform ID.
+
+For example:
+
+```text
+~/RomM/roms/roms/gbc/
+~/RomM/roms/roms/gba/
+~/RomM/roms/roms/n64/
+```
+
+Platform detection is based on the directory structure, not ROM filenames.
+
+## Configuration
+
+User configuration is stored outside the repository:
 
 ```text
 ~/.config/romm-vita-manager/config.json
 ```
 
-This file is deliberately outside the Git repository so personal paths and settings are not published.
+Personal paths, credentials, ROM files, device dumps, mount UUIDs, and other machine-specific data must never be committed.
 
-## Default paths
-
-The initial suggested RomM path is:
-
-```text
-~/RomM/roms/roms/
-```
-
-RetroFlow ROMs on the Vita:
-
-```text
-ux0:/data/RetroFlow/ROMS/
-```
-
-PSP ISOs through Adrenaline:
-
-```text
-ux0:/pspemu/ISO/
-```
-
-PSP and PS1 EBOOT.PBP games through Adrenaline:
-
-```text
-ux0:/pspemu/PSP/GAME/<Game>/EBOOT.PBP
-```
-
-## Requirements
+## Installation
 
 Designed for Arch-based Linux distributions such as CachyOS.
 
@@ -73,7 +83,7 @@ Designed for Arch-based Linux distributions such as CachyOS.
 sudo pacman -S --needed python pyside6
 ```
 
-## Run
+Run the application with:
 
 ```fish
 ./run.sh
@@ -87,72 +97,78 @@ python romm_vita_manager.py
 
 ## Vita connection
 
-Put the Vita into USB mode using VitaShell, connect it to Linux, and press **Refresh** in the application.
+Put the Vita into USB mode using VitaShell, connect it to Linux, and press **Refresh**.
 
-The manager detects the mounted filesystem rather than relying on a fixed mount point or storage UUID.
+RommHeld discovers the mounted filesystem dynamically. It does not require a fixed mount point or storage UUID.
 
-## Vita Setup
+## Send File
 
-Open **Vita Setup** from the main window to inspect the connected Vita and the emulator/frontend components it contains.
+RommHeld provides a generic **Send File** workflow for arbitrary files.
 
-Available package actions currently cover selected components from their upstream sources:
+The user explicitly chooses:
 
-- RetroFlow Emu4Vita build
-- Adrenaline
-- DSVita
-- DaedalusX64
-- RetroArch
-- RetroArch data package
+1. the local file
+2. the destination device
+3. the remote file path
 
-Downloads are stored in the user cache under:
+The file extension does not determine its destination automatically.
 
-```text
-~/.cache/romm-vita-manager/packages/
-```
+This is intended to make it easy to stage homebrew artifacts downloaded from their upstream projects without RommHeld becoming a package mirror.
 
-Packages with an upstream SHA-256 digest are verified before staging. VPKs are copied to the Vita root for explicit VitaShell installation. Data archives are staged separately and are not installed automatically.
+## Software and emulator setup
 
-RetroFlow is treated as a frontend. For systems supported by RetroAchievements, RetroArch plus the appropriate libretro core is the achievement-first route. N64 is deliberately presented as a choice between ordinary DaedalusX64 use and an achievement-oriented RetroArch setup.
+RommHeld should prefer authoritative upstream project and release links rather than maintaining fragile package-download logic for every emulator and homebrew project.
 
-## Transfer behaviour
+For Vita and 3DS software, the user can obtain the appropriate upstream artifact and then transfer it with **Send File**.
 
-The manager skips destination files when they already exist with the expected size. This makes interrupted bulk transfers safe to resume.
+Final VPK installation on the Vita remains an explicit VitaShell action.
 
-New copies are verified by comparing the resulting file size with the source. A full checksum is not calculated by default because that would require another complete read of every transferred file.
+## RetroAchievements
 
-Before a transfer begins, the manager checks the mounted Vita's free space and blocks the operation when the selected files cannot fit.
+RetroFlow is treated as a launcher/frontend rather than an emulator.
+
+Achievement compatibility belongs to the emulator/core actually running the game. RommHeld therefore models RetroAchievements as a separate capability instead of assuming that a frontend or transport supports achievements.
+
+The same principle will apply to 3DS native execution, emulator execution, and experimental achievement integrations.
 
 ## Project structure
 
-- `romm_vita_manager/config.py` for local configuration
-- `romm_vita_manager/models.py` for shared data structures
-- `romm_vita_manager/mappings.py` for platform and RetroFlow mapping definitions
-- `romm_vita_manager/romm.py` for RomM library discovery
-- `romm_vita_manager/vita.py` for Vita filesystem discovery and storage information
-- `romm_vita_manager/transfers.py` for reusable cancellable copy operations
-- `romm_vita_manager/emulators.py` for emulator/component definitions, detection patterns, package references, and achievement roles
-- `romm_vita_manager/package_manager.py` for upstream package resolution, downloading, digest verification, caching, and staging
-- `romm_vita_manager/vita_setup.py` for the Vita Setup UI and component actions
-- `romm_vita_manager/ui.py` for the main PySide6 application UI
+The implementation is being split into focused modules under `romm_vita_manager/`:
+
+- `config.py` for local configuration
+- `devices.py` for device metadata and backend boundaries
+- `models.py` for shared data structures
+- `mappings.py` for platform mappings
+- `romm.py` for RomM library discovery
+- `vita.py` for Vita filesystem detection and storage information
+- `transfers.py` for cancellable local/device-mounted transfers
+- `emulators.py` for emulator/frontend metadata and achievement roles
+- `archive_utils.py` for safe archive inspection and extraction helpers
+- `package_manager.py` for existing Vita package handling during the transition
+- `vita_setup.py` for Vita setup information
+- `ui.py` for the main PySide6 application UI
+
+The internal Python package name remains `romm_vita_manager` during the transition to avoid a needless namespace migration.
 
 ## Safety
 
-Unknown or disabled platform mappings are not copied automatically. Native Vita VPK files are staged separately rather than being silently written into `ux0:/app`.
+Unknown or unsupported platform mappings are not copied automatically.
 
-The setup manager does not silently install VPKs or mutate Vita application configuration. Final VPK installation remains an explicit VitaShell action.
+Archive extraction rejects unsafe paths and multi-platform archives are not blindly extracted into a Vita data directory.
 
-The repository is intended to remain free of personal paths, credentials, ROM files, Vita dumps, and other machine-specific data.
+The Linux application performs file transfers. No Vita-side downloader is required.
 
 ## Roadmap
 
-Planned areas include:
-
-- automatic RetroFlow directory discovery
-- artwork and richer tile browsing
-- a detailed transfer queue
-- smarter duplicate/hash handling
-- Vita free-space and transfer planning tools
-- more complete emulator/component package coverage
-- verified version/update comparison
-- RetroAchievements-aware emulator/core recommendations
-- improved native Vita VPK installation workflow
+- complete the modular GUI transition
+- generic Send File across device backends
+- Nintendo 3DS FTP backend
+- 3DS filesystem discovery and explicit platform mappings
+- upstream software/project links in Setup
+- frontend/homebrew detection
+- emulator and native execution routing
+- RetroAchievements-aware routing
+- artwork and richer library browsing
+- detailed transfer queue
+- duplicate detection and optional hashing
+- smarter free-space and transfer planning
