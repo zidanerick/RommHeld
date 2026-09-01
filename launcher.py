@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Application launcher."""
+"""RommHeld application launcher."""
 from __future__ import annotations
 
-from romm_vita_manager.ui import main
+from romm_vita_manager.app import main
 
 
 if __name__ == "__main__":
