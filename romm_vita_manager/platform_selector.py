@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QThread, QObject, QSize, Qt, Signal, Slot
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -44,6 +44,31 @@ CONSOLES = (
     ConsoleProfile("psp", "PlayStation Portable", "Sony handheld", "coming", "#777777", "#202020", "Coming soon"),
     ConsoleProfile("mobile", "Mobile", "General", "coming", "#777777", "#202020", "Coming soon"),
 )
+
+
+class RomMConnectionWorker(QObject):
+    succeeded = Signal(str)
+    failed = Signal(str)
+    finished = Signal()
+
+    def __init__(self, url: str, token: str, parent: QObject | None = None):
+        super().__init__(parent)
+        self.url = url
+        self.token = token
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            instance_url = normalize_romm_url(self.url)
+            test_connection(instance_url, self.token)
+        except (RomMApiError, ValueError) as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:
+            self.failed.emit(f"Unexpected connection error: {exc}")
+        else:
+            self.succeeded.emit("RomM API connection successful. platforms.read is available.")
+        finally:
+            self.finished.emit()
 
 
 class ConsoleTile(QPushButton):
@@ -110,6 +135,8 @@ class PlatformSelectorDialog(QDialog):
         self.selected_console = str(config.get("active_console", "vita"))
         self.source = get_library_source(config)
         self.selected_profile: ConsoleProfile | None = None
+        self._romm_thread: QThread | None = None
+        self._romm_worker: RomMConnectionWorker | None = None
         self.setWindowTitle("RommHeld")
         self.resize(1120, 820)
         self.setMinimumSize(980, 720)
@@ -190,8 +217,11 @@ class PlatformSelectorDialog(QDialog):
 
         self.source_status = QLabel()
         self.source_status.setProperty("class", "muted")
+        self.source_status.setWordWrap(True)
         source_layout.addWidget(self.source_status)
         self.local_radio.toggled.connect(self.update_source_visibility)
+        self.url_edit.textChanged.connect(self.refresh_source_status)
+        self.token_edit.textChanged.connect(self.refresh_source_status)
         self.update_source_visibility()
         self.refresh_source_status()
         root.addWidget(source_box)
@@ -230,23 +260,69 @@ class PlatformSelectorDialog(QDialog):
         self.local_edit.setEnabled(local)
         for widget in (self.url_edit, self.token_edit, self.test_button):
             widget.setEnabled(not local)
+        self.refresh_source_status()
 
     def refresh_source_status(self) -> None:
         if self.local_radio.isChecked():
             root = Path(self.local_edit.text()).expanduser()
             self.source_status.setText("Local source ready." if root.is_dir() else "Choose an existing ROM directory.")
+        elif self._romm_thread and self._romm_thread.isRunning():
+            self.source_status.setText("Testing RomM API connection… You can continue editing the URL or token while this runs.")
         else:
             self.source_status.setText("RomM server credentials are stored locally and used by the API provider.")
 
     def test_romm_server(self) -> None:
+        if self._romm_thread and self._romm_thread.isRunning():
+            return
+        url = self.url_edit.text().strip()
+        token = self.token_edit.text().strip()
+        if not url or not token:
+            self.source_status.setText("Enter the RomM server URL and Client API Token first.")
+            return
+
         try:
-            instance_url = normalize_romm_url(self.url_edit.text())
-            test_connection(instance_url, self.token_edit.text())
-            self.source_status.setText("RomM API connection successful. platforms.read is available.")
-        except RomMApiError as exc:
-            self.source_status.setText(str(exc))
+            normalize_romm_url(url)
         except ValueError as exc:
             self.source_status.setText(str(exc))
+            return
+
+        self.test_button.setText("Testing…")
+        self.test_button.setEnabled(False)
+        self.test_button.setToolTip("RomM connection test in progress")
+        self._romm_thread = QThread(self)
+        self._romm_worker = RomMConnectionWorker(url, token)
+        self._romm_worker.moveToThread(self._romm_thread)
+        self._romm_thread.started.connect(self._romm_worker.run)
+        self._romm_worker.succeeded.connect(self._romm_test_succeeded)
+        self._romm_worker.failed.connect(self._romm_test_failed)
+        self._romm_worker.finished.connect(self._romm_test_finished)
+        self._romm_worker.finished.connect(self._romm_thread.quit)
+        self._romm_thread.finished.connect(self._romm_thread.deleteLater)
+        self._romm_thread.start()
+        self.refresh_source_status()
+
+    @Slot(str)
+    def _romm_test_succeeded(self, message: str) -> None:
+        self.source_status.setText(message)
+        self.test_button.setText("PASS")
+        self.test_button.setStyleSheet("background: #1f8f4d; color: white; border-radius: 8px; padding: 9px 16px; font-weight: 700;")
+        self.test_button.setEnabled(True)
+        self.test_button.setToolTip("Click to test the RomM server again")
+
+    @Slot(str)
+    def _romm_test_failed(self, message: str) -> None:
+        self.source_status.setText(message)
+        self.test_button.setText("FAIL")
+        self.test_button.setStyleSheet("background: #b83232; color: white; border-radius: 8px; padding: 9px 16px; font-weight: 700;")
+        self.test_button.setEnabled(True)
+        self.test_button.setToolTip("Click to test the RomM server again")
+
+    @Slot()
+    def _romm_test_finished(self) -> None:
+        if self._romm_thread is not None:
+            self._romm_thread.wait(1000)
+        self._romm_worker = None
+        self._romm_thread = None
 
     def continue_selected(self) -> None:
         if self.selected_profile is None:
@@ -276,6 +352,12 @@ class PlatformSelectorDialog(QDialog):
         save_config(updated)
         self.config = updated
         self.accept()
+
+    def closeEvent(self, event) -> None:
+        if self._romm_thread and self._romm_thread.isRunning():
+            self._romm_thread.quit()
+            self._romm_thread.wait(1000)
+        super().closeEvent(event)
 
 
 def choose_console(config: dict) -> tuple[str | None, dict]:
