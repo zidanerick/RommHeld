@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import ftplib
 import pytest
 
 from romm_vita_manager.three_ds_ftp import (
@@ -36,7 +37,7 @@ class FakeFTP:
     def cwd(self, path):
         path = normalize_remote_path(path)
         if path not in self.dirs:
-            raise Exception("not a directory")
+            raise ftplib.error_perm("550 not a directory")
         self.cwd_path = path
 
     def mkd(self, path):
@@ -46,6 +47,8 @@ class FakeFTP:
 
     def mlsd(self, path):
         path = normalize_remote_path(path)
+        if path not in self.dirs:
+            raise ftplib.error_perm("550 not a directory")
         prefix = path.rstrip("/") + "/"
         for candidate in sorted(self.dirs):
             if candidate.startswith(prefix):
@@ -64,13 +67,13 @@ class FakeFTP:
     def size(self, path):
         path = normalize_remote_path(path)
         if path not in self.files:
-            raise Exception("not found")
+            raise ftplib.error_perm("550 not found")
         return len(self.files[path])
 
     def sendcmd(self, command):
         if command == "SITE AVBL":
             return "213 123456789"
-        raise Exception("unsupported command")
+        raise ftplib.error_perm("500 unsupported command")
 
     def storbinary(self, command, fp, blocksize=8192, callback=None, rest=None):
         path = command.removeprefix("STOR ")
