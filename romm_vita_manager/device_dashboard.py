@@ -8,94 +8,65 @@ from .config import load_config
 
 
 class DeviceDashboardWindow(BaseMainWindow):
-    """RommHeld main window with persistent per-device management cards."""
+    """RommHeld main window with persistent per-device management sections."""
 
     def __init__(self, config: dict):
         super().__init__(config)
+        self.setWindowTitle("RommHeld")
         self._three_ds_dialog: ThreeDSFtpDialog | None = None
-        self._build_device_panel()
+        self._build_device_sections()
 
-    def _build_device_panel(self) -> None:
+    def _build_device_sections(self) -> None:
         central = self.centralWidget()
-        if central is None:
+        if central is None or central.layout() is None:
             return
+
         layout = central.layout()
-        if layout is None or layout.count() < 2:
-            return
-        splitter = layout.itemAt(1).widget()
+        splitter_item = next(
+            (layout.itemAt(i) for i in range(layout.count())
+             if layout.itemAt(i).widget() is not None and hasattr(layout.itemAt(i).widget(), "count")),
+            None,
+        )
+        splitter = splitter_item.widget() if splitter_item else None
         if splitter is None or splitter.count() < 2:
             return
 
-        old_vita_box = splitter.widget(1)
-        if old_vita_box is None:
+        vita_box = splitter.widget(1)
+        if not isinstance(vita_box, QGroupBox):
             return
 
-        named_vita_widgets = (
-            self.vita_label,
-            self.destination_label,
-            self.destination_button,
-            self.progress,
-            self.status,
-            self.copy_button,
-            self.cancel_button,
-        )
-
-        # Explicitly detach the existing Vita widgets from the old layout before
-        # replacing the container. This keeps their Python wrappers valid.
-        old_vita_layout = old_vita_box.layout()
-        if old_vita_layout is not None:
-            while old_vita_layout.count():
-                item = old_vita_layout.takeAt(0)
-                widget = item.widget()
-                if widget in named_vita_widgets:
-                    widget.setParent(None)
-
-        devices_box = QGroupBox("Devices")
-        devices_layout = QVBoxLayout(devices_box)
-
-        vita_box = QGroupBox("PlayStation Vita")
-        vita_layout = QVBoxLayout(vita_box)
-        for widget in named_vita_widgets:
-            widget.setParent(vita_box)
-
-        vita_layout.addWidget(self.vita_label)
-        vita_layout.addWidget(QLabel("Automatic destination:"))
-        vita_layout.addWidget(self.destination_label)
-        vita_layout.addWidget(self.destination_button)
-        vita_layout.addStretch()
-        vita_layout.addWidget(self.progress)
-        vita_layout.addWidget(self.status)
-        vita_layout.addWidget(self.copy_button)
-        vita_layout.addWidget(self.cancel_button)
-        devices_layout.addWidget(vita_box)
+        vita_box.setTitle("Devices")
+        device_layout = vita_box.layout()
+        if device_layout is None:
+            return
 
         three_ds_box = QGroupBox("Nintendo 3DS")
         three_ds_layout = QVBoxLayout(three_ds_box)
         self.three_ds_status = QLabel()
         self.three_ds_endpoint = QLabel()
         self.three_ds_endpoint.setTextInteractionFlags(Qt.TextSelectableByMouse)
+
         manage_button = QPushButton("Manage 3DS FTP")
         manage_button.clicked.connect(self.open_3ds)
 
         three_ds_layout.addWidget(self.three_ds_status)
         three_ds_layout.addWidget(self.three_ds_endpoint)
         three_ds_layout.addWidget(manage_button)
-        three_ds_layout.addStretch()
-        devices_layout.addWidget(three_ds_box)
+        device_layout.addWidget(three_ds_box)
 
-        splitter.replaceWidget(1, devices_box)
-        old_vita_box.deleteLater()
+        self.refresh_device_sections()
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
         splitter.setSizes([850, 400])
-        self.refresh_device_cards()
 
-    def refresh_device_cards(self) -> None:
-        if not hasattr(self, "three_ds_status"):
-            return
+    def refresh_device_sections(self) -> None:
         config = load_config()
         saved = config.get("devices", {}).get("3ds", {})
         host = str(saved.get("host", "")).strip()
         port = saved.get("port", 5000)
-        self.three_ds_status.setText("3DS: configured" if host else "3DS: not configured")
+        self.three_ds_status.setText(
+            "Configured" if host else "Not configured"
+        )
         self.three_ds_endpoint.setText(
             f"FTP endpoint: {host}:{port}" if host else "FTP endpoint: not configured"
         )
@@ -110,7 +81,7 @@ class DeviceDashboardWindow(BaseMainWindow):
 
     def _three_ds_closed(self, _result: int) -> None:
         self._three_ds_dialog = None
-        self.refresh_device_cards()
+        self.refresh_device_sections()
 
 
 def main() -> None:
