@@ -22,16 +22,41 @@ from .vita import find_vita_mounts, free_space
 
 ASSET_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 
+WORKSPACES = {
+    "vita": {
+        "name": "PlayStation Vita",
+        "accent": "#4ca8ff",
+        "deep": "#17314c",
+        "icon": "vita.svg",
+    },
+    "3ds": {
+        "name": "Nintendo 3DS",
+        "accent": "#ef3b3b",
+        "deep": "#421517",
+        "icon": "3ds.svg",
+    },
+    "ds": {
+        "name": "Nintendo DS",
+        "accent": "#63c2ff",
+        "deep": "#15334a",
+        "icon": "ds.svg",
+    },
+}
+
 
 class DeviceDashboardWindow(BaseMainWindow):
-    """RommHeld main window with persistent per-device management sections."""
+    """RommHeld management workspace with persistent per-device sections."""
 
     def __init__(self, config: dict):
         super().__init__(config)
         self.setWindowTitle("RommHeld")
         self._three_ds_dialog: ThreeDSFtpDialog | None = None
+        self.workspace_key = str(config.get("active_console", "vita"))
+        if self.workspace_key not in WORKSPACES:
+            self.workspace_key = "vita"
         self._build_status_bar()
         self._build_device_sections()
+        self._apply_workspace_theme()
         self.refresh_device_sections()
 
     def _build_device_sections(self) -> None:
@@ -61,11 +86,33 @@ class DeviceDashboardWindow(BaseMainWindow):
         if device_layout is None:
             return
 
+        self.workspace_banner = QWidget()
+        banner_layout = QHBoxLayout(self.workspace_banner)
+        banner_layout.setContentsMargins(2, 2, 2, 6)
+        banner_layout.setSpacing(8)
+        self.workspace_icon = QLabel()
+        self.workspace_icon.setFixedSize(28, 28)
+        banner_layout.addWidget(self.workspace_icon)
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(0)
+        self.workspace_heading = QLabel()
+        self.workspace_heading.setObjectName("workspaceHeading")
+        self.workspace_subtitle = QLabel("Current workspace")
+        self.workspace_subtitle.setObjectName("workspaceSubtitle")
+        text_layout.addWidget(self.workspace_heading)
+        text_layout.addWidget(self.workspace_subtitle)
+        banner_layout.addLayout(text_layout, 1)
+        change_button = QPushButton("Change handheld")
+        change_button.clicked.connect(self.change_workspace)
+        banner_layout.addWidget(change_button)
+        device_layout.insertWidget(0, self.workspace_banner)
+
         vita_heading = QLabel("PlayStation Vita")
         vita_heading.setObjectName("vitaHeading")
         vita_heading.setToolTip("USB / VitaShell device management")
-        device_layout.insertWidget(0, vita_heading)
-        device_layout.insertWidget(1, self._build_preference_box("vita", "Vita runtime priority"))
+        device_layout.insertWidget(1, vita_heading)
+        device_layout.insertWidget(2, self._build_preference_box("vita", "Vita runtime priority"))
 
         three_ds_box = QGroupBox("Nintendo 3DS")
         three_ds_box.setObjectName("threeDsCard")
@@ -83,19 +130,79 @@ class DeviceDashboardWindow(BaseMainWindow):
         three_ds_layout.addStretch()
         device_layout.addWidget(three_ds_box)
 
-        vita_box.setStyleSheet(
-            """
-            QGroupBox#devicesPanel { border: 1px solid #3c67d6; border-radius: 10px; margin-top: 8px; padding-top: 8px; }
-            QGroupBox#devicesPanel::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #3c67d6; font-weight: 700; }
-            QLabel#vitaHeading { color: #3157b7; font-size: 16px; font-weight: 700; padding: 3px 2px 8px 2px; }
-            QGroupBox#threeDsCard { border: 1px solid #d93636; border-radius: 10px; margin-top: 10px; padding-top: 8px; }
-            QGroupBox#threeDsCard::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #c72d2d; font-weight: 700; }
-            QGroupBox#threeDsCard QPushButton { min-height: 30px; }
-            """
-        )
+        device_layout.addStretch()
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         splitter.setSizes([850, 400])
+
+    def _apply_workspace_theme(self) -> None:
+        profile = WORKSPACES[self.workspace_key]
+        self.setWindowTitle(f"RommHeld • {profile['name']}")
+        icon_path = ASSET_DIR / profile["icon"]
+        if icon_path.is_file():
+            self.workspace_icon.setPixmap(QIcon(str(icon_path)).pixmap(28, 28))
+        self.workspace_heading.setText(profile["name"])
+        self.setStyleSheet(
+            f"""
+            QGroupBox#devicesPanel {{
+                border: 1px solid {profile['accent']};
+                border-radius: 12px;
+                margin-top: 8px;
+                padding-top: 8px;
+            }}
+            QGroupBox#devicesPanel::title {{
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 6px;
+                color: {profile['accent']};
+                font-weight: 700;
+            }}
+            QLabel#workspaceHeading {{
+                color: {profile['accent']};
+                font-size: 18px;
+                font-weight: 800;
+                padding: 0;
+            }}
+            QLabel#workspaceSubtitle {{
+                color: #8d97a5;
+                font-size: 10px;
+            }}
+            QLabel#vitaHeading {{
+                color: #86bfff;
+                font-size: 15px;
+                font-weight: 700;
+                padding: 3px 2px 8px 2px;
+            }}
+            QGroupBox#threeDsCard {{
+                border: 1px solid #d93636;
+                border-radius: 10px;
+                margin-top: 10px;
+                padding-top: 8px;
+            }}
+            QGroupBox#threeDsCard::title {{
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 6px;
+                color: #e04444;
+                font-weight: 700;
+            }}
+            QGroupBox#threeDsCard QPushButton {{
+                min-height: 30px;
+            }}
+            """
+        )
+
+    def change_workspace(self) -> None:
+        self.close()
+        from .platform_selector import PlatformSelectorDialog
+
+        dialog = PlatformSelectorDialog(load_config(), self.parentWidget())
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        config = load_config()
+        window = DeviceDashboardWindow(config)
+        window.show()
+        self._next_workspace_window = window
 
     def _build_preference_box(self, device_key: str, title: str) -> QGroupBox:
         box = QGroupBox(title)
@@ -210,15 +317,18 @@ class DeviceDashboardWindow(BaseMainWindow):
 
 
 def main() -> None:
-    from PySide6.QtWidgets import QApplication, QDialog
+    from PySide6.QtWidgets import QApplication
+
     app = QApplication.instance() or QApplication([])
     app.setApplicationName("RommHeld")
-    app.setApplicationVersion("0.9")
+    app.setApplicationVersion("1.0")
     config = load_config()
     if not config.get("setup_complete"):
-        from .ui import SetupWizard
-        wizard = SetupWizard(config)
-        if wizard.exec() != QDialog.DialogCode.Accepted:
+        # The selector is responsible for first-run source configuration.
+        from .platform_selector import PlatformSelectorDialog
+
+        selector = PlatformSelectorDialog(config)
+        if selector.exec() != selector.DialogCode.Accepted:
             return
         config = load_config()
     window = DeviceDashboardWindow(config)
