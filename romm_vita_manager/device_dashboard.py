@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGroupBox, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QLabel, QPushButton, QStatusBar, QVBoxLayout
 
 from .app import MainWindow as BaseMainWindow, ThreeDSFtpDialog
 from .config import load_config
-from .local_storage_ui import MountedStorageDialog
+from .vita import find_vita_mounts, free_space
+
+
+ASSET_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 
 
 class DeviceDashboardWindow(BaseMainWindow):
@@ -15,9 +21,8 @@ class DeviceDashboardWindow(BaseMainWindow):
         super().__init__(config)
         self.setWindowTitle("RommHeld")
         self._three_ds_dialog: ThreeDSFtpDialog | None = None
-        self._vita_storage_dialog: MountedStorageDialog | None = None
-        self._three_ds_storage_dialog: MountedStorageDialog | None = None
         self._build_device_sections()
+        self._build_status_bar()
 
     def _build_device_sections(self) -> None:
         central = self.centralWidget()
@@ -26,8 +31,12 @@ class DeviceDashboardWindow(BaseMainWindow):
 
         layout = central.layout()
         splitter_item = next(
-            (layout.itemAt(i) for i in range(layout.count())
-             if layout.itemAt(i).widget() is not None and hasattr(layout.itemAt(i).widget(), "count")),
+            (
+                layout.itemAt(i)
+                for i in range(layout.count())
+                if layout.itemAt(i).widget() is not None
+                and hasattr(layout.itemAt(i).widget(), "count")
+            ),
             None,
         )
         splitter = splitter_item.widget() if splitter_item else None
@@ -38,17 +47,19 @@ class DeviceDashboardWindow(BaseMainWindow):
         if not isinstance(vita_box, QGroupBox):
             return
 
-        vita_box.setTitle("PlayStation Vita")
+        vita_box.setTitle("Devices")
+        vita_box.setObjectName("devicesPanel")
         device_layout = vita_box.layout()
         if device_layout is None:
             return
 
-        vita_storage_button = QPushButton("Manage SD / Local Storage")
-        vita_storage_button.clicked.connect(self.open_vita_storage)
-        insert_at = max(0, device_layout.count() - 4)
-        device_layout.insertWidget(insert_at, vita_storage_button)
+        vita_heading = QLabel("PlayStation Vita")
+        vita_heading.setObjectName("vitaHeading")
+        vita_heading.setToolTip("USB / VitaShell device management")
+        device_layout.insertWidget(0, vita_heading)
 
         three_ds_box = QGroupBox("Nintendo 3DS")
+        three_ds_box.setObjectName("threeDsCard")
         three_ds_layout = QVBoxLayout(three_ds_box)
         self.three_ds_status = QLabel()
         self.three_ds_endpoint = QLabel()
@@ -56,20 +67,107 @@ class DeviceDashboardWindow(BaseMainWindow):
 
         manage_button = QPushButton("Manage 3DS FTP")
         manage_button.clicked.connect(self.open_3ds)
-        storage_button = QPushButton("Manage SD / Local Storage")
-        storage_button.clicked.connect(self.open_3ds_storage)
 
         three_ds_layout.addWidget(self.three_ds_status)
         three_ds_layout.addWidget(self.three_ds_endpoint)
         three_ds_layout.addWidget(manage_button)
-        three_ds_layout.addWidget(storage_button)
         three_ds_layout.addStretch()
         device_layout.addWidget(three_ds_box)
 
-        self.refresh_device_sections()
+        vita_box.setStyleSheet(
+            """
+            QGroupBox#devicesPanel {
+                border: 1px solid #3c67d6;
+                border-radius: 10px;
+                margin-top: 8px;
+                padding-top: 8px;
+            }
+            QGroupBox#devicesPanel::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 6px;
+                color: #3c67d6;
+                font-weight: 700;
+            }
+            QLabel#vitaHeading {
+                color: #3157b7;
+                font-size: 16px;
+                font-weight: 700;
+                padding: 3px 2px 8px 2px;
+            }
+            QGroupBox#threeDsCard {
+                border: 1px solid #d93636;
+                border-radius: 10px;
+                margin-top: 10px;
+                padding-top: 8px;
+            }
+            QGroupBox#threeDsCard::title {
+                subcontrol-origin: margin;
+                left: 12px;
+                padding: 0 6px;
+                color: #c72d2d;
+                font-weight: 700;
+            }
+            QGroupBox#threeDsCard QPushButton {
+                min-height: 30px;
+            }
+            """
+        )
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         splitter.setSizes([850, 400])
+        self.refresh_device_sections()
+
+    def _build_status_bar(self) -> None:
+        status_bar = QStatusBar(self)
+        status_bar.setSizeGripEnabled(False)
+        self.setStatusBar(status_bar)
+
+        self.vita_status_widget = self._make_status_widget("vita.svg", "Vita", "Not detected")
+        self.three_ds_status_widget = self._make_status_widget("3ds.svg", "3DS", "Not configured")
+        status_bar.addPermanentWidget(self.vita_status_widget)
+        status_bar.addPermanentWidget(self.three_ds_status_widget)
+        self.refresh_status_bar()
+
+    def _make_status_widget(self, icon_name: str, label: str, text: str) -> QLabel:
+        path = ASSET_DIR / icon_name
+        widget = QLabel(f"  {label}: {text}")
+        widget.setToolTip(f"{label} device status")
+        if path.is_file():
+            widget.setPixmap(QIcon(str(path)).pixmap(20, 20))
+            widget.setText(f"  {label}: {text}")
+        widget.setMinimumWidth(185)
+        widget.setStyleSheet("padding: 0 6px; font-weight: 600;")
+        return widget
+
+    def refresh_status_bar(self) -> None:
+        mounts = find_vita_mounts()
+        if mounts:
+            try:
+                free = free_space(mounts[0])
+                vita_text = f"Connected • {self._human_size(free)} free"
+            except OSError:
+                vita_text = "Connected"
+        else:
+            vita_text = "Not detected"
+
+        config = load_config()
+        saved = config.get("devices", {}).get("3ds", {})
+        host = str(saved.get("host", "")).strip()
+        port = saved.get("port", 5000)
+        three_ds_text = f"FTP {host}:{port}" if host else "Not configured"
+
+        self.vita_status_widget.setText(f"  Vita: {vita_text}")
+        self.three_ds_status_widget.setText(f"  3DS: {three_ds_text}")
+
+    @staticmethod
+    def _human_size(value: int) -> str:
+        n = float(value)
+        for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+            if n < 1024 or unit == "TiB":
+                return f"{n:.1f} {unit}"
+            n /= 1024
+        return f"{value} B"
 
     def refresh_device_sections(self) -> None:
         config = load_config()
@@ -80,6 +178,7 @@ class DeviceDashboardWindow(BaseMainWindow):
         self.three_ds_endpoint.setText(
             f"FTP endpoint: {host}:{port}" if host else "FTP endpoint: not configured"
         )
+        self.refresh_status_bar()
 
     def open_3ds(self) -> None:
         if self._three_ds_dialog is None:
@@ -93,39 +192,13 @@ class DeviceDashboardWindow(BaseMainWindow):
         self._three_ds_dialog = None
         self.refresh_device_sections()
 
-    def open_vita_storage(self) -> None:
-        if self._vita_storage_dialog is None:
-            self._vita_storage_dialog = MountedStorageDialog(
-                self.config, "vita", "PlayStation Vita", self
-            )
-            self._vita_storage_dialog.finished.connect(self._vita_storage_closed)
-        self._vita_storage_dialog.show()
-        self._vita_storage_dialog.raise_()
-        self._vita_storage_dialog.activateWindow()
-
-    def _vita_storage_closed(self, _result: int) -> None:
-        self._vita_storage_dialog = None
-
-    def open_3ds_storage(self) -> None:
-        if self._three_ds_storage_dialog is None:
-            self._three_ds_storage_dialog = MountedStorageDialog(
-                self.config, "3ds", "Nintendo 3DS", self
-            )
-            self._three_ds_storage_dialog.finished.connect(self._three_ds_storage_closed)
-        self._three_ds_storage_dialog.show()
-        self._three_ds_storage_dialog.raise_()
-        self._three_ds_storage_dialog.activateWindow()
-
-    def _three_ds_storage_closed(self, _result: int) -> None:
-        self._three_ds_storage_dialog = None
-
 
 def main() -> None:
     from PySide6.QtWidgets import QApplication, QDialog
 
     app = QApplication.instance() or QApplication([])
     app.setApplicationName("RommHeld")
-    app.setApplicationVersion("0.10")
+    app.setApplicationVersion("0.9")
     config = load_config()
     if not config.get("setup_complete"):
         from .ui import SetupWizard
