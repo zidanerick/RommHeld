@@ -79,6 +79,10 @@ The 3DS should support multiple target profiles rather than treating every file 
 - [x] Device-specific iconography.
 - [x] Console-inspired but original device card styling.
 - [x] Non-modal 3DS management so Vita controls remain available.
+- [x] Handheld selection launch screen.
+- [x] Library source selection shell.
+- [x] Active handheld workspace context.
+- [ ] Replace legacy management layout with a fully console-themed management shell.
 - [ ] Device selection for transfer destinations.
 - [ ] Storage/target profile selector.
 - [ ] Polish responsive layout and accessibility across larger/smaller desktop sizes.
@@ -132,3 +136,7 @@ The current capability matrix is maintained in `docs/3DS_CAPABILITY_MATRIX.md`. 
 ## Runtime preference rule
 
 Runtime preference expresses what the user values most. It must never force an unavailable or incompatible runtime. Platform routing should intersect the user's preference with the target's detected capabilities and present the resulting recommendation transparently.
+
+## UI redesign rule
+
+The launch selector establishes the active handheld context and library provider. The selected management workspace may still expose cross-device status and global tools, but device-specific controls, target profiles, transports, and runtime preferences should remain compartmentalized behind their device profile.
