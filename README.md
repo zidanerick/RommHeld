@@ -1,66 +1,120 @@
-# RomM Vita Manager
+# RommHeld
 
-A Linux desktop utility for managing game transfers from a local RomM library to a USB-mounted modded PlayStation Vita.
+A Linux desktop application for managing a local RomM library across supported handheld devices.
+
+RommHeld handles the common library and transfer workflow while keeping device-specific transport and filesystem behaviour behind separate backends.
 
 ## Current status
 
-Early development. The current prototype provides:
+Early development. The current implementation is focused on the PlayStation Vita and includes:
 
-- first-run setup wizard
-- configurable main RomM ROM directory
-- persistent per-user platform mappings
-- automatic Vita mount detection
-- platform filtering and search
+- first-run RomM library setup
+- automatic discovery of top-level RomM platform directories
+- persistent platform mappings
+- VitaShell USB mount detection without hard-coded mount UUIDs
+- platform filtering and game search
 - installed-state detection
-- automatic RetroFlow and Adrenaline destinations
-- multi-selection for bulk transfers
-- resumable batch behaviour by skipping same-size files
-- transfer progress and cancellation
-- post-copy file-size verification
-- list and tile browsing modes
-- Vita free-space display and pre-transfer capacity checks
+- list and tile views
+- bulk selection
+- cancellable transfers
+- resume-friendly same-size file skipping
+- post-transfer size verification
+- Vita free-space checks
+- Vita Setup information
+- a generic **Send File** workflow for arbitrary files
 
-The codebase is beginning a modular refactor so the application can grow without keeping all logic in one file. New reusable code lives under `romm_vita_manager/` while the existing entry point remains usable during the transition.
+Nintendo 3DS support is planned as an FTP-backed device using the same reusable library and transfer architecture.
 
-## First-run setup
+## RomM library
 
-The application does not assume the developer's local filesystem layout.
-
-On first launch it asks for the main RomM ROM directory. It then discovers the top-level platform directories and presents a mapping table where each RomM platform can be mapped to a RetroFlow destination or disabled.
-
-The configuration is stored locally at:
-
-```text
-~/.config/romm-vita-manager/config.json
-```
-
-This file is deliberately outside the Git repository so personal paths and settings are not published.
-
-## Default paths
-
-The initial suggested RomM path is:
+RommHeld expects the local RomM ROM library to be organised by top-level RomM platform IDs, for example:
 
 ```text
 ~/RomM/roms/roms/
+├── gba/
+├── gbc/
+├── n64/
+├── nes/
+└── psx/
 ```
 
-RetroFlow ROMs on the Vita:
+Platform detection is based on the top-level directory. The application does not guess a platform from a ROM filename.
+
+## PlayStation Vita
+
+The current device backend uses a VitaShell USB-mounted filesystem.
+
+Typical RetroFlow ROM storage is below:
 
 ```text
 ux0:/data/RetroFlow/ROMS/
 ```
 
-PSP ISOs through Adrenaline:
+PSP ISO storage through Adrenaline:
 
 ```text
 ux0:/pspemu/ISO/
 ```
 
-PSP and PS1 EBOOT.PBP games through Adrenaline:
+PS1 EBOOT storage through Adrenaline:
 
 ```text
 ux0:/pspemu/PSP/GAME/<Game>/EBOOT.PBP
 ```
+
+Actual mount paths are detected dynamically and are never hard-coded.
+
+## Send File
+
+**Send File** is deliberately file-type agnostic. It can transfer an arbitrary local file to an explicit destination on a connected device.
+
+The workflow does not infer a destination from the extension and does not automatically extract archives or install packages.
+
+For Vita transfers it provides:
+
+- explicit `ux0:/...` destination selection
+- same-size skip
+- explicit overwrite confirmation for different-size files
+- cancellable transfer
+- post-transfer size verification
+- protection against escaping the Vita `ux0` filesystem
+
+See `docs/SEND_FILE.md` for details.
+
+## Software and emulator setup
+
+RommHeld is not intended to become a package mirror for every emulator and homebrew project. Setup information should link to authoritative upstream projects/releases and explain requirements where useful.
+
+Users can then download the appropriate release from the upstream project and use **Send File** to place the artifact on the device.
+
+RetroAchievements is treated separately from frontend and transport support. Emulator routing should prefer the appropriate achievement-compatible route rather than assuming that a frontend or emulator automatically supports achievements.
+
+## Device architecture
+
+The application is structured around reusable device backends:
+
+```text
+RommHeld
+├── RomM library
+├── shared transfer planning
+├── platform mappings
+├── device backends
+│   ├── PlayStation Vita
+│   └── Nintendo 3DS (planned)
+└── emulator/frontend metadata
+```
+
+See `docs/DEVICE_BACKENDS.md` for the architecture and `docs/3DS_AGENT_SCOPE.md` for the planned Nintendo 3DS implementation.
+
+## Configuration
+
+Local configuration is stored outside the repository at:
+
+```text
+~/.config/romm-vita-manager/config.json
+```
+
+The configuration contains user-specific paths and settings and should not be committed.
 
 ## Requirements
 
@@ -82,50 +136,24 @@ or:
 python romm_vita_manager.py
 ```
 
-## Vita connection
-
-Put the Vita into USB mode using VitaShell, connect it to Linux, and press **Refresh** in the application.
-
-The manager detects the mounted filesystem rather than relying on a fixed mount point or storage UUID.
-
-## Transfer behaviour
-
-The manager skips destination files when they already exist with the expected size. This makes interrupted bulk transfers safe to resume.
-
-New copies are verified by comparing the resulting file size with the source. A full checksum is not calculated by default because that would require another complete read of every transferred file.
-
-Before a transfer begins, the manager checks the mounted Vita's free space and blocks the operation when the selected files cannot fit.
-
-## Project structure
-
-The project is being migrated toward a small set of focused modules:
-
-- `romm_vita_manager/config.py` for local configuration
-- `romm_vita_manager/models.py` for shared data structures
-- `romm_vita_manager/mappings.py` for platform and RetroFlow mapping definitions
-- `romm_vita_manager/romm.py` for RomM library discovery
-- `romm_vita_manager/vita.py` for Vita filesystem discovery and storage information
-- `romm_vita_manager/transfers.py` for reusable cancellable copy operations
-- `romm_vita_manager/emulators.py` for emulator/component definitions and detection
-
-The legacy `romm_vita_manager.py` entry point remains the runnable application while this migration is completed.
-
-## Safety
-
-Unknown or disabled platform mappings are not copied automatically. Native Vita VPK files are staged separately rather than being silently written into `ux0:/app`.
-
-The repository is intended to remain free of personal paths, credentials, ROM files, Vita dumps, and other machine-specific data.
+The internal Python package namespace remains `romm_vita_manager` for now to avoid an unnecessary namespace migration while the device architecture is stabilised.
 
 ## Roadmap
 
-Planned areas include:
-
 - complete the modular UI refactor
-- automatic RetroFlow directory discovery
-- artwork and richer tile browsing
-- a detailed transfer queue
+- finish generic device-aware transfer UI
+- Nintendo 3DS FTP backend
+- 3DS filesystem discovery and platform mappings
+- upstream software/project links in Setup
+- artwork and richer browsing
+- proper transfer queue
 - smarter duplicate/hash handling
-- Vita free-space and transfer planning tools
-- emulator/component setup assistance
-- RetroAchievements-aware emulator/core recommendations
-- improved native Vita VPK installation workflow
+- emulator and native execution routing
+- RetroAchievements-aware route selection
+- broader handheld/device support
+
+## Safety
+
+RommHeld should remain free of personal paths, credentials, ROM files, Vita/3DS dumps, and machine-specific configuration.
+
+Unknown or unsupported platform mappings must remain explicitly unsupported rather than being guessed.
