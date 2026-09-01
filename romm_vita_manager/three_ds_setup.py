@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
+import tempfile
 import webbrowser
 
 from PySide6.QtCore import Qt
@@ -22,8 +23,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from .config import load_config
 from .storage_validation import validate_storage
+from .platform_services import temp_dir
 
 
 @dataclass(frozen=True)
@@ -90,10 +91,17 @@ def qr_image(url: str, size: int = 320) -> QPixmap:
         raise RuntimeError("Python package 'qrcode' is required for QR display.") from exc
 
     image = qrcode.make(url)
-    path = Path(__file__).resolve().parent.parent / ".rommheld_qr_tmp.png"
-    image.save(path)
-    pixmap = QPixmap(str(path))
-    path.unlink(missing_ok=True)
+    temp_root = temp_dir()
+    temp_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        suffix=".png", prefix="rommheld-qr-", dir=temp_root, delete=False
+    ) as handle:
+        path = Path(handle.name)
+    try:
+        image.save(path)
+        pixmap = QPixmap(str(path))
+    finally:
+        path.unlink(missing_ok=True)
     return pixmap.scaled(
         size,
         size,
