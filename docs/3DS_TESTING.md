@@ -23,7 +23,6 @@ cd ~/romm-vita-manager
 git fetch origin
 git checkout feature/3ds-ftp
 git pull
-chmod +x run.sh
 ./run.sh
 ```
 
