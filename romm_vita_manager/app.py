@@ -95,6 +95,7 @@ class SendFileDialog(QDialog):
         self.send_button.clicked.connect(self.start_transfer)
         self.cancel_button.clicked.connect(self.cancel_transfer)
         self.worker: SendFileWorker | None = None
+        self.overwrite = False
 
     def choose_source(self):
         path, _ = QFileDialog.getOpenFileName(self, "Choose file")
@@ -129,19 +130,23 @@ class SendFileDialog(QDialog):
                     f"but the Vita reports {_human_size(available)} free."
                 )
 
-            self.send_button.setEnabled(False)
-            self.cancel_button.setEnabled(True)
-            self.status.setText(f"Transferring {_human_size(required)}…")
-            self.progress.setValue(0)
-            self.worker = SendFileWorker(source, destination)
-            self.worker.progress.connect(
-                lambda done: self.progress.setValue(int(done * 100 / required) if required else 100)
-            )
-            self.worker.completed.connect(self.transfer_finished)
-            self.worker.failed.connect(self.transfer_failed)
-            self.worker.start()
+            self._run_transfer(source, destination)
         except Exception as exc:
             QMessageBox.warning(self, "Unable to send file", str(exc))
+
+    def _run_transfer(self, source: Path, destination: Path):
+        self.send_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.status.setText(f"Transferring {_human_size(source.stat().st_size)}…")
+        self.progress.setValue(0)
+        self.worker = SendFileWorker(source, destination, overwrite=self.overwrite)
+        total = source.stat().st_size
+        self.worker.progress.connect(
+            lambda done: self.progress.setValue(int(done * 100 / total) if total else 100)
+        )
+        self.worker.completed.connect(self.transfer_finished)
+        self.worker.failed.connect(self.transfer_failed)
+        self.worker.start()
 
     def cancel_transfer(self):
         if self.worker:
@@ -150,6 +155,19 @@ class SendFileDialog(QDialog):
 
     def transfer_finished(self, result: str):
         self.cancel_button.setEnabled(False)
+        if result == "different":
+            self.send_button.setEnabled(True)
+            answer = QMessageBox.question(
+                self,
+                "File already exists",
+                "The destination contains a different-size file. Overwrite it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                self.overwrite = True
+                self.start_transfer()
+            return
         if result == "copied":
             self.status.setText("Transfer completed and size verified.")
         elif result == "skipped":
@@ -170,10 +188,11 @@ class SendFileWorker(QThread):
     completed = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, source: Path, destination: Path):
+    def __init__(self, source: Path, destination: Path, overwrite: bool = False):
         super().__init__()
         self.source = source
         self.destination = destination
+        self.overwrite = overwrite
         self.cancel_event = threading.Event()
 
     def cancel(self):
@@ -186,6 +205,7 @@ class SendFileWorker(QThread):
                 self.destination,
                 self.cancel_event,
                 progress=self.progress.emit,
+                overwrite=self.overwrite,
             )
             self.completed.emit(result)
         except Exception as exc:
