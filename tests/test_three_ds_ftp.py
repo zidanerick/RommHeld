@@ -102,9 +102,9 @@ def reset_fake():
     FakeFTP.dirs = {"/"}
 
 
-def make_backend() -> ThreeDSFtpBackend:
+def make_backend(remote_root: str = "/") -> ThreeDSFtpBackend:
     backend = ThreeDSFtpBackend(
-        ThreeDSFtpSettings(host="192.0.2.10"),
+        ThreeDSFtpSettings(host="192.0.2.10", remote_root=remote_root),
         ftp_factory=FakeFTP,
     )
     backend.connect()
@@ -123,6 +123,20 @@ def test_join_remote_path_stays_inside_root():
         join_remote_path("/roms", "/outside.nds")
     with pytest.raises(ValueError):
         join_remote_path("/roms", "../outside.nds")
+
+
+def test_backend_enforces_configured_root(tmp_path: Path):
+    source = tmp_path / "test.bin"
+    source.write_bytes(b"data")
+    FakeFTP.dirs.add("/roms")
+    backend = make_backend("/roms")
+
+    result, _ = backend.upload(source, "game.bin")
+    assert result == "copied"
+    assert FakeFTP.files["/roms/game.bin"] == b"data"
+
+    with pytest.raises(ValueError):
+        backend.upload(source, "/outside/game.bin")
 
 
 def test_backend_connects_with_configured_endpoint():
