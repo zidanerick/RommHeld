@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from .config import load_config, save_config
 from .file_transfer import transfer_file
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings, join_remote_path
+from .three_ds_setup import ThreeDSSetupDialog
 from .ui import MainWindow as BaseMainWindow, SetupWizard
 from .vita import free_space
 
@@ -471,9 +472,9 @@ class MainWindow(BaseMainWindow):
     def __init__(self, config: dict):
         super().__init__(config)
         self.send_file_button = QPushButton("Send File")
-        self.three_ds_button = QPushButton("3DS FTP")
+        self.three_ds_button = QPushButton("3DS Setup")
         self.send_file_button.clicked.connect(self.open_send_file)
-        self.three_ds_button.clicked.connect(self.open_3ds)
+        self.three_ds_button.clicked.connect(self.open_3ds_setup)
         top = self.centralWidget().layout().itemAt(0).layout()
         top.insertWidget(top.count() - 2, self.send_file_button)
         top.insertWidget(top.count() - 2, self.three_ds_button)
@@ -484,14 +485,20 @@ class MainWindow(BaseMainWindow):
             return
         SendFileDialog(self.vita, self).exec()
 
-    def open_3ds(self):
+    def open_3ds_setup(self):
+        dialog = ThreeDSSetupDialog(self.config, self)
+        result = dialog.exec()
+        if result == 2:
+            self.open_3ds_ftp()
+
+    def open_3ds_ftp(self):
         ThreeDSFtpDialog(self.config, self).exec()
 
 
 def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("RommHeld")
-    app.setApplicationVersion("0.8")
+    app.setApplicationVersion("0.9")
     config = load_config()
     if not config.get("setup_complete"):
         wizard = SetupWizard(config)
