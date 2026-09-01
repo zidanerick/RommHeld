@@ -90,7 +90,14 @@ class ConsoleTile(QPushButton):
         if assets:
             path = assets.path("device_large")
             if path.is_file():
-                art.setPixmap(QPixmap(str(path)).scaled(118, 118, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                art.setPixmap(
+                    QPixmap(str(path)).scaled(
+                        118,
+                        118,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
         layout.addWidget(art, 1)
 
         logo = QLabel()
@@ -98,7 +105,14 @@ class ConsoleTile(QPushButton):
         if assets:
             path = assets.path("logo_dark" if profile.key != "vita" else "logo")
             if path.is_file():
-                logo.setPixmap(QPixmap(str(path)).scaled(210, 52, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                logo.setPixmap(
+                    QPixmap(str(path)).scaled(
+                        210,
+                        52,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
         if not logo.pixmap() if hasattr(logo, "pixmap") else False:
             logo.setText(profile.name)
         layout.addWidget(logo)
@@ -203,7 +217,6 @@ class PlatformSelectorDialog(QDialog):
         self.source_status.setWordWrap(True)
         source_layout.addWidget(self.source_status)
         self.local_radio.toggled.connect(self.update_source_visibility)
-        self.update_source_visibility()
         root.addWidget(source_box)
 
         actions = QHBoxLayout()
@@ -218,6 +231,7 @@ class PlatformSelectorDialog(QDialog):
         root.addLayout(actions)
 
         self.select_console(self.selected_console if self.selected_console in self.tiles else "vita")
+        self.update_source_visibility()
         self.refresh_source_status()
 
     def select_console(self, key: str) -> None:
@@ -239,7 +253,7 @@ class PlatformSelectorDialog(QDialog):
     def update_source_visibility(self) -> None:
         local = self.local_radio.isChecked()
         testing = bool(self._romm_thread and self._romm_thread.isRunning())
-        self.local_edit.setEnabled(local)
+        self.local_edit.setEnabled(local and not testing)
         self.url_edit.setEnabled(not local and not testing)
         self.token_edit.setEnabled(not local and not testing)
         self.test_button.setEnabled(not local and not testing)
@@ -274,8 +288,6 @@ class PlatformSelectorDialog(QDialog):
         self.url_edit.setEnabled(False)
         self.token_edit.setEnabled(False)
         self.continue_button.setEnabled(False)
-        self.local_radio.setEnabled(False)
-        self.romm_radio.setEnabled(False)
         self._romm_thread = QThread(self)
         self._romm_worker = RomMConnectionWorker(url, token)
         self._romm_worker.moveToThread(self._romm_thread)
@@ -307,9 +319,11 @@ class PlatformSelectorDialog(QDialog):
         self._romm_worker = None
         self._romm_thread = None
         self.test_button.setText("Test again")
+        self.local_edit.setEnabled(self.local_radio.isChecked())
+        self.url_edit.setEnabled(not self.local_radio.isChecked())
+        self.token_edit.setEnabled(not self.local_radio.isChecked())
         self.test_button.setEnabled(not self.local_radio.isChecked())
-        self.local_radio.setEnabled(True)
-        self.romm_radio.setEnabled(True)
+        self.continue_button.setEnabled(True)
         self.update_source_visibility()
 
     def continue_selected(self) -> None:
