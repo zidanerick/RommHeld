@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, QSize, Qt, Signal, Slot
-from PySide6.QtGui import QFont, QPixmap
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -22,8 +22,8 @@ from PySide6.QtWidgets import (
 )
 
 from .config import load_config, save_config
+from .console_identity import ConsoleIdentity
 from .library_sources import LibrarySource, get_library_source, save_library_source
-from .platform_assets import get_platform_assets
 from .romm_api import RomMApiError, normalize_romm_url, test_connection
 
 
@@ -75,59 +75,24 @@ class ConsoleTile(QPushButton):
         self.profile = profile
         self.setCheckable(profile.state == "supported")
         self.setEnabled(profile.state == "supported")
-        self.setMinimumSize(QSize(250, 205))
+        self.setMinimumSize(QSize(250, 225))
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setCursor(Qt.CursorShape.PointingHandCursor if self.isEnabled() else Qt.CursorShape.ArrowCursor)
         self.setStyleSheet(self._style())
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(7)
+        layout.setSpacing(6)
 
-        self.art = QLabel()
-        self.art.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.art.setMinimumHeight(112)
-        self.art.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        assets = get_platform_assets(profile.key)
-        if assets:
-            path = assets.path("device_large")
-            if path.is_file():
-                self.art.setPixmap(QPixmap(str(path)).scaled(
-                    138, 112,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                ))
-        layout.addWidget(self.art, 1)
-
-        identity = QHBoxLayout()
-        identity.setSpacing(8)
-        identity.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        if assets:
-            logo_path = assets.path("logo" if profile.key == "vita" else "logo_simpleicons")
-            if logo_path.is_file():
-                logo = QLabel()
-                logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                size = 34 if profile.key != "vita" else 126
-                pixmap = QPixmap(str(logo_path)).scaled(
-                    size, 34,
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                logo.setPixmap(pixmap)
-                identity.addWidget(logo)
-
-        name = QLabel(profile.name.upper())
-        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name.setFont(QFont("Sans Serif", 12, QFont.Weight.Bold))
-        name.setStyleSheet("background:transparent;border:none;color:#f2f4f8;letter-spacing:0.5px;")
-        identity.addWidget(name)
-        layout.addLayout(identity)
+        identity = ConsoleIdentity(profile.key, profile.name, self)
+        layout.addWidget(identity, 1)
 
         sub = QLabel(profile.subtitle)
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub.setWordWrap(True)
-        sub.setStyleSheet("background:transparent;border:none;color:#9fa8b5;font-size:10px;")
+        sub.setStyleSheet(
+            "background:transparent;border:none;color:#9fa8b5;font-size:10px;padding-top:2px;"
+        )
         layout.addWidget(sub)
 
     def _style(self) -> str:
@@ -286,8 +251,8 @@ class PlatformSelectorDialog(QDialog):
     def update_source_visibility(self) -> None:
         local = self.local_radio.isChecked()
         testing = bool(self._romm_thread and self._romm_thread.isRunning())
-        self.local_edit.setEnabled(local)
-        self.local_browse.setEnabled(local)
+        self.local_edit.setEnabled(local and not testing)
+        self.local_browse.setEnabled(local and not testing)
         self.url_edit.setEnabled(not local and not testing)
         self.token_edit.setEnabled(not local and not testing)
         self.test_button.setEnabled(not local and not testing)
@@ -348,12 +313,16 @@ class PlatformSelectorDialog(QDialog):
     @Slot(str)
     def _romm_test_succeeded(self, message: str) -> None:
         self.source_status.setText(message)
-        self.test_button.setStyleSheet("background:#1f8f4d;color:white;border-radius:8px;padding:8px 14px;font-weight:700;")
+        self.test_button.setStyleSheet(
+            "background:#1f8f4d;color:white;border-radius:8px;padding:8px 14px;font-weight:700;"
+        )
 
     @Slot(str)
     def _romm_test_failed(self, message: str) -> None:
         self.source_status.setText(f"FAIL • {message}")
-        self.test_button.setStyleSheet("background:#b83232;color:white;border-radius:8px;padding:8px 14px;font-weight:700;")
+        self.test_button.setStyleSheet(
+            "background:#b83232;color:white;border-radius:8px;padding:8px 14px;font-weight:700;"
+        )
 
     @Slot()
     def _romm_test_finished(self) -> None:
