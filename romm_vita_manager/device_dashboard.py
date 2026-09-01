@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGroupBox, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGroupBox, QLabel, QPushButton, QVBoxLayout
 
 from .app import MainWindow as BaseMainWindow, ThreeDSFtpDialog
 from .config import load_config
-from .vita import find_vita_mounts, free_space
+from .vita import find_vita_mounts
 
 
 class DeviceDashboardWindow(BaseMainWindow):
@@ -58,22 +56,19 @@ class DeviceDashboardWindow(BaseMainWindow):
     def refresh_device_cards(self) -> None:
         if not hasattr(self, "three_ds_status"):
             return
-        mounts = find_vita_mounts()
-        if mounts:
-            try:
-                self.three_ds_status.setText("3DS: configuration available • Vita connected")
-            except Exception:
-                self.three_ds_status.setText("3DS: configuration available")
-        else:
-            self.three_ds_status.setText("3DS: ready to configure • Vita not connected")
 
         config = load_config()
         saved = config.get("devices", {}).get("3ds", {})
         host = str(saved.get("host", "")).strip()
         port = saved.get("port", 5000)
+        self.three_ds_status.setText("3DS: configured" if host else "3DS: not configured")
         self.three_ds_endpoint.setText(
-            f"FTP: {host}:{port}" if host else "FTP: not configured"
+            f"FTP endpoint: {host}:{port}" if host else "FTP endpoint: not configured"
         )
+
+        mounts = find_vita_mounts()
+        if not mounts:
+            return
 
     def open_3ds(self) -> None:
         if self._three_ds_dialog is None:
