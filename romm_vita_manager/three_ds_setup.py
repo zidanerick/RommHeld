@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
+import webbrowser
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
@@ -18,14 +19,11 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
-    QRadioButton,
     QVBoxLayout,
-    QWidget,
 )
 
 from .config import load_config
 from .storage_validation import validate_storage
-from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
 
 
 @dataclass(frozen=True)
@@ -96,7 +94,12 @@ def qr_image(url: str, size: int = 320) -> QPixmap:
     image.save(path)
     pixmap = QPixmap(str(path))
     path.unlink(missing_ok=True)
-    return pixmap.scaled(size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+    return pixmap.scaled(
+        size,
+        size,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
 
 
 class ThreeDSSetupDialog(QDialog):
@@ -137,37 +140,36 @@ class ThreeDSSetupDialog(QDialog):
         self.port_edit = QLineEdit(str(saved.get("port", 5000)))
         ftp_layout.addRow("Host:", self.host_edit)
         ftp_layout.addRow("Port:", self.port_edit)
-        ftp_buttons = QHBoxLayout()
         ftp_open = QPushButton("Open FTP Manager")
-        ftp_open.clicked.connect(self.accept)
-        ftp_buttons.addWidget(ftp_open)
-        ftp_open.setToolTip("Open the 3DS FTP manager")
-        ftp_layout.addRow("", ftp_buttons)
+        ftp_open.clicked.connect(lambda: self.done(2))
+        ftp_layout.addRow("", ftp_open)
 
         component_box = QGroupBox("Homebrew Components")
         component_layout = QVBoxLayout(component_box)
         self.component_list = QListWidget()
         component_layout.addWidget(self.component_list)
+        component_buttons = QHBoxLayout()
         refresh_components = QPushButton("Refresh Detection")
         refresh_components.clicked.connect(self.refresh_components)
-        component_layout.addWidget(refresh_components)
+        upstream_button = QPushButton("Open Upstream Release")
+        upstream_button.clicked.connect(self.open_upstream)
+        component_buttons.addWidget(refresh_components)
+        component_buttons.addWidget(upstream_button)
+        component_layout.addLayout(component_buttons)
 
         action_box = QGroupBox("Install / Stage")
         action_layout = QVBoxLayout(action_box)
         action_layout.addWidget(QLabel(
             "RommHeld does not silently install software. Choose an upstream release, "
-            "then stage the downloaded CIA/3DSX for manual FBI installation or create a QR "
+            "then stage the downloaded CIA/3DSX for manual installation or create a QR "
             "code for FBI Remote Install."
         ))
         url_row = QHBoxLayout()
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText("HTTPS URL to a CIA/3DSX/other supported package")
-        stage_button = QPushButton("Stage URL")
-        stage_button.clicked.connect(self.stage_url)
         qr_button = QPushButton("Show QR")
         qr_button.clicked.connect(self.show_qr)
         url_row.addWidget(self.url_edit, 1)
-        url_row.addWidget(stage_button)
         url_row.addWidget(qr_button)
         action_layout.addLayout(url_row)
 
@@ -211,17 +213,16 @@ class ThreeDSSetupDialog(QDialog):
             item.setData(Qt.ItemDataRole.UserRole, component.upstream_url)
             self.component_list.addItem(item)
 
-    def stage_url(self) -> None:
-        url = self.url_edit.text().strip()
-        if not is_web_url(url):
-            QMessageBox.warning(self, "Invalid URL", "Enter a complete HTTPS or HTTP URL.")
+    def open_upstream(self) -> None:
+        item = self.component_list.currentItem()
+        if item is None:
+            QMessageBox.information(self, "Select a component", "Select a component first.")
             return
-        QMessageBox.information(
-            self,
-            "Staging",
-            "The upstream package URL has been accepted as a staging source. "
-            "The actual download/staging action will be handled by the shared transfer/download service.",
-        )
+        url = str(item.data(Qt.ItemDataRole.UserRole) or "")
+        if not is_web_url(url):
+            QMessageBox.warning(self, "Invalid upstream URL", "The selected component has no valid upstream URL.")
+            return
+        webbrowser.open(url)
 
     def show_qr(self) -> None:
         url = self.url_edit.text().strip()
