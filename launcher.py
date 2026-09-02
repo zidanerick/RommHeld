@@ -2,14 +2,14 @@
 """RommHeld application launcher."""
 from __future__ import annotations
 
+from PySide6.QtWidgets import QApplication
+
 from romm_vita_manager.config import load_config
 from romm_vita_manager.console_selector import PlatformSelectorDialog
-from romm_vita_manager.device_dashboard import DeviceDashboardWindow
+from romm_vita_manager.workspace_dashboard import WorkspaceDashboardWindow
 
 
 def main() -> None:
-    from PySide6.QtWidgets import QApplication
-
     app = QApplication.instance() or QApplication([])
     app.setApplicationName("RommHeld")
     app.setApplicationVersion("1.0")
@@ -19,8 +19,7 @@ def main() -> None:
     if selector.exec() != selector.DialogCode.Accepted:
         return
 
-    config = load_config()
-    window = DeviceDashboardWindow(config)
+    window = WorkspaceDashboardWindow(load_config())
     window.show()
     app.exec()
 
