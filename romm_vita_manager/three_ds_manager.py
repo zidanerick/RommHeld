@@ -3,7 +3,6 @@ from __future__ import annotations
 import tempfile
 import threading
 from pathlib import Path
-from urllib import error, request
 
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QPixmap
@@ -25,7 +24,7 @@ from PySide6.QtWidgets import (
 from .config import save_config
 from .library_sources import get_library_source
 from .romm import scan_games
-from .romm_remote import RomMRemoteGame, download_rom
+from .romm_remote import RomMRemoteGame, download_artwork, download_rom
 from .romm_remote_worker import RomMLibraryWorker
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
 from .three_ds_targets import available_targets, default_destination
@@ -55,27 +54,17 @@ class RomMArtworkWorker(QThread):
     loaded = Signal(bytes)
     failed = Signal(str)
 
-    def __init__(self, url: str, token: str):
+    def __init__(self, url: str, token: str, instance_url: str = ""):
         super().__init__()
         self.url = url
         self.token = token
+        self.instance_url = instance_url
 
     def run(self) -> None:
         try:
-            headers = {
-                "User-Agent": "RommHeld",
-                "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*",
-            }
-            if self.token.strip():
-                headers["Authorization"] = f"Bearer {self.token.strip()}"
-            with request.urlopen(request.Request(self.url, headers=headers), timeout=10) as response:
-                data = response.read(8 * 1024 * 1024 + 1)
-            if len(data) > 8 * 1024 * 1024:
-                raise ValueError("Artwork is larger than the 8 MiB safety limit.")
+            data = download_artwork(self.instance_url, self.token, self.url)
             self.loaded.emit(data)
-        except error.HTTPError as exc:
-            self.failed.emit(f"Artwork request returned HTTP {exc.code}.")
-        except (error.URLError, TimeoutError, ValueError) as exc:
+        except Exception as exc:
             self.failed.emit(str(exc))
 
 
@@ -428,7 +417,11 @@ class ThreeDSManagerDialog(QDialog):
         self.artwork.setText("Loading artwork…" if game.cover_url else "No artwork in RomM")
         if not game.cover_url:
             return
-        self.artwork_worker = RomMArtworkWorker(game.cover_url, self.library_source.api_token)
+        self.artwork_worker = RomMArtworkWorker(
+            game.cover_url,
+            self.library_source.api_token,
+            self.library_source.romm_url,
+        )
         self.artwork_worker.loaded.connect(self._artwork_loaded)
         self.artwork_worker.failed.connect(self._artwork_failed)
         self.artwork_worker.finished.connect(self._artwork_finished)
