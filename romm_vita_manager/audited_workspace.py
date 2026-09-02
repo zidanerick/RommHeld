@@ -45,11 +45,22 @@ class WorkspaceDashboardWindow(BaseWorkspaceDashboardWindow):
         self.shell.add_section("Queue", self._build_queue_page())
         self.shell.add_section("Tools", self._build_tools_page())
         self.shell.add_section("Settings", self._build_settings_page())
+
+        # Selecting the first tab emits navigation_requested synchronously. For
+        # the 3DS workspace the library widget already begins its initial load in
+        # its constructor, so calling refresh_workspace here would immediately
+        # invalidate that worker and leave the visible generation stale.
         self.shell.select_section("Library")
-        self.refresh_workspace()
+        if self.workspace_key == "3ds":
+            self.refresh_device_page()
+            self.refresh_setup_page()
+        else:
+            self.refresh_workspace()
 
     def refresh_games(self) -> None:
         if self.workspace_key == "3ds" and self.three_ds_library is not None:
+            if self.three_ds_library.library_worker and self.three_ds_library.library_worker.isRunning():
+                return
             self.three_ds_library.config = self._reload_config()
             self.three_ds_library.refresh_library()
             return
@@ -72,6 +83,7 @@ class WorkspaceDashboardWindow(BaseWorkspaceDashboardWindow):
             vita_text = "Connected" if self._safe_vita_mounts() else "Not detected"
         saved = self.config.get("devices", {}).get("3ds", {})
         host = str(saved.get("host", "")).strip()
+        port = saved.get("port", 5000)
         three_ds_text = "FTP configured" if host else "Not configured"
         ds_root = str(self.config.get("ds_sd_root", "")).strip()
         ds_text = "SD selected" if ds_root else "Not configured"
