@@ -17,8 +17,10 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
+    QWidget,
 )
 
 from .config import load_config, save_config
@@ -40,8 +42,8 @@ CONSOLES = (
     ConsoleProfile("vita", "PlayStation Vita", "supported", "#3b9cf5", "USB / VitaShell • RetroFlow • Adrenaline"),
     ConsoleProfile("3ds", "Nintendo 3DS", "supported", "#d12228", "FTP / SD card • native 3DS runtimes"),
     ConsoleProfile("ds", "Nintendo DS", "supported", "#54b8ff", "TWiLight Menu++ • nds-bootstrap • flashcards"),
-    ConsoleProfile("psp", "PlayStation Portable", "coming", "#777b84", "Coming soon"),
-    ConsoleProfile("mobile", "Mobile", "coming", "#777b84", "Coming soon"),
+    ConsoleProfile("psp", "PlayStation Portable", "coming", "#8a8f98", "Coming soon"),
+    ConsoleProfile("mobile", "Mobile", "coming", "#8a8f98", "Coming soon"),
 )
 
 
@@ -75,14 +77,13 @@ class ConsoleTile(QPushButton):
         self.profile = profile
         self.setCheckable(profile.state == "supported")
         self.setEnabled(profile.state == "supported")
-        self.setMinimumSize(QSize(250, 225))
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setFixedSize(QSize(280, 230))
         self.setCursor(Qt.CursorShape.PointingHandCursor if self.isEnabled() else Qt.CursorShape.ArrowCursor)
         self.setStyleSheet(self._style())
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(6)
+        layout.setContentsMargins(18, 16, 18, 14)
+        layout.setSpacing(8)
 
         identity = ConsoleIdentity(profile.key, profile.name, self)
         layout.addWidget(identity, 1)
@@ -91,31 +92,86 @@ class ConsoleTile(QPushButton):
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub.setWordWrap(True)
         sub.setStyleSheet(
-            "background:transparent;border:none;color:#9fa8b5;font-size:10px;padding-top:2px;"
+            "background:transparent;border:none;color:#8f98a6;font-size:10px;padding:0;"
         )
         layout.addWidget(sub)
+
+        state = QLabel("SUPPORTED" if profile.state == "supported" else "COMING SOON")
+        state.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        state.setStyleSheet(
+            f"background:transparent;border:none;color:{profile.accent};font-size:9px;font-weight:800;letter-spacing:1px;"
+        )
+        layout.addWidget(state)
 
     def _style(self) -> str:
         if self.profile.state == "coming":
             return (
-                "QPushButton { background:#15181d; border:1px solid #30353d; "
-                "border-radius:14px; }"
-                "QPushButton:disabled { color:#6d727b; }"
+                "QPushButton { background:#12161c; border:1px solid #2b3139; "
+                "border-radius:16px; }"
+                "QPushButton:disabled { color:#707782; }"
             )
         accent = self.profile.accent
         return f"""
             QPushButton {{
                 background:#0f1319;
-                border:2px solid #292f38;
-                border-radius:14px;
+                border:1px solid #2b3139;
+                border-radius:16px;
             }}
-            QPushButton:hover {{ border-color:{accent}; background:#141922; }}
-            QPushButton:checked {{ border:3px solid {accent}; background:#171d26; }}
+            QPushButton:hover {{
+                border-color:{accent};
+                background:#141a22;
+            }}
+            QPushButton:checked {{
+                border:2px solid {accent};
+                background:#171d26;
+            }}
         """
 
 
+class ConsoleGrid(QWidget):
+    """Responsive, non-overlapping grid that wraps from three to one column."""
+
+    def __init__(self, tiles: list[ConsoleTile], parent=None):
+        super().__init__(parent)
+        self.tiles = tiles
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setHorizontalSpacing(14)
+        self.grid.setVerticalSpacing(14)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._columns = 0
+        self._relayout()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._relayout()
+
+    def _column_count(self) -> int:
+        width = max(280, self.width())
+        return max(1, min(3, (width + 14) // (280 + 14)))
+
+    def _relayout(self) -> None:
+        columns = int(self._column_count())
+        if columns == self._columns:
+            return
+        self._columns = columns
+
+        while self.grid.count():
+            item = self.grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(self)
+
+        for index, tile in enumerate(self.tiles):
+            self.grid.addWidget(tile, index // columns, index % columns)
+
+        rows = (len(self.tiles) + columns - 1) // columns
+        height = rows * 230 + max(0, rows - 1) * 14
+        self.setMinimumHeight(height)
+
+
 class PlatformSelectorDialog(QDialog):
-    """Game-menu style startup selector for handheld and library context."""
+    """Responsive startup selector for handheld and library context."""
 
     def __init__(self, config: dict, parent=None):
         super().__init__(parent)
@@ -128,7 +184,7 @@ class PlatformSelectorDialog(QDialog):
 
         self.setWindowTitle("RommHeld")
         self.resize(1120, 820)
-        self.setMinimumSize(980, 720)
+        self.setMinimumSize(760, 680)
         self.setStyleSheet("""
             QDialog { background:#080a0e; color:#edf1f6; }
             QGroupBox { border:1px solid #292e36; border-radius:12px; margin-top:10px; padding-top:10px; }
@@ -141,6 +197,7 @@ class PlatformSelectorDialog(QDialog):
             QPushButton#continue { background:#e8edf4; color:#11151b; border-radius:8px; padding:9px 18px; font-weight:800; }
             QPushButton#exit { background:#171b22; color:#c6ccd5; border:1px solid #333943; border-radius:8px; padding:8px 14px; }
             QLabel#muted { color:#8d96a4; }
+            QScrollArea { border:none; background:transparent; }
         """)
 
         root = QVBoxLayout(self)
@@ -158,19 +215,22 @@ class PlatformSelectorDialog(QDialog):
         eyebrow.setStyleSheet("color:#7e8794; font-size:10px; letter-spacing:4px;")
         root.addWidget(eyebrow)
 
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(14)
         group = QButtonGroup(self)
         group.setExclusive(True)
-        self.tiles: dict[str, ConsoleTile] = {}
-        for index, profile in enumerate(CONSOLES):
+        tiles: list[ConsoleTile] = []
+        for profile in CONSOLES:
             tile = ConsoleTile(profile)
-            self.tiles[profile.key] = tile
+            tiles.append(tile)
             group.addButton(tile)
             tile.clicked.connect(lambda _=False, key=profile.key: self.select_console(key))
-            grid.addWidget(tile, index // 3, index % 3)
-        root.addLayout(grid, 1)
+
+        self.console_grid = ConsoleGrid(tiles)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(self.console_grid)
+        root.addWidget(scroll, 1)
 
         source_box = QGroupBox("LIBRARY SOURCE")
         source_layout = QVBoxLayout(source_box)
@@ -228,7 +288,7 @@ class PlatformSelectorDialog(QDialog):
         actions.addWidget(self.continue_button)
         root.addLayout(actions)
 
-        self.select_console(self.selected_console if self.selected_console in self.tiles else "vita")
+        self.select_console(self.selected_console if self.selected_console in {p.key for p in CONSOLES} else "vita")
         self.update_source_visibility()
         self.refresh_source_status()
 
@@ -238,8 +298,8 @@ class PlatformSelectorDialog(QDialog):
             return
         self.selected_console = key
         self.selected_profile = profile
-        for tile_key, tile in self.tiles.items():
-            tile.setChecked(tile_key == key)
+        for tile in self.console_grid.tiles:
+            tile.setChecked(tile.profile.key == key)
 
     def choose_local_root(self) -> None:
         path = QFileDialog.getExistingDirectory(self, "Select local ROM directory", self.local_edit.text())
@@ -294,8 +354,6 @@ class PlatformSelectorDialog(QDialog):
         self.test_button.setEnabled(False)
         self.local_edit.setEnabled(False)
         self.local_browse.setEnabled(False)
-        self.local_radio.setEnabled(True)
-        self.romm_radio.setEnabled(True)
         self.continue_button.setEnabled(False)
 
         self._romm_thread = QThread(self)
@@ -313,16 +371,12 @@ class PlatformSelectorDialog(QDialog):
     @Slot(str)
     def _romm_test_succeeded(self, message: str) -> None:
         self.source_status.setText(message)
-        self.test_button.setStyleSheet(
-            "background:#1f8f4d;color:white;border-radius:8px;padding:8px 14px;font-weight:700;"
-        )
+        self.test_button.setStyleSheet("background:#1f8f4d;color:white;border-radius:8px;padding:8px 14px;font-weight:700;")
 
     @Slot(str)
     def _romm_test_failed(self, message: str) -> None:
         self.source_status.setText(f"FAIL • {message}")
-        self.test_button.setStyleSheet(
-            "background:#b83232;color:white;border-radius:8px;padding:8px 14px;font-weight:700;"
-        )
+        self.test_button.setStyleSheet("background:#b83232;color:white;border-radius:8px;padding:8px 14px;font-weight:700;")
 
     @Slot()
     def _romm_test_finished(self) -> None:
