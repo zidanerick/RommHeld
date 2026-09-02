@@ -6,6 +6,7 @@ from .models import Game
 
 EXTENSIONS = {
     ".vpk", ".iso", ".cso", ".pbp", ".cue", ".bin", ".chd", ".zip", ".7z", ".rar",
+    ".3ds", ".3dsx", ".cia",
     ".nes", ".fds", ".smc", ".sfc", ".gba", ".gb", ".gbc", ".md", ".gen", ".sms", ".gg",
     ".32x", ".pce", ".sg", ".a26", ".a52", ".a78", ".lnx", ".nds", ".n64", ".z64", ".v64",
     ".wbfs", ".rvz", ".gdi", ".cdi", ".tap", ".dsk", ".hdf", ".3do", ".uae",
