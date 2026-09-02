@@ -1,100 +1,174 @@
 # RommHeld
 
-A Linux desktop application for managing a local RomM library and transferring games and files to supported handhelds.
+RommHeld is a PySide6 desktop application for managing a local RomM game library and transferring games/files to supported handhelds.
 
-RommHeld is becoming device-aware rather than being tied to a single console. The first supported device is the modded PlayStation Vita, with Nintendo 3DS FTP support planned as the next device backend.
+The project is currently transitioning from a PlayStation Vita-focused application into a multi-device manager. The `main` branch remains the conservative Vita baseline while the active development branches contain the larger device, transfer, Nintendo 3DS, and UI work described below.
 
-## Current status
+## Project status
 
-Early development. The current working implementation focuses on PlayStation Vita support and provides:
+### Stable baseline on `main`
 
-- first-run setup wizard
-- configurable RomM ROM directory
-- automatic discovery of top-level RomM platform directories
+The current `main` branch provides a working Vita-oriented foundation:
+
+- first-run RomM library setup
+- discovery of top-level RomM platform directories
 - persistent platform mappings
-- automatic Vita mount detection
-- platform filtering and search
+- VitaShell USB mount detection
+- platform filtering and game search
 - installed-state detection
 - list and tile browsing
-- multi-selection for bulk transfers
+- bulk selection and transfers
 - transfer progress and cancellation
-- resume-friendly transfers by skipping same-size destination files
+- same-size skipping for resume-friendly transfers
 - post-transfer size verification
-- Vita free-space display and pre-transfer capacity checks
-- Vita Setup information for emulator/frontend components
+- Vita free-space checks
+- Vita Setup information
+- modular configuration, RomM scanning, mapping, Vita, transfer, and UI modules
 
-The application is being refactored toward reusable device backends so the same library and transfer concepts can work with different handhelds and transport methods.
+The internal Python package namespace is still `romm_vita_manager` for compatibility during the refactor.
 
-## Supported devices
+### Active development
 
-### PlayStation Vita
+The current feature stack extends the Vita baseline with:
 
-Current implementation uses a VitaShell USB-mounted filesystem on Linux.
+- a generic, file-type-agnostic **Send File** workflow
+- a reusable device/backend model
+- a Nintendo 3DS FTP backend with browsing, upload, cancellation, resume where supported, and size verification
+- a new handheld-selection and workspace UI
+- local-directory and RomM-server source selection
+- bundled handheld artwork and device-aware UI structure
+- research and target-profile documentation for Nintendo 3DS and Nintendo DS
 
-The manager detects the mounted filesystem dynamically. Mount UUIDs and usernames are not hard-coded.
+These changes are currently under review in the open pull requests rather than all being part of `main` yet.
 
-Current Vita destinations include RetroFlow and Adrenaline-specific handling where the platform mapping is known.
+## Devices
 
-### Nintendo 3DS
+| Device | Status | Transport / storage |
+| --- | --- | --- |
+| PlayStation Vita | Current supported baseline | USB / VitaShell mounted filesystem |
+| Nintendo 3DS | Active development | FTP backend |
+| Nintendo DS / compatible flashcards | UI and target research | Flashcard / SD workflows planned |
+| PlayStation Portable | Planned | Not implemented |
+| Mobile | Planned | Not implemented |
 
-Planned next. The 3DS backend will use FTP rather than requiring a custom networking application on the console.
+The UI work may show a device as selectable before its complete management backend is finished. A selectable workspace must not be interpreted as proof that every transfer or runtime workflow for that device is implemented.
 
-The intended architecture is:
+## RomM library
 
-```text
-RomM library
-    ↓
-RommHeld
-    ↓
-Nintendo 3DS FTP backend
-    ↓
-configured remote destination
-    ↓
-transfer + verification
-```
+RommHeld treats the first directory below the configured RomM ROM root as the RomM platform ID. Platform identity is determined from directory structure, not individual filenames.
 
-## Library layout
-
-RommHeld expects a local RomM library whose platform directories are identified by their top-level RomM platform IDs.
-
-A typical library looks like:
+Example:
 
 ```text
 ~/RomM/roms/roms/
-├── amiga/
-├── gb/
-├── gbc/
 ├── gba/
+├── gbc/
 ├── n64/
 ├── nes/
 ├── psx/
-├── psp/
 └── snes/
 ```
 
-Platform detection is based on the top-level directory. The application does not infer platform identity from individual filenames.
+## PlayStation Vita
+
+The Vita implementation uses the filesystem exposed by VitaShell USB mode. Mount discovery is dynamic and does not depend on a hard-coded username or storage UUID.
+
+Known Vita destinations include RetroFlow and Adrenaline layouts where the platform mapping is verified. Unknown mappings remain unsupported rather than being guessed.
+
+## Nintendo 3DS
+
+The active 3DS implementation is an FTP transport. It is deliberately separate from the Vita filesystem implementation and does not assume a universal ROM directory.
+
+The development backend supports:
+
+- configurable host, port, username, password, timeout, and passive mode
+- connection and filesystem browsing
+- configurable remote root
+- remote path traversal protection
+- same-size skipping
+- resumable uploads where supported by the FTP server
+- cancellation
+- best-effort free-space reporting
+- post-transfer size verification
+
+Real-device testing and verified platform mappings are still separate work from implementing the transport itself.
+
+## Send File
+
+RommHeld is moving toward a first-class **Send File** workflow shared by device backends.
+
+The intended behaviour is deliberately file-type agnostic:
+
+1. choose a local file
+2. choose the target device
+3. choose an explicit destination
+4. transfer with progress and cancellation
+5. skip an existing same-size file where safe
+6. require explicit confirmation before overwriting a different-size file
+7. verify the resulting file after transfer
+
+File extensions must not silently determine destinations. Known installation layouts may eventually be exposed as explicit, verified presets.
+
+## Software and emulator setup
+
+RommHeld is not intended to become a package mirror for every emulator and homebrew project. The preferred approach is to provide authoritative upstream project/release links and concise setup guidance, then let the user transfer downloaded artifacts with Send File.
+
+This avoids brittle download URLs and avoids assuming that every archive has the same installation layout.
+
+## RetroAchievements
+
+RetroAchievements is modelled as a capability of the actual runtime rather than of a frontend or transport.
+
+The long-term routing model distinguishes between native execution, ordinary emulation, RetroAchievements-compatible execution, experimental support, and Hardcore compatibility where verified. Runtime preferences should influence recommendations without silently replacing an available native path.
+
+## Architecture
+
+The application is being split into reusable layers:
+
+```text
+RomM / local library
+        │
+        ▼
+ library + game metadata
+        │
+        ▼
+ transfer planning / platform mapping
+        │
+        ▼
+ device backend
+    ┌───┴───────────────┐
+    │                   │
+   Vita                3DS
+ USB/VitaShell          FTP
+```
+
+Device-specific transport and filesystem behaviour should remain behind backend boundaries. Emulator/frontend logic should remain separate from transport logic.
+
+See:
+
+- `docs/ARCHITECTURE.md` for the current architecture rules
+- `docs/DEVICE_BACKENDS.md` for backend boundaries
+- `docs/3DS_AGENT_SCOPE.md` for the original 3DS implementation scope
 
 ## Configuration
 
-User-specific configuration is stored outside the repository:
+User configuration is stored outside the repository:
 
 ```text
 ~/.config/romm-vita-manager/config.json
 ```
 
-The current filename is retained for compatibility while the internal application name transitions to RommHeld.
+The application is expected to keep personal filesystem paths, credentials, ROM files, device dumps, mount UUIDs, and other machine-specific information out of Git.
 
-Personal paths, credentials, ROM files, Vita dumps, device UUIDs, and other machine-specific data must not be committed to Git.
+## Requirements
 
-## Run
-
-On Arch-based Linux distributions such as CachyOS:
+The current application uses Python and PySide6. On Arch-based Linux distributions such as CachyOS:
 
 ```fish
 sudo pacman -S --needed python pyside6
 ```
 
-Then:
+Run:
 
 ```fish
 ./run.sh
@@ -106,127 +180,29 @@ or:
 python romm_vita_manager.py
 ```
 
-The internal Python package namespace is still `romm_vita_manager` during the transition.
+The active UI development branch also contains a `requirements.txt` for Python dependencies used by that branch.
 
-## Transfer model
+## Development priorities
 
-Transfers are intended to be reusable across device backends.
+The immediate priority is not adding more device targets. It is consolidating the current work into a tested, coherent application:
 
-The general model is:
+1. establish one integration branch and merge the modular foundation
+2. consolidate the duplicate Send File work
+3. integrate and test the 3DS FTP backend against the common transfer model
+4. finish the device-aware UI without overstating backend support
+5. add verified 3DS filesystem signatures, target profiles, and platform mappings
+6. add a persistent transfer queue with retries and clear per-item state
+7. complete emulator/frontend detection and upstream software links
+8. implement explicit runtime and RetroAchievements-aware routing
+9. improve library metadata, artwork, duplicate detection, and optional hashing
+10. package and verify the application across supported desktop platforms
 
-```text
-source file
-    ↓
-device backend
-    ↓
-remote/local destination
-    ↓
-progress + cancellation
-    ↓
-verification
-```
+## Safety and design rules
 
-Existing destination files with the expected size can be skipped to make interrupted batches easier to resume.
-
-A full checksum is not calculated for ordinary transfers by default because it requires another complete read of the file. Size verification is used after copying.
-
-## Sending arbitrary files
-
-RommHeld is intended to support a generic **Send File** workflow in addition to ROM transfers.
-
-The user should be able to choose a local file, a supported handheld, and a destination path without the application needing to understand the file type.
-
-This is useful for homebrew and emulator files such as:
-
-```text
-.vpk
-.nds
-.gba
-.3ds
-.cia
-.zip
-.7z
-.suprx
-.cfg
-```
-
-RommHeld should not infer a destination merely from a file extension. Known installation layouts may be offered as explicit presets, while arbitrary files can always be sent to a user-selected destination.
-
-## Software and emulator setup
-
-RommHeld does not need to redistribute every emulator or homebrew package itself.
-
-The preferred model is to provide links to the authoritative upstream project or release page, explain what the software is for, and let the user download the appropriate artifact directly.
-
-The generic file-transfer workflow can then be used to copy that downloaded artifact to the handheld.
-
-This avoids hard-coding fragile download URLs and avoids assuming that every ZIP or archive has the same installation layout.
-
-## RetroAchievements
-
-RetroAchievements is treated as a capability rather than a property of the frontend alone.
-
-RetroFlow is a launcher/frontend. The actual emulator or core used for a game determines compatibility and achievement support.
-
-The long-term goal is to make emulator routing explicit so that RommHeld can distinguish between:
-
-- native execution
-- ordinary emulation
-- RetroAchievements-compatible execution
-- experimental achievement support
-- achievement-first emulator/core choices
-
-This is particularly important for systems where a native handheld execution path may offer better performance while an emulator provides mature RetroAchievements support.
-
-## Project structure
-
-The codebase is being migrated toward focused modules:
-
-- `romm_vita_manager/config.py` for local configuration
-- `romm_vita_manager/models.py` for shared data structures
-- `romm_vita_manager/mappings.py` for platform and destination mappings
-- `romm_vita_manager/romm.py` for RomM library discovery
-- `romm_vita_manager/vita.py` for Vita filesystem discovery and storage information
-- `romm_vita_manager/transfers.py` for reusable transfer operations
-- `romm_vita_manager/emulators.py` for emulator/frontend metadata and detection
-- `romm_vita_manager/devices.py` for the emerging device/backend abstraction
-
-The legacy `romm_vita_manager.py` entry point remains during the transition.
-
-## Development direction
-
-The project is deliberately moving toward a multi-device architecture:
-
-```text
-                    RomM
-                     │
-                  RommHeld
-                     │
-          ┌──────────┴──────────┐
-          │                     │
-     PlayStation Vita      Nintendo 3DS
-          │                     │
-     USB / VitaShell           FTP
-```
-
-Near-term work includes:
-
-- complete the modular refactor
-- add generic Send File support
-- generalize the transfer queue across device backends
-- improve automatic platform and destination discovery
-- add Nintendo 3DS FTP support
-- add 3DS frontend/homebrew detection
-- provide upstream software/project links from Setup
-- add emulator and capability-aware routing
-- improve duplicate detection and optional hashing
-- add artwork and richer browsing
-- make RetroAchievements-aware routing a first-class feature
-
-## Safety and scope
-
-RommHeld is a Linux desktop manager. It deliberately does not revive the abandoned Vita-native HTTP/SSL downloader approach from the unrelated historical `romm-vita` experiment.
-
-Unknown or unsupported platform mappings should remain explicitly unsupported rather than being guessed.
-
-The repository should remain free of personal filesystem paths, credentials, ROM files, Vita dumps, and other machine-specific data.
+- Unknown or unsupported platform mappings must remain explicitly unsupported.
+- Remote destinations must be explicit or backed by verified device-specific presets.
+- Destructive remote operations must require explicit user action.
+- FTP should be treated as a trusted local-network transport, not exposed directly to the Internet.
+- Transport code must not make emulator or frontend decisions.
+- Personal paths, credentials, ROMs, dumps, and device-specific state must not be committed.
+- Tests must not require physical handheld hardware unless they are explicitly documented as manual integration tests.
