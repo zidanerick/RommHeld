@@ -1,1 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="PlayStation Vita handheld illustration"><g transform="translate(64 48)"><rect width="384" height="400" rx="74" fill="#111820" stroke="#5b6878" stroke-width="12"/><rect x="42" y="42" width="300" height="180" rx="16" fill="#1d2b39" stroke="#8b98a8" stroke-width="7"/><rect x="55" y="55" width="274" height="154" rx="10" fill="#243545"/><circle cx="86" cy="270" r="24" fill="#0a0f14" stroke="#68788b" stroke-width="7"/><circle cx="298" cy="270" r="24" fill="#0a0f14" stroke="#68788b" stroke-width="7"/><path d="M118 312h62M149 281v62" stroke="#d7dee7" stroke-width="13" stroke-linecap="round"/><circle cx="252" cy="305" r="11" fill="#5bb0ff"/><circle cx="282" cy="335" r="11" fill="#5bb0ff"/><circle cx="312" cy="305" r="11" fill="#5bb0ff"/><circle cx="282" cy="275" r="11" fill="#5bb0ff"/><circle cx="188" cy="360" r="8" fill="#8e9aaa"/><circle cx="216" cy="360" r="8" fill="#8e9aaa"/></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 360" role="img" aria-label="PlayStation Vita handheld illustration">
+<defs><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#303840"/><stop offset="1" stop-color="#0a0d11"/></linearGradient><linearGradient id="s" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#243847"/><stop offset="1" stop-color="#101920"/></linearGradient></defs>
+<rect x="35" y="75" width="730" height="210" rx="78" fill="url(#b)" stroke="#697585" stroke-width="8"/>
+<rect x="182" y="100" width="436" height="114" rx="10" fill="#05070a" stroke="#8a95a2" stroke-width="5"/><rect x="193" y="111" width="414" height="92" rx="5" fill="url(#s)"/>
+<circle cx="121" cy="184" r="35" fill="#11161c" stroke="#748091" stroke-width="6"/><circle cx="121" cy="184" r="18" fill="#252d35"/>
+<circle cx="679" cy="184" r="35" fill="#11161c" stroke="#748091" stroke-width="6"/><circle cx="679" cy="184" r="18" fill="#252d35"/>
+<circle cx="91" cy="126" r="6" fill="#8d98a5"/><circle cx="709" cy="126" r="6" fill="#8d98a5"/>
+<path d="M101 244h54M128 217v54" stroke="#d6dce2" stroke-width="11" stroke-linecap="round"/>
+<circle cx="694" cy="247" r="9" fill="#59a9ff"/><circle cx="719" cy="272" r="9" fill="#59a9ff"/><circle cx="744" cy="247" r="9" fill="#59a9ff"/><circle cx="719" cy="222" r="9" fill="#59a9ff"/>
+<circle cx="383" cy="251" r="5" fill="#8993a0"/><circle cx="417" cy="251" r="5" fill="#8993a0"/>
+</svg>
