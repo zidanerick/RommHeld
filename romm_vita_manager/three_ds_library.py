@@ -54,7 +54,7 @@ class ThreeDSLibraryWidget(QWidget):
         self.target_combo.currentIndexChanged.connect(self._target_changed)
         self.destination = QLineEdit()
         self.destination.setReadOnly(True)
-        self.deploy_button = QPushButton("Open 3DS Deployment")
+        self.deploy_button = QPushButton("Deploy Selected Game")
         self.deploy_button.clicked.connect(self._open_manager)
 
         controls = QHBoxLayout()
@@ -134,8 +134,7 @@ class ThreeDSLibraryWidget(QWidget):
         platform = self.platforms.currentText()
         selected_row = self.game_list.currentRow()
         visible = [
-            game
-            for game in self.games
+            game for game in self.games
             if (not query or query in game.name.lower())
             and (platform == "All platforms" or game.platform == platform)
         ]
@@ -180,10 +179,9 @@ class ThreeDSLibraryWidget(QWidget):
         if game is None or self.target_combo.count() == 0:
             self.destination.clear()
             return
-        self.destination.setText(
-            default_destination(str(self.target_combo.currentData()), game.platform_slug, game.filename)
-        )
-        target = next((t for t in available_targets(game.platform_slug) if t.key == self.target_combo.currentData()), None)
+        target_key = str(self.target_combo.currentData())
+        self.destination.setText(default_destination(target_key, game.platform_slug, game.filename))
+        target = next((t for t in available_targets(game.platform_slug) if t.key == target_key), None)
         if target:
             self.details.setText(
                 f"{game.name}\n{game.platform} ({game.platform_slug}) • {game.size:,} bytes\n\n{target.description}"
@@ -222,4 +220,7 @@ class ThreeDSLibraryWidget(QWidget):
         self.deploy_button.setEnabled(False)
 
     def _open_manager(self) -> None:
-        self.open_manager_callback()
+        game = self._selected_game()
+        target_key = str(self.target_combo.currentData() or "")
+        if game is not None and target_key:
+            self.open_manager_callback(game, target_key)
