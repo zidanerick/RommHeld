@@ -1,4 +1,4 @@
-from romm_vita_manager.three_ds_manager import default_3ds_destination
+from romm_vita_manager.three_ds_paths import default_3ds_destination
 
 
 def test_default_3ds_destination_for_nds():
