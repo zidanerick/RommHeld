@@ -26,7 +26,9 @@ def normalize_remote_path(path: str) -> str:
     raw = path.strip().replace("\\", "/")
     if not raw:
         return "/"
-    parts = [part for part in PurePosixPath(raw).parts if part not in {".", ""}]
+    if raw == "/":
+        return "/"
+    parts = [part for part in PurePosixPath(raw).parts if part not in {".", "", "/"}]
     if any(part == ".." for part in parts):
         raise ValueError(f"Remote path traversal is not allowed: {path}")
     normalized = posixpath.normpath("/" + "/".join(parts))
@@ -155,8 +157,8 @@ class ThreeDSFtpBackend:
             response = ftp.sendcmd("SITE AVBL")
         except Exception:
             return None
-        match = re.search(r"(\d+)", response or "")
-        return int(match.group(1)) if match else None
+        values = re.findall(r"\d+", response or "")
+        return int(values[-1]) if values else None
 
     def ensure_directory(self, path: str) -> None:
         ftp = self._require_connection()
