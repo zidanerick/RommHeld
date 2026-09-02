@@ -10,13 +10,13 @@ from .platform_assets import get_platform_assets
 
 
 class ConsoleIdentity(QWidget):
-    """Render bundled, recognisable handheld artwork with no runtime network dependency."""
+    """Render bundled handheld artwork without forcing every console into one aspect ratio."""
 
     DISPLAY_SIZE = {
-        "vita": (186, 104),
-        "3ds": (168, 132),
-        "ds": (168, 132),
-        "psp": (186, 120),
+        "vita": (198, 96),
+        "3ds": (158, 154),
+        "ds": (158, 154),
+        "psp": (192, 118),
     }
 
     def __init__(self, console_key: str, name: str, parent: QWidget | None = None):
@@ -24,7 +24,7 @@ class ConsoleIdentity(QWidget):
         self.console_key = console_key
         self.name = name
         self.assets = get_platform_assets(console_key)
-        width, height = self.DISPLAY_SIZE.get(console_key, (168, 132))
+        width, height = self.DISPLAY_SIZE.get(console_key, (170, 132))
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
