@@ -62,14 +62,17 @@ def _items(payload) -> list:
 
 
 def resolve_cover_url(instance_url: str, cover: str | None) -> str | None:
-    """Resolve a RomM cover path using the same resource base as RomM's frontend."""
+    """Resolve a RomM cover path using RomM's frontend resource base."""
     if not cover:
         return None
     value = str(cover).strip()
     if value.startswith(("http://", "https://")):
         return value
     base = normalize_romm_url(instance_url)
-    return f"{base}/assets/romm/resources/{value.lstrip('/')}"
+    value = value.lstrip("/")
+    if value.startswith("assets/romm/resources/"):
+        return f"{base}/{value}"
+    return f"{base}/assets/romm/resources/{value}"
 
 
 def _platform_name(item: dict) -> str:
