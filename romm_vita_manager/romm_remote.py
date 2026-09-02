@@ -6,6 +6,7 @@ from pathlib import Path
 from urllib import error, request
 from urllib.parse import quote, urlencode
 
+from .mappings import platform_label
 from .romm_api import RomMApiError, normalize_romm_url
 from .three_ds_targets import RETROARCH_PLATFORM_SLUGS
 
@@ -21,10 +22,10 @@ class RomMRemoteGame:
     platform_slug: str = ""
 
 
-def _auth_headers(token: str) -> dict[str, str]:
+def _auth_headers(token: str, *, accept: str = "application/json") -> dict[str, str]:
     return {
         "Authorization": f"Bearer {token.strip()}",
-        "Accept": "application/json",
+        "Accept": accept,
         "User-Agent": "RommHeld",
     }
 
@@ -116,7 +117,29 @@ def _platform_name(item: dict) -> str:
     platform = item.get("platform")
     if isinstance(platform, dict) and platform.get("name"):
         return str(platform["name"])
-    return str(item.get("slug") or "Unknown platform")
+    slug = item.get("platform_slug") or item.get("slug")
+    return platform_label(str(slug)) if slug else "Unknown platform"
+
+
+def _platform_slug(item: dict, by_id: dict[int, str], by_name: dict[str, str]) -> str:
+    value = item.get("platform_slug")
+    if value:
+        return str(value).lower()
+    platform_id = item.get("platform_id")
+    if isinstance(platform_id, int) and platform_id in by_id:
+        return by_id[platform_id]
+    nested = item.get("platform")
+    if isinstance(nested, dict):
+        value = nested.get("slug")
+        if value:
+            return str(value).lower()
+        name = nested.get("name")
+        if name and str(name).lower() in by_name:
+            return by_name[str(name).lower()]
+    name = item.get("platform_name")
+    if name and str(name).lower() in by_name:
+        return by_name[str(name).lower()]
+    return ""
 
 
 def list_compatible_games(
@@ -134,14 +157,21 @@ def list_compatible_games(
         and isinstance(item.get("id"), int)
     ]
     if not wanted:
-        raise RomMApiError("RomM has no platforms currently recognised as compatible with the 3DS targets.")
+        raise RomMApiError(
+            "RomM has no platforms currently recognised as compatible with the 3DS targets."
+        )
 
     platform_ids = [item["id"] for item in wanted]
     names = {
         item["id"]: str(item.get("name") or item.get("slug") or "Unknown platform")
         for item in wanted
     }
-    slugs = {item["id"]: str(item.get("slug") or "").lower() for item in wanted}
+    slugs = {
+        item["id"]: str(item.get("slug") or "").lower()
+        for item in wanted
+    }
+    by_name = {name.lower(): slug for slug, name in [(slugs.get(i, ""), names[i]) for i in names] if slug}
+
     rows = _items(
         _json_request(
             instance_url,
@@ -160,22 +190,11 @@ def list_compatible_games(
     for item in rows:
         if not isinstance(item, dict) or not isinstance(item.get("id"), int):
             continue
-        platform_id = item.get("platform_id")
-        slug = slugs.get(platform_id, "")
-        platform = names.get(platform_id) or _platform_name(item)
-        if not slug:
-            nested = item.get("platform")
-            if isinstance(nested, dict):
-                slug = str(nested.get("slug") or "").lower()
-                platform = str(nested.get("name") or platform)
+        slug = _platform_slug(item, slugs, by_name)
         if slug not in RETROARCH_PLATFORM_SLUGS:
             continue
-        filename = str(
-            item.get("fs_name")
-            or item.get("file_name")
-            or item.get("name")
-            or ""
-        )
+        platform = names.get(item.get("platform_id"), _platform_name(item))
+        filename = str(item.get("fs_name") or item.get("file_name") or item.get("name") or "")
         name = str(item.get("name") or filename)
         size = int(item.get("size_bytes") or item.get("size") or 0)
         cover = item.get("cover_path") or item.get("cover_url")
@@ -199,9 +218,11 @@ def list_3ds_games(
     *,
     limit: int = 1000,
 ) -> list[RomMRemoteGame]:
-    """Backward-compatible alias for the old 3DS-only library loader."""
-    games = list_compatible_games(instance_url, token, limit=limit)
-    return [game for game in games if game.platform_slug == "3ds"]
+    return [
+        game
+        for game in list_compatible_games(instance_url, token, limit=limit)
+        if game.platform_slug == "3ds"
+    ]
 
 
 def download_rom(
