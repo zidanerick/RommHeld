@@ -112,7 +112,8 @@ def _list_games_for_platform_slugs(
     token: str,
     allowed_slugs: set[str] | frozenset[str],
     *,
-    limit: int = 1000,
+    limit: int = 200,
+    offset: int = 0,
     missing_message: str,
 ) -> list[RomMRemoteGame]:
     platforms = _items(_json_request(instance_url, token, "platforms"))
@@ -145,8 +146,8 @@ def _list_games_for_platform_slugs(
             "roms",
             {
                 "platform_ids": platform_ids,
-                "limit": limit,
-                "offset": 0,
+                "limit": max(1, min(limit, 500)),
+                "offset": max(0, offset),
                 "with_total": False,
                 "with_char_index": False,
                 "with_filter_values": False,
@@ -188,22 +189,24 @@ def _list_games_for_platform_slugs(
     return games
 
 
-def list_compatible_games(instance_url: str, token: str, *, limit: int = 1000) -> list[RomMRemoteGame]:
+def list_compatible_games(instance_url: str, token: str, *, limit: int = 200) -> list[RomMRemoteGame]:
     return _list_games_for_platform_slugs(
         instance_url,
         token,
         RETROARCH_PLATFORM_SLUGS,
         limit=limit,
+        offset=0,
         missing_message="RomM has no platforms currently recognised as compatible with the 3DS targets.",
     )
 
 
-def list_3ds_games(instance_url: str, token: str, *, limit: int = 1000) -> list[RomMRemoteGame]:
+def list_3ds_games(instance_url: str, token: str, *, limit: int = 200) -> list[RomMRemoteGame]:
     games = _list_games_for_platform_slugs(
         instance_url,
         token,
         {"3ds"},
         limit=limit,
+        offset=0,
         missing_message="RomM has no Nintendo 3DS platform (slug: 3ds).",
     )
     return [
