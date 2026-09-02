@@ -1,4 +1,4 @@
-from __future__ import annotations
+from __future__
 
 import ftplib
 import posixpath
@@ -218,6 +218,7 @@ class ThreeDSFtpBackend:
 
         offset = remote_existing if resume and remote_existing and remote_existing < source_size else 0
         blocksize = 256 * 1024
+        did_resume = bool(offset)
 
         with local_path.open("rb") as src:
             transferred = offset
@@ -251,6 +252,7 @@ class ThreeDSFtpBackend:
                     raise
                 src.seek(0)
                 transferred = 0
+                did_resume = False
                 if progress is not None:
                     progress(0)
                 try:
@@ -272,4 +274,4 @@ class ThreeDSFtpBackend:
             raise IOError(
                 f"FTP size verification failed for {remote}: expected {source_size} bytes, got {final_size}"
             )
-        return ("resumed" if offset else "copied"), source_size
+        return ("resumed" if did_resume else "copied"), source_size
