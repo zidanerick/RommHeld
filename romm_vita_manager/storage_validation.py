@@ -83,10 +83,12 @@ def validate_ds_flashcard(root: Path) -> StorageValidation:
         StorageCheck("ysmenu", "YSMenu launcher", _file(root, "YSMenu.nds"), "YSMenu.nds"),
         StorageCheck("ttmenu", "TTMenu directory", _directory(root, "TTMenu"), "TTMenu/"),
         StorageCheck("r4-data", "R4.dat", _file(root, "R4.dat"), "R4.dat"),
+        StorageCheck("r4-kernel", "R4 kernel directory", _directory(root, "__rpg"), "__rpg/"),
     )
     signatures = tuple(check.path for check in checks if check.found)
     capability = sum(check.found for check in checks[:5])
-    confidence = "high" if capability >= 4 else "medium" if capability >= 2 else "low" if capability == 1 else "unknown"
+    explicit_marker = any(check.found for check in checks[5:])
+    confidence = "high" if capability >= 4 else "medium" if capability >= 2 or explicit_marker else "low" if capability == 1 else "unknown"
     return StorageValidation("ds-flashcard", confidence, signatures, checks)
 
 
