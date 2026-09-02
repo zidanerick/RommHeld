@@ -10,7 +10,7 @@ from .platform_assets import get_platform_assets
 
 
 class ConsoleIdentity(QWidget):
-    """Render bundled handheld artwork with no runtime network dependency."""
+    """Render bundled, recognisable handheld artwork with no runtime network dependency."""
 
     def __init__(self, console_key: str, name: str, parent: QWidget | None = None):
         super().__init__(parent)
@@ -20,12 +20,12 @@ class ConsoleIdentity(QWidget):
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(8)
+        root.setSpacing(7)
         root.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.device = QLabel()
         self.device.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.device.setFixedSize(120, 120)
+        self.device.setFixedSize(160, 118)
         self.device.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.device.setStyleSheet("background:transparent;border:none;")
         root.addWidget(self.device, 0, Qt.AlignmentFlag.AlignCenter)
@@ -38,22 +38,22 @@ class ConsoleIdentity(QWidget):
         )
         root.addWidget(self.name_label, 0, Qt.AlignmentFlag.AlignCenter)
 
-        self._load_icon()
+        self._load_artwork()
 
-    def _load_icon(self) -> None:
+    def _load_artwork(self) -> None:
         if not self.assets:
             return
-        icon_path: Path = self.assets.path("device_large")
-        if not icon_path.is_file():
+        artwork_path: Path = self.assets.path("device_large")
+        if not artwork_path.is_file():
             return
 
-        pixmap = QPixmap(str(icon_path))
+        pixmap = QPixmap(str(artwork_path))
         if pixmap.isNull():
             return
         self.device.setPixmap(
             pixmap.scaled(
-                100,
-                100,
+                150,
+                110,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
