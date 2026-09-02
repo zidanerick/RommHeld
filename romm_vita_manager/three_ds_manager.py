@@ -24,12 +24,33 @@ from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings, join_remote_pat
 
 
 def default_3ds_destination(game_name: str, suffix: str) -> str:
-    """Return a conservative destination for formats with documented 3DS paths."""
-    if suffix.lower() == ".nds":
+    """Return conservative destinations for formats with documented 3DS paths."""
+    suffix = suffix.lower()
+    if suffix == ".nds":
         return join_remote_path("/", f"roms/nds/{game_name}")
-    if suffix.lower() == ".gba":
+    if suffix == ".gba":
         return join_remote_path("/", f"roms/gba/{game_name}")
     return game_name
+
+
+class ThreeDSConnectionWorker(QThread):
+    succeeded = Signal()
+    failed = Signal(str)
+
+    def __init__(self, settings: ThreeDSFtpSettings):
+        super().__init__()
+        self.settings = settings
+
+    def run(self) -> None:
+        backend = ThreeDSFtpBackend(self.settings)
+        try:
+            backend.connect()
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        else:
+            self.succeeded.emit()
+        finally:
+            backend.close()
 
 
 class ThreeDSTransferWorker(QThread):
@@ -73,6 +94,7 @@ class ThreeDSManagerDialog(QDialog):
         super().__init__(parent)
         self.config = config
         self.library_root = library_root.expanduser() if library_root else None
+        self.connection_worker: ThreeDSConnectionWorker | None = None
         self.worker: ThreeDSTransferWorker | None = None
         self._connected = False
 
@@ -84,8 +106,7 @@ class ThreeDSManagerDialog(QDialog):
         self.port_edit = QLineEdit(str(saved.get("port", 5000)))
         self.user_edit = QLineEdit(str(saved.get("username", "anonymous")))
         self.password_edit = QLineEdit(str(saved.get("password", "")))
-        from PySide6.QtWidgets import QLineEdit as _QLineEdit
-        self.password_edit.setEchoMode(_QLineEdit.EchoMode.Password)
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.root_edit = QLineEdit(str(saved.get("remote_root", "/")))
 
         self.connect_button = QPushButton("Connect")
@@ -177,19 +198,37 @@ class ThreeDSManagerDialog(QDialog):
         self.config = cfg
 
     def connect_3ds(self) -> None:
+        if self.connection_worker and self.connection_worker.isRunning():
+            return
+        if self.worker and self.worker.isRunning():
+            return
         try:
             settings = self.settings()
             self.save_settings()
-            backend = ThreeDSFtpBackend(settings)
-            backend.connect()
-            backend.close()
         except Exception as exc:
-            self._connected = False
-            self._update_controls()
-            QMessageBox.warning(self, "3DS FTP connection failed", str(exc))
+            QMessageBox.warning(self, "Invalid FTP settings", str(exc))
             return
+
+        self.status.setText("Connecting to 3DS FTP…")
+        self.connection_worker = ThreeDSConnectionWorker(settings)
+        self.connection_worker.succeeded.connect(self.connection_succeeded)
+        self.connection_worker.failed.connect(self.connection_failed)
+        self.connection_worker.finished.connect(self._connection_finished)
+        self._update_controls()
+        self.connection_worker.start()
+
+    def connection_succeeded(self) -> None:
         self._connected = True
-        self.status.setText("Connected to the 3DS FTP server. Transfers use verified destination sizes and safe duplicate handling.")
+        self.status.setText("Connected to the 3DS FTP server. Transfers verify destination sizes and protect different-size files.")
+        self._update_controls()
+
+    def connection_failed(self, message: str) -> None:
+        self._connected = False
+        self.status.setText(f"Connection failed: {message}")
+        self._update_controls()
+
+    def _connection_finished(self) -> None:
+        self.connection_worker = None
         self._update_controls()
 
     def refresh_library(self) -> None:
@@ -219,12 +258,15 @@ class ThreeDSManagerDialog(QDialog):
         self._update_controls()
 
     def _update_controls(self) -> None:
-        running = bool(self.worker and self.worker.isRunning())
+        running = bool(
+            (self.connection_worker and self.connection_worker.isRunning())
+            or (self.worker and self.worker.isRunning())
+        )
         selected = self.game_list.currentItem() is not None
         self.connect_button.setEnabled(not running)
         self.refresh_button.setEnabled(not running)
         self.send_button.setEnabled(self._connected and selected and not running)
-        self.cancel_button.setEnabled(running)
+        self.cancel_button.setEnabled(bool(self.worker and self.worker.isRunning()))
         for widget in (self.host_edit, self.port_edit, self.user_edit, self.password_edit, self.root_edit, self.destination_edit):
             widget.setEnabled(not running)
 
@@ -279,8 +321,6 @@ class ThreeDSManagerDialog(QDialog):
 
     def worker_failed(self, message: str) -> None:
         self.status.setText(f"Transfer failed: {message}")
-        QMessageBox.critical(self, "3DS transfer failed", message)
-        self._connected = False
 
     def _worker_finished(self) -> None:
         self.worker = None
@@ -293,6 +333,8 @@ class ThreeDSManagerDialog(QDialog):
             self.cancel_button.setEnabled(False)
 
     def closeEvent(self, event) -> None:
+        if self.connection_worker is not None and self.connection_worker.isRunning():
+            self.connection_worker.wait(1500)
         if self.worker is not None and self.worker.isRunning():
             self.worker.cancel()
             self.worker.wait(1500)
