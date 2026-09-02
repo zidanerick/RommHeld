@@ -151,19 +151,20 @@ class ThreeDSLibraryWidget(QWidget):
         self.search.clear()
         self.search.blockSignals(False)
         self._generation += 1
-        self._clear_results()
+        self._clear_results(clear_platforms=True)
         self._start_page(reset=True, prefer_cache=True)
 
-    def _clear_results(self) -> None:
+    def _clear_results(self, *, clear_platforms: bool = False) -> None:
         self._loading = False
         self._cache_displayed = False
         self.games = []
         self._offset = 0
         self.list_model.clear_games()
-        self.platforms.blockSignals(True)
-        self.platforms.clear()
-        self.platforms.addItem("All platforms", "")
-        self.platforms.blockSignals(False)
+        if clear_platforms:
+            self.platforms.blockSignals(True)
+            self.platforms.clear()
+            self.platforms.addItem("All platforms", "")
+            self.platforms.blockSignals(False)
         self._clear_details()
 
     def _schedule_filter(self) -> None:
@@ -174,7 +175,7 @@ class ThreeDSLibraryWidget(QWidget):
             self._filter_timer.start()
             return
         self._generation += 1
-        self._clear_results()
+        self._clear_results(clear_platforms=False)
         self._start_page(reset=True, prefer_cache=True)
 
     def _cached_query(self) -> tuple[str, str | None]:
