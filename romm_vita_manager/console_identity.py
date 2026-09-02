@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QStandardPaths, Qt, QUrl
 from PySide6.QtGui import QPixmap
-from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 
@@ -27,7 +27,7 @@ class ConsoleIdentity(QWidget):
         self.console_key = console_key
         self.name = name
         self._network = QNetworkAccessManager(self)
-        self._reply = None
+        self._reply: QNetworkReply | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -92,7 +92,7 @@ class ConsoleIdentity(QWidget):
         if reply is None:
             return
         try:
-            if reply.error() != reply.NetworkError.NoError:
+            if reply.error() != QNetworkReply.NetworkError.NoError:
                 return
             data = bytes(reply.readAll())
             pixmap = QPixmap()
