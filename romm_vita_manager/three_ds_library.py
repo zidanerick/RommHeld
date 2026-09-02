@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -21,7 +21,7 @@ from .three_ds_manager import RomMArtworkWorker
 
 
 class ThreeDSLibraryWidget(QWidget):
-    """Non-blocking RomM browser for content deployable to a 3DS."""
+    """Responsive, incremental RomM browser for content deployable to a 3DS."""
 
     def __init__(self, config: dict, open_manager_callback, parent=None):
         super().__init__(parent)
@@ -30,6 +30,11 @@ class ThreeDSLibraryWidget(QWidget):
         self.library_worker: RomMLibraryWorker | None = None
         self.artwork_worker: RomMArtworkWorker | None = None
         self.games: list[RomMRemoteGame] = []
+        self._loading = False
+        self._filter_timer = QTimer(self)
+        self._filter_timer.setSingleShot(True)
+        self._filter_timer.setInterval(120)
+        self._filter_timer.timeout.connect(self._apply_filter)
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search compatible games…")
@@ -37,7 +42,7 @@ class ThreeDSLibraryWidget(QWidget):
         self.platforms.addItem("All platforms")
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_library)
-        self.search.textChanged.connect(self._apply_filter)
+        self.search.textChanged.connect(self._schedule_filter)
         self.platforms.currentIndexChanged.connect(self._apply_filter)
 
         self.game_list = QListWidget()
@@ -85,6 +90,9 @@ class ThreeDSLibraryWidget(QWidget):
 
         self.refresh_library()
 
+    def _schedule_filter(self) -> None:
+        self._filter_timer.start()
+
     def refresh_library(self) -> None:
         if self.library_worker and self.library_worker.isRunning():
             return
@@ -101,50 +109,102 @@ class ThreeDSLibraryWidget(QWidget):
             self.status.setText("RomM Server is selected but the URL or Client API Token is missing.")
             return
 
+        self.games = []
+        self.game_list.clear()
+        self.platforms.blockSignals(True)
+        self.platforms.clear()
+        self.platforms.addItem("All platforms")
+        self.platforms.blockSignals(False)
+        self._loading = True
+        self.refresh_button.setEnabled(False)
         self.status.setText(f"Loading compatible RomM library from {url}…")
         self.library_worker = RomMLibraryWorker(url, token)
-        self.library_worker.loaded.connect(self._loaded)
+        self.library_worker.loaded.connect(self._loaded_batch)
         self.library_worker.failed.connect(self._failed)
         self.library_worker.finished.connect(self._finished)
         self.library_worker.start()
 
-    def _loaded(self, games) -> None:
-        self.games = list(games)
-        current = self.platforms.currentText()
-        self.platforms.blockSignals(True)
-        self.platforms.clear()
-        self.platforms.addItem("All platforms")
-        self.platforms.addItems(sorted({game.platform for game in self.games}, key=str.lower))
-        index = self.platforms.findText(current)
-        self.platforms.setCurrentIndex(index if index >= 0 else 0)
-        self.platforms.blockSignals(False)
-        self.status.setText(f"RomM library loaded: {len(self.games)} compatible files.")
-        self._apply_filter()
+    def _loaded_batch(self, batch) -> None:
+        batch = list(batch)
+        if not batch:
+            return
+        self.games.extend(batch)
+
+        existing_platforms = {
+            self.platforms.itemText(index)
+            for index in range(self.platforms.count())
+        }
+        new_platforms = sorted(
+            {game.platform for game in batch if game.platform not in existing_platforms},
+            key=str.lower,
+        )
+        if new_platforms:
+            current = self.platforms.currentText()
+            self.platforms.blockSignals(True)
+            self.platforms.addItems(new_platforms)
+            self.platforms.setCurrentText(current)
+            self.platforms.blockSignals(False)
+
+        query = self.search.text().strip()
+        platform = self.platforms.currentText()
+        if not query and platform == "All platforms":
+            self.game_list.setUpdatesEnabled(False)
+            for game in batch:
+                self._add_game_item(game)
+            self.game_list.setUpdatesEnabled(True)
+        else:
+            self._apply_filter()
+
+        self.status.setText(
+            f"Loading RomM library… {len(self.games):,} compatible files loaded."
+        )
+
+    def _add_game_item(self, game: RomMRemoteGame) -> None:
+        item = QListWidgetItem(f"{game.name} • {game.platform} • {game.size:,} bytes")
+        item.setData(Qt.ItemDataRole.UserRole, game)
+        self.game_list.addItem(item)
 
     def _failed(self, message: str) -> None:
-        self.status.setText(f"RomM library unavailable: {message}")
-        self.game_list.clear()
-        self.games = []
+        self._loading = False
+        self.refresh_button.setEnabled(True)
+        if self.games:
+            self.status.setText(
+                f"RomM library load stopped after {len(self.games):,} files: {message}"
+            )
+        else:
+            self.status.setText(f"RomM library unavailable: {message}")
+            self.game_list.clear()
 
     def _finished(self) -> None:
         self.library_worker = None
+        self._loading = False
+        self.refresh_button.setEnabled(True)
+        self.status.setText(f"RomM library ready: {len(self.games):,} compatible files.")
 
     def _apply_filter(self) -> None:
         query = self.search.text().strip().lower()
         platform = self.platforms.currentText()
-        selected_row = self.game_list.currentRow()
+        selected = self._selected_game()
         visible = [
             game for game in self.games
-            if (not query or query in game.name.lower())
+            if (not query or query in game.name.lower() or query in game.filename.lower())
             and (platform == "All platforms" or game.platform == platform)
         ]
+        self.game_list.setUpdatesEnabled(False)
         self.game_list.clear()
         for game in visible:
-            item = QListWidgetItem(f"{game.name} • {game.platform} • {game.size:,} bytes")
-            item.setData(Qt.ItemDataRole.UserRole, game)
-            self.game_list.addItem(item)
-        if self.game_list.count():
-            self.game_list.setCurrentRow(min(max(selected_row, 0), self.game_list.count() - 1))
+            self._add_game_item(game)
+        self.game_list.setUpdatesEnabled(True)
+        if visible:
+            if selected is not None:
+                for row, game in enumerate(visible):
+                    if game.rom_id == selected.rom_id:
+                        self.game_list.setCurrentRow(row)
+                        break
+                else:
+                    self.game_list.setCurrentRow(0)
+            else:
+                self.game_list.setCurrentRow(0)
         else:
             self._clear_details()
 
