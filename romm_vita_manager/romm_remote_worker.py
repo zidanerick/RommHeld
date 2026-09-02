@@ -71,7 +71,7 @@ class RomMLibraryWorker(QThread):
             ),
         )
 
-    def _fetch_platform(self, platform: dict):
+    def _fetch_platform(self, platform: dict, *, limit: int | None = None):
         slug = str(platform.get("slug") or "").lower()
         if not slug:
             return []
@@ -79,7 +79,7 @@ class RomMLibraryWorker(QThread):
             self.instance_url,
             self.token,
             {slug},
-            limit=self.page_size,
+            limit=limit or self.page_size,
             offset=self.offset if self.platform_slug else 0,
             missing_message="RomM has no platforms currently recognised as compatible with the 3DS targets.",
             platform_items=[platform],
@@ -103,7 +103,8 @@ class RomMLibraryWorker(QThread):
             self.progress.emit("Connecting to RomM…")
             platforms = _items(_json_request(self.instance_url, self.token, "platforms"))
             compatible = [
-                item for item in platforms
+                item
+                for item in platforms
                 if isinstance(item, dict)
                 and str(item.get("slug", "")).lower() in RETROARCH_PLATFORM_SLUGS
             ]
@@ -129,6 +130,19 @@ class RomMLibraryWorker(QThread):
                 slug = str(platform.get("slug") or "").lower()
                 self.progress.emit(f"RomM: checking {platform.get('name') or slug}…")
                 try:
+                    # First prove the authenticated ROM endpoint works with a tiny
+                    # request. This is intentionally bounded and also gives the UI
+                    # the first real ROM as quickly as possible.
+                    if collected == 0:
+                        probe = self._fetch_platform(platform, limit=1)
+                        if probe:
+                            self.platforms_consumed = index + 1
+                            self.progress.emit(
+                                f"RomM: API probe succeeded with {platform.get('name') or slug}; loading its library page…"
+                            )
+                            collected += self._emit_platform_results(platform, index + 1, probe)
+                            if collected >= self.page_size:
+                                break
                     results = self._fetch_platform(platform)
                 except Exception as exc:
                     self.progress.emit(f"RomM: {platform.get('name') or slug} failed: {exc}")
@@ -138,6 +152,11 @@ class RomMLibraryWorker(QThread):
                 if not results:
                     continue
 
+                # Replace the one-item probe with the full first-page result so
+                # the UI does not retain a single-item page as the whole result.
+                if collected == 1 and index == start:
+                    results = results[: self.page_size]
+                    collected = 0
                 collected += self._emit_platform_results(platform, index + 1, results)
                 if collected >= self.page_size:
                     break
