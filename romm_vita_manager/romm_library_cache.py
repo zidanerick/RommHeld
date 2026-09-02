@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 
-from .platform_services import cache_dir
 from .romm_remote import RomMRemoteGame
 
 CACHE_VERSION = 1
@@ -13,6 +12,9 @@ MAX_ENTRIES = 24
 
 
 def _cache_root() -> Path:
+    # Keep the cache module importable by headless tests without importing Qt.
+    from .platform_services import cache_dir
+
     path = cache_dir() / "romm-library"
     path.mkdir(parents=True, exist_ok=True)
     return path
