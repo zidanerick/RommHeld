@@ -207,6 +207,8 @@ def _list_games_for_platform_slugs(
         "platform_ids": platform_ids,
         "limit": max(1, min(limit, 500)),
         "offset": max(0, offset),
+        "order_by": "name",
+        "order_dir": "asc",
         "with_total": False,
         "with_char_index": False,
         "with_filter_values": False,
