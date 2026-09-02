@@ -54,7 +54,7 @@ class RomMGameFilterProxy(QSortFilterProxyModel):
 
 
 class ThreeDSLibraryWidget(QWidget):
-    """Lazy, server-searched RomM browser with an instant local first-page cache."""
+    """Progressive RomM browser that never depends on one huge cross-platform query."""
 
     PAGE_SIZE = 24
     SCROLL_THRESHOLD = 15
@@ -67,9 +67,11 @@ class ThreeDSLibraryWidget(QWidget):
         self.artwork_worker: RomMArtworkWorker | None = None
         self.games: list[RomMRemoteGame] = []
         self._loading = False
-        self._offset = 0
+        self._remote_offset = 0
+        self._platform_cursor = 0
         self._generation = 0
         self._cache_displayed = False
+        self._end_reached = False
         self._filter_timer = QTimer(self)
         self._filter_timer.setSingleShot(True)
         self._filter_timer.setInterval(180)
@@ -157,8 +159,10 @@ class ThreeDSLibraryWidget(QWidget):
     def _clear_results(self, *, clear_platforms: bool = False) -> None:
         self._loading = False
         self._cache_displayed = False
+        self._end_reached = False
         self.games = []
-        self._offset = 0
+        self._remote_offset = 0
+        self._platform_cursor = 0
         self.list_model.clear_games()
         if clear_platforms:
             self.platforms.blockSignals(True)
@@ -187,7 +191,8 @@ class ThreeDSLibraryWidget(QWidget):
         if not cached:
             return False
         self.games = list(cached)
-        self._offset = len(cached)
+        self._remote_offset = len(cached) if platform_slug else 0
+        self._platform_cursor = 0
         self._cache_displayed = True
         self.list_model.add_games(cached)
         self.status.setText(f"Showing {len(cached):,} cached results. Refreshing RomM…")
@@ -200,28 +205,34 @@ class ThreeDSLibraryWidget(QWidget):
             return
         if self.library_worker and self.library_worker.isRunning():
             return
+        if self._end_reached and not reset:
+            return
 
         url, token = source
         search_term = self.search.text().strip()
         platform_slug = str(self.platforms.currentData() or "") or None
         if reset:
-            self._offset = 0
+            self._remote_offset = 0
+            self._platform_cursor = 0
             self.list_model.clear_games()
             self.games = []
             self._cache_displayed = False
+            self._end_reached = False
             if prefer_cache:
                 self._show_cached_page(url)
 
         self._loading = True
         self.refresh_button.setEnabled(False)
         scope = f" for ‘{search_term}’" if search_term else (f" for {self.platforms.currentText()}" if platform_slug else "")
-        self.status.setText(
-            f"Showing cached results{scope}. Refreshing RomM…"
-            if self._cache_displayed
-            else f"Loading RomM library{scope}…"
-        )
+        if self._cache_displayed:
+            text = f"Showing cached results{scope}. Refreshing RomM…"
+        elif platform_slug:
+            text = f"Loading {self.platforms.currentText()}{scope}…"
+        else:
+            text = f"Loading RomM library progressively{scope}…"
+        self.status.setText(text)
 
-        request_offset = 0 if self._cache_displayed else self._offset
+        request_offset = 0 if self._cache_displayed else (self._remote_offset if platform_slug else self._platform_cursor)
         worker = RomMLibraryWorker(
             url,
             token,
@@ -231,7 +242,7 @@ class ThreeDSLibraryWidget(QWidget):
             platform_slug=platform_slug,
         )
         generation = self._generation
-        worker.loaded.connect(lambda batch, g=generation: self._loaded_batch(batch, g))
+        worker.loaded.connect(lambda batch, g=generation, w=worker: self._loaded_batch(batch, g, w))
         worker.platforms_loaded.connect(lambda platforms, g=generation: self._platforms_loaded(platforms, g))
         worker.failed.connect(lambda message, g=generation: self._failed(message, g))
         worker.finished.connect(lambda g=generation: self._finished(g))
@@ -256,40 +267,60 @@ class ThreeDSLibraryWidget(QWidget):
         self.platforms.setCurrentIndex(index if index >= 0 else 0)
         self.platforms.blockSignals(False)
 
-    def _loaded_batch(self, batch, generation: int) -> None:
+    def _loaded_batch(self, batch, generation: int, worker: RomMLibraryWorker) -> None:
         if generation != self._generation:
             return
         batch = list(batch)
         search_term, platform_slug = self._cached_query()
         replacing_cache = self._cache_displayed
+        first_page = (self._remote_offset == 0 if platform_slug else self._platform_cursor == 0)
+
         if replacing_cache:
             self.list_model.clear_games()
             self.games = []
-            self._offset = 0
+            self._remote_offset = 0
+            self._platform_cursor = 0
             self._cache_displayed = False
+            first_page = True
+
         if not batch:
             self._loading = False
             self.refresh_button.setEnabled(True)
             if replacing_cache or not self.games:
                 self.status.setText("No matching games found in RomM.")
                 self._clear_details()
+            if platform_slug or self._platform_cursor >= worker.platforms_total:
+                self._end_reached = True
             return
+
         self.games.extend(batch)
         self.list_model.add_games(batch)
-        self._offset += len(batch)
+        if platform_slug:
+            self._remote_offset += len(batch)
+            self._end_reached = len(batch) < self.PAGE_SIZE
+        else:
+            self._platform_cursor += worker.platforms_consumed
+            self._end_reached = self._platform_cursor >= worker.platforms_total
+
         self._loading = False
         self.refresh_button.setEnabled(True)
-        if replacing_cache or self._offset == len(batch):
+        if first_page:
             source = self._source()
             if source is not None:
                 save_cached_page(source[0], batch, search_term, platform_slug)
-        self.status.setText(f"Showing {len(self.games):,} loaded results. Scroll for more.")
+
+        if platform_slug:
+            scope = f" {self.platforms.currentText()}"
+        else:
+            scope = " compatible platforms"
+        suffix = " End of compatible library." if self._end_reached else " Scroll for more."
+        self.status.setText(f"Showing {len(self.games):,} loaded results from{scope}.{suffix}")
 
     def _scroll_changed(self, value: int) -> None:
         bar = self.game_list.verticalScrollBar()
         if bar.maximum() - value > self.SCROLL_THRESHOLD:
             return
-        if self._loading or not self.games:
+        if self._loading or not self.games or self._end_reached:
             return
         self._start_page()
 
