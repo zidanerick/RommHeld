@@ -10,6 +10,7 @@ class RomMLibraryWorker(QThread):
     """Fetch one page of a compatible RomM library in the background."""
 
     loaded = Signal(object)
+    platforms_loaded = Signal(object)
     failed = Signal(str)
 
     def __init__(
@@ -30,29 +31,39 @@ class RomMLibraryWorker(QThread):
         self.search_term = search_term
         self.platform_slug = platform_slug
 
+    def _wanted_platforms(self, platforms):
+        wanted = [
+            item
+            for item in platforms
+            if isinstance(item, dict)
+            and str(item.get("slug", "")).lower() in RETROARCH_PLATFORM_SLUGS
+            and isinstance(item.get("id"), int)
+        ]
+        if self.platform_slug:
+            wanted = [
+                item for item in wanted
+                if str(item.get("slug", "")).lower() == self.platform_slug.lower()
+            ]
+        return wanted
+
     def run(self) -> None:
         try:
             platforms = _items(_json_request(self.instance_url, self.token, "platforms"))
-            allowed = RETROARCH_PLATFORM_SLUGS
-            wanted = [
-                item
-                for item in platforms
-                if isinstance(item, dict)
-                and str(item.get("slug", "")).lower() in allowed
-                and isinstance(item.get("id"), int)
-            ]
-            if self.platform_slug:
-                wanted = [
-                    item for item in wanted
-                    if str(item.get("slug", "")).lower() == self.platform_slug.lower()
+            self.platforms_loaded.emit(
+                [
+                    item for item in platforms
+                    if isinstance(item, dict)
+                    and str(item.get("slug", "")).lower() in RETROARCH_PLATFORM_SLUGS
                 ]
+            )
+            wanted = self._wanted_platforms(platforms)
             if not wanted:
                 raise RuntimeError("RomM has no platforms currently recognised as compatible with the 3DS targets.")
 
             batch = _list_games_for_platform_slugs(
                 self.instance_url,
                 self.token,
-                allowed,
+                RETROARCH_PLATFORM_SLUGS,
                 limit=self.page_size,
                 offset=self.offset,
                 missing_message="RomM has no platforms currently recognised as compatible with the 3DS targets.",
@@ -72,11 +83,13 @@ class RomM3DSLibraryWorker(RomMLibraryWorker):
         try:
             platforms = _items(_json_request(self.instance_url, self.token, "platforms"))
             wanted = [
-                item for item in platforms
+                item
+                for item in platforms
                 if isinstance(item, dict)
                 and str(item.get("slug", "")).lower() == "3ds"
                 and isinstance(item.get("id"), int)
             ]
+            self.platforms_loaded.emit(wanted)
             if not wanted:
                 raise RuntimeError("RomM has no Nintendo 3DS platform (slug: 3ds).")
             batch = _list_games_for_platform_slugs(
