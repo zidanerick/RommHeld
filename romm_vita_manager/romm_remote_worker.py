@@ -50,7 +50,7 @@ class RomMLibraryWorker(QThread):
         self.search_term = search_term
         self.platform_slug = platform_slug
         self.platforms_consumed = 0
-        self._platform_batch_count = 0
+        self.platforms_total = 0
 
     def _wanted_platforms(self, platforms):
         wanted = [
@@ -94,9 +94,6 @@ class RomMLibraryWorker(QThread):
         if not platforms:
             self.platforms_consumed = 0
             return []
-        self._platform_batch_count = len(platforms)
-        # Divide the UI page budget across platforms so no request asks RomM
-        # for a large cross-platform page.
         per_platform = max(1, self.page_size // len(platforms))
         results: dict[str, list] = {}
         errors: list[str] = []
@@ -121,9 +118,8 @@ class RomMLibraryWorker(QThread):
 
     def _fetch_browse(self, wanted: list[dict]) -> list:
         if self.platform_slug:
+            platform = wanted[0]
             if self.offset:
-                # Explicit platform selection uses normal ROM pagination.
-                platform = wanted[0]
                 return _list_games_for_platform_slugs(
                     self.instance_url,
                     self.token,
@@ -136,8 +132,8 @@ class RomMLibraryWorker(QThread):
                     platform_slug=self.platform_slug,
                 )
             return self._fetch_batch(wanted)
-
-        return self._fetch_batch(wanted[self.offset:self.offset + self.PLATFORM_BATCH_SIZE])
+        group = wanted[self.offset:self.offset + self.PLATFORM_BATCH_SIZE]
+        return self._fetch_batch(group)
 
     def run(self) -> None:
         try:
@@ -149,23 +145,22 @@ class RomMLibraryWorker(QThread):
             ]
             self.platforms_loaded.emit(compatible)
             wanted = self._wanted_platforms(platforms)
+            self.platforms_total = len(wanted)
             if not wanted:
                 raise RuntimeError("RomM has no platforms currently recognised as compatible with the 3DS targets.")
 
             if self.search_term.strip() and not self.platform_slug:
-                # Searches need broader coverage than the initial gallery. Probe
-                # several small platform batches, stopping once we have enough
-                # matches to render a useful first page.
                 start = self.offset
                 collected: list = []
                 consumed = 0
-                while start < len(wanted) and consumed < self.PLATFORM_BATCH_SIZE * self.SEARCH_BATCHES_PER_REQUEST:
-                    batch = wanted[start:start + self.PLATFORM_BATCH_SIZE]
-                    results = self._fetch_batch(batch)
+                max_platforms = self.PLATFORM_BATCH_SIZE * self.SEARCH_BATCHES_PER_REQUEST
+                while start < len(wanted) and consumed < max_platforms:
+                    group = wanted[start:start + self.PLATFORM_BATCH_SIZE]
+                    results = self._fetch_batch(group)
                     collected.extend(results)
-                    consumed += len(batch)
-                    start += len(batch)
-                    if len(collected) >= self.page_size or not results:
+                    consumed += len(group)
+                    start += len(group)
+                    if len(collected) >= self.page_size:
                         break
                 self.platforms_consumed = consumed
                 self.loaded.emit(collected[:self.page_size])
@@ -190,6 +185,8 @@ class RomM3DSLibraryWorker(RomMLibraryWorker):
                 and str(item.get("slug", "")).lower() == "3ds"
                 and isinstance(item.get("id"), int)
             ]
+            self.platforms_total = len(wanted)
+            self.platforms_consumed = len(wanted)
             self.platforms_loaded.emit(wanted)
             if not wanted:
                 raise RuntimeError("RomM has no Nintendo 3DS platform (slug: 3ds).")
