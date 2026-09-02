@@ -7,8 +7,6 @@ from agbcia.banner.image import ImageSource
 from agbcia.gba.footer import extract_logo
 from agbcia.inject.pipeline import InjectionRequest, inject
 
-_NATIVE_TITLE_ID_PREFIX = bytes.fromhex("0004000000F")
-
 
 def native_title_id_for_romm_id(romm_id: int) -> bytes:
     """Return a stable 3DS GBA VC-range title ID for a RomM ROM ID."""
@@ -16,7 +14,7 @@ def native_title_id_for_romm_id(romm_id: int) -> bytes:
         raise ValueError("RomM ROM ID must be non-negative.")
     digest = hashlib.sha256(str(romm_id).encode("ascii")).digest()
     unique = int.from_bytes(digest[:2], "big") & 0x0FFF
-    return _NATIVE_TITLE_ID_PREFIX + unique.to_bytes(2, "big") + b"\x00"
+    return bytes.fromhex(f"0004000000F{unique:03X}00")
 
 
 def read_asset(path: Path) -> bytes:
