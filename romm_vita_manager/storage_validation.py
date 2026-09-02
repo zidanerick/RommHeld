@@ -53,6 +53,22 @@ def validate_3ds_sd(root: Path) -> StorageValidation:
     return StorageValidation("3ds-sd", confidence, signatures, checks)
 
 
+def validate_ds_storage(root: Path) -> StorageValidation:
+    root = root.expanduser().resolve()
+    if not root.is_dir():
+        raise NotADirectoryError(f"Storage root does not exist: {root}")
+
+    checks = (
+        StorageCheck("nds-directory", "DS support directory", _directory(root, "_nds"), "_nds/"),
+        StorageCheck("boot-nds", "DS boot loader", _file(root, "BOOT.NDS"), "BOOT.NDS"),
+        StorageCheck("roms", "ROM directory", _directory(root, "roms"), "roms/"),
+    )
+    signatures = tuple(check.path for check in checks if check.found)
+    matched = sum(check.found for check in checks)
+    confidence = "high" if matched == 3 else "medium" if matched == 2 else "low" if matched == 1 else "unknown"
+    return StorageValidation("ds-storage", confidence, signatures, checks)
+
+
 def validate_ds_flashcard(root: Path) -> StorageValidation:
     root = root.expanduser().resolve()
     if not root.is_dir():
@@ -67,19 +83,17 @@ def validate_ds_flashcard(root: Path) -> StorageValidation:
         StorageCheck("ysmenu", "YSMenu launcher", _file(root, "YSMenu.nds"), "YSMenu.nds"),
         StorageCheck("ttmenu", "TTMenu directory", _directory(root, "TTMenu"), "TTMenu/"),
         StorageCheck("r4-data", "R4.dat", _file(root, "R4.dat"), "R4.dat"),
+        StorageCheck("r4-kernel", "R4 kernel directory", _directory(root, "__rpg"), "__rpg/"),
     )
     signatures = tuple(check.path for check in checks if check.found)
     capability = sum(check.found for check in checks[:5])
-    confidence = "high" if capability >= 4 else "medium" if capability >= 2 else "low" if capability == 1 else "unknown"
+    explicit_marker = any(check.found for check in checks[5:])
+    confidence = "high" if capability >= 4 else "medium" if capability >= 2 or explicit_marker else "low" if capability == 1 else "unknown"
     return StorageValidation("ds-flashcard", confidence, signatures, checks)
 
 
 def validate_storage(root: Path) -> StorageValidation:
-    """Perform a read-only heuristic validation of a mounted handheld storage root.
-
-    This compatibility wrapper preserves the original single-call API while using
-    the more specific validators whenever enough evidence is available.
-    """
+    """Perform a read-only heuristic validation of a mounted handheld storage root."""
     root = root.expanduser().resolve()
     if not root.is_dir():
         raise NotADirectoryError(f"Storage root does not exist: {root}")
@@ -88,8 +102,13 @@ def validate_storage(root: Path) -> StorageValidation:
     has_3ds = {"boot.firm", "boot.3dsx", "luma", "gm9"}.issubset(names)
     if has_3ds:
         return validate_3ds_sd(root)
-    if "_nds" in names and "roms" in names:
+
+    flashcard_markers = {"r4.dat", "ttmenu.dat", "ysmenu.nds", "ttmenu", "__rpg"}
+    if names.intersection(flashcard_markers):
         return validate_ds_flashcard(root)
+
+    if "_nds" in names and "roms" in names:
+        return validate_ds_storage(root)
 
     signatures: list[str] = []
     if "roms" in names:
