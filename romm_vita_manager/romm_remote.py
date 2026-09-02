@@ -107,10 +107,18 @@ def _platform_slug(item: dict, by_id: dict[int, str], by_name: dict[str, str]) -
     return ""
 
 
-def _list_games_for_platform_slugs(instance_url: str, token: str, allowed_slugs: set[str] | frozenset[str], *, limit: int = 1000, missing_message: str) -> list[RomMRemoteGame]:
+def _list_games_for_platform_slugs(
+    instance_url: str,
+    token: str,
+    allowed_slugs: set[str] | frozenset[str],
+    *,
+    limit: int = 1000,
+    missing_message: str,
+) -> list[RomMRemoteGame]:
     platforms = _items(_json_request(instance_url, token, "platforms"))
     wanted = [
-        item for item in platforms
+        item
+        for item in platforms
         if isinstance(item, dict)
         and str(item.get("slug", "")).lower() in allowed_slugs
         and isinstance(item.get("id"), int)
@@ -130,12 +138,23 @@ def _list_games_for_platform_slugs(instance_url: str, token: str, allowed_slugs:
         for item in wanted
     }
 
-    rows = _items(_json_request(
-        instance_url,
-        token,
-        "roms",
-        {"platform_ids": platform_ids, "limit": limit, "offset": 0, "with_total": False},
-    ))
+    rows = _items(
+        _json_request(
+            instance_url,
+            token,
+            "roms",
+            {
+                "platform_ids": platform_ids,
+                "limit": limit,
+                "offset": 0,
+                "with_total": False,
+                "with_char_index": False,
+                "with_filter_values": False,
+                "with_rom_id_index": False,
+                "group_by_meta_id": False,
+            },
+        )
+    )
 
     games: list[RomMRemoteGame] = []
     for item in rows:
@@ -155,7 +174,17 @@ def _list_games_for_platform_slugs(instance_url: str, token: str, allowed_slugs:
             or item.get("cover_path")
             or item.get("cover_url")
         )
-        games.append(RomMRemoteGame(item["id"], name, filename, platform, size, resolve_cover_url(instance_url, cover), slug))
+        games.append(
+            RomMRemoteGame(
+                item["id"],
+                name,
+                filename,
+                platform,
+                size,
+                resolve_cover_url(instance_url, cover),
+                slug,
+            )
+        )
     return games
 
 
