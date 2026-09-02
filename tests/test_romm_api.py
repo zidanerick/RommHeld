@@ -4,7 +4,11 @@ from unittest.mock import patch
 
 import pytest
 
-from romm_vita_manager.romm_api import RomMApiError, normalize_romm_url, test_connection
+from romm_vita_manager.romm_api import (
+    RomMApiError,
+    normalize_romm_url,
+    test_connection as check_connection,
+)
 
 
 def test_normalize_romm_instance_url():
@@ -23,7 +27,7 @@ def test_rejects_malformed_url():
 
 def test_client_token_prefix_is_checked():
     with pytest.raises(ValueError, match="beginning with rmm_"):
-        test_connection("https://romm.example.test", "not-a-client-token")
+        check_connection("https://romm.example.test", "not-a-client-token")
 
 
 def test_403_is_reported_as_scope_error():
@@ -34,4 +38,4 @@ def test_403_is_reported_as_scope_error():
         ),
     ):
         with pytest.raises(RomMApiError, match="platforms.read"):
-            test_connection("https://romm.example.test", "rmm_" + "a" * 64)
+            check_connection("https://romm.example.test", "rmm_" + "a" * 64)
