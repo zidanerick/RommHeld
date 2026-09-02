@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from romm_vita_manager.romm_remote import RomMRemoteGame, _download, list_3ds_games
+from romm_vita_manager.romm_remote import (
+    RomMRemoteGame,
+    _download,
+    list_3ds_games,
+    list_compatible_games,
+    resolve_cover_url,
+)
 
 
 def test_list_3ds_games_maps_platform_and_rom_fields(monkeypatch):
@@ -38,7 +44,8 @@ def test_list_3ds_games_maps_platform_and_rom_fields(monkeypatch):
             "Pokemon Alpha Sapphire.3ds",
             "Nintendo 3DS",
             1234,
-            "/assets/covers/42.jpg",
+            "https://romm.example/assets/covers/42.jpg",
+            "",
         )
     ]
 
@@ -52,9 +59,61 @@ def test_list_3ds_games_requires_the_3ds_platform(monkeypatch):
     try:
         list_3ds_games("https://romm.example", "rmm_test")
     except Exception as exc:
-        assert "slug: 3ds" in str(exc)
+        assert "compatible" in str(exc)
     else:
         raise AssertionError("Expected a RomMApiError")
+
+
+def test_list_compatible_games_maps_gba_and_skips_unknown_platform(monkeypatch):
+    responses = {
+        "platforms": [
+            {"id": 10, "name": "Game Boy Advance", "slug": "gba"},
+            {"id": 20, "name": "Nintendo DS", "slug": "nds"},
+        ],
+        "roms": {
+            "items": [
+                {
+                    "id": 7,
+                    "name": "Metroid Fusion",
+                    "fs_name": "Metroid Fusion.gba",
+                    "platform_id": 10,
+                    "size_bytes": 4194304,
+                    "cover_path": "/assets/covers/7.jpg",
+                },
+                {
+                    "id": 8,
+                    "name": "Example DS game",
+                    "fs_name": "example.nds",
+                    "platform_id": 20,
+                    "size_bytes": 9000,
+                },
+            ]
+        },
+    }
+
+    monkeypatch.setattr(
+        "romm_vita_manager.romm_remote._json_request",
+        lambda instance_url, token, path, params=None: responses[path],
+    )
+
+    games = list_compatible_games("https://romm.example", "rmm_test")
+
+    assert games == [
+        RomMRemoteGame(
+            7,
+            "Metroid Fusion",
+            "Metroid Fusion.gba",
+            "Game Boy Advance",
+            4194304,
+            "https://romm.example/assets/covers/7.jpg",
+            "gba",
+        )
+    ]
+
+
+def test_resolve_cover_url_preserves_absolute_urls():
+    assert resolve_cover_url("https://romm.example", "https://cdn.example/cover.jpg") == "https://cdn.example/cover.jpg"
+    assert resolve_cover_url("https://romm.example", "/assets/cover.jpg") == "https://romm.example/assets/cover.jpg"
 
 
 def test_download_streams_to_destination(monkeypatch, tmp_path: Path):
