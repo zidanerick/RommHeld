@@ -6,7 +6,7 @@ import socket
 from dataclasses import dataclass
 from pathlib import Path
 from urllib import error, request
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlparse
 
 from .mappings import platform_label
 from .romm_api import RomMApiError, normalize_romm_url
@@ -82,6 +82,7 @@ class _RomMHTTPSHandler(request.HTTPSHandler):
 
 
 _ROMM_OPENER = request.build_opener(_RomMHTTPHandler(), _RomMHTTPSHandler())
+_MAX_REMOTE_ARTWORK_BYTES = 8 * 1024 * 1024
 
 
 def _json_request(instance_url: str, token: str, path: str, params: dict | None = None):
@@ -102,6 +103,49 @@ def _json_request(instance_url: str, token: str, path: str, params: dict | None 
     except (error.URLError, TimeoutError) as exc:
         reason = getattr(exc, "reason", exc)
         raise RomMApiError(f"Unable to reach the RomM server: {reason}") from exc
+
+
+def download_artwork(
+    instance_url: str,
+    token: str,
+    url: str,
+    *,
+    max_bytes: int = _MAX_REMOTE_ARTWORK_BYTES,
+) -> bytes:
+    """Fetch a RomM artwork resource using RomM's IPv4-first transport.
+
+    The URL must use HTTP(S). Relative paths and RomM resource paths are
+    resolved against the configured RomM instance. External absolute URLs
+    are permitted because RomM can legitimately expose third-party artwork
+    such as IGDB covers.
+    """
+    target = str(url).strip()
+    if not target:
+        raise ValueError("Artwork URL is empty.")
+    parsed = urlparse(target)
+    if not parsed.scheme:
+        target = resolve_cover_url(instance_url, target) or ""
+        parsed = urlparse(target)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("RomM artwork URL must be an HTTP(S) resource.")
+
+    req = request.Request(
+        target,
+        headers=_auth_headers(
+            token,
+            accept="image/avif,image/webp,image/png,image/jpeg,*/*",
+        ),
+    )
+    try:
+        with _ROMM_OPENER.open(req, timeout=10) as response:
+            data = response.read(max_bytes + 1)
+    except error.HTTPError as exc:
+        raise RomMApiError(f"RomM artwork request returned HTTP {exc.code}.", exc.code) from exc
+    except (error.URLError, TimeoutError) as exc:
+        raise RomMApiError(f"Unable to download RomM artwork: {getattr(exc, 'reason', exc)}") from exc
+    if len(data) > max_bytes:
+        raise ValueError(f"Artwork is larger than the {max_bytes // (1024 * 1024)} MiB safety limit.")
+    return data
 
 
 def _items(payload) -> list:
