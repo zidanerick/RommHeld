@@ -106,6 +106,20 @@ RetroAchievements compatibility belongs to the emulator/core that actually runs 
 
 The eventual routing model should distinguish native execution, emulator execution, RetroAchievements-compatible execution, experimental achievement support, and hardcore compatibility where verified.
 
+## Artwork and branding
+
+The startup handheld selector uses Icons8 Color-style artwork for its platform tiles. Icons8 describes the Color family as suitable for desktop and application interfaces and provides the assets in PNG and SVG formats.
+
+The selector currently references these Icons8 assets:
+
+- PlayStation: https://icons8.com/icon/JIb5eNE17DPV/playstation
+- 3DS Console: https://icons8.com/icon/fdVLfvnTjw0H/3ds-console
+- Nintendo DS: https://icons8.com/icon/19599/nintendo-ds
+- PlayStation Portable: https://icons8.com/icon/xv4xoRkYlmXq/playstation-portable
+- Mobile: https://icons8.com/icon/12919/mobile
+
+Review and comply with the current Icons8 license terms applicable to the project's distribution model.
+
 ## Project structure
 
 The implementation is being split into focused modules under `romm_vita_manager/`:
