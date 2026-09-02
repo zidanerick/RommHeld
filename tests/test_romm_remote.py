@@ -25,16 +25,16 @@ def test_list_3ds_games_maps_platform_and_rom_fields(monkeypatch):
                     "fs_name": "Pokemon Alpha Sapphire.3ds",
                     "platform_name": "Nintendo 3DS",
                     "size_bytes": 1234,
-                    "cover_path": "/assets/covers/42.jpg",
+                    "path_cover_large": "roms/12/42/cover.jpg",
                 }
             ]
         },
     }
 
-    def fake_request(instance_url, token, path, params=None):
-        return responses[path]
-
-    monkeypatch.setattr("romm_vita_manager.romm_remote._json_request", fake_request)
+    monkeypatch.setattr(
+        "romm_vita_manager.romm_remote._json_request",
+        lambda instance_url, token, path, params=None: responses[path],
+    )
     games = list_3ds_games("https://romm.example", "rmm_test")
 
     assert games == [
@@ -44,7 +44,7 @@ def test_list_3ds_games_maps_platform_and_rom_fields(monkeypatch):
             "Pokemon Alpha Sapphire.3ds",
             "Nintendo 3DS",
             1234,
-            "https://romm.example/assets/covers/42.jpg",
+            "https://romm.example/assets/romm/resources/roms/12/42/cover.jpg",
             "",
         )
     ]
@@ -59,7 +59,7 @@ def test_list_3ds_games_requires_the_3ds_platform(monkeypatch):
     try:
         list_3ds_games("https://romm.example", "rmm_test")
     except Exception as exc:
-        assert "compatible" in str(exc)
+        assert "Nintendo 3DS platform" in str(exc)
     else:
         raise AssertionError("Expected a RomMApiError")
 
@@ -77,8 +77,8 @@ def test_list_compatible_games_maps_gba_and_skips_unknown_platform(monkeypatch):
                     "name": "Metroid Fusion",
                     "fs_name": "Metroid Fusion.gba",
                     "platform_id": 10,
-                    "size_bytes": 4194304,
-                    "cover_path": "/assets/covers/7.jpg",
+                    "fs_size_bytes": 4194304,
+                    "path_cover_large": "roms/10/7/cover.jpg",
                 },
                 {
                     "id": 8,
@@ -105,7 +105,7 @@ def test_list_compatible_games_maps_gba_and_skips_unknown_platform(monkeypatch):
             "Metroid Fusion.gba",
             "Game Boy Advance",
             4194304,
-            "https://romm.example/assets/covers/7.jpg",
+            "https://romm.example/assets/romm/resources/roms/10/7/cover.jpg",
             "gba",
         )
     ]
@@ -113,7 +113,7 @@ def test_list_compatible_games_maps_gba_and_skips_unknown_platform(monkeypatch):
 
 def test_resolve_cover_url_preserves_absolute_urls():
     assert resolve_cover_url("https://romm.example", "https://cdn.example/cover.jpg") == "https://cdn.example/cover.jpg"
-    assert resolve_cover_url("https://romm.example", "/assets/cover.jpg") == "https://romm.example/assets/cover.jpg"
+    assert resolve_cover_url("https://romm.example", "/assets/romm/resources/cover.jpg") == "https://romm.example/assets/romm/resources/cover.jpg"
 
 
 def test_download_streams_to_destination(monkeypatch, tmp_path: Path):
