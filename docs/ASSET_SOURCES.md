@@ -9,31 +9,28 @@ Kenney Game Icons and UI Pack are CC0 and may be redistributed and modified.
 
 ## Platform logos
 
-The repository keeps platform logos separate from device illustrations. The selected launch-screen logo files are based on sources whose individual pages identify the logo artwork as public domain for copyright purposes, while noting that trademark rights remain separate.
+The repository keeps platform logos separate from device illustrations. Launch-screen identity marks use verified platform sources where practical; trademarks remain the property of their respective owners.
 
 - PlayStation Vita: https://commons.wikimedia.org/wiki/File:PlayStation_Vita_logo.svg
 - Nintendo 3DS: https://commons.wikimedia.org/wiki/File:Nintendo_3DS_logo.svg
 - Nintendo DS: https://commons.wikimedia.org/wiki/File:Nintendo_DS_Logo.svg
 
-The PlayStation Vita wordmark path was cross-checked against the Simple Icons PlayStation Vita asset: https://github.com/simple-icons/simple-icons/blob/develop/icons/playstationvita.svg
+## Handheld illustrations
 
-## Device illustrations
+RommHeld uses original local SVG illustrations for the selector and future library/status indicators. They are intentionally simplified for UI use but are based on the physical front layouts of the actual hardware.
 
-The handheld illustrations in `assets/handhelds/` are original RommHeld SVG artwork. They use the user's selected Icons8 Color handheld set as a visual reference for a clean, modern flat-icon treatment, but they are not copied Icons8 files.
+Reference sources used for geometry and visual accuracy:
 
-- PlayStation Vita: simplified black-hardware illustration.
-- Nintendo 3DS: simplified Aqua Blue clamshell illustration.
-- Nintendo DS: simplified light-gray clamshell illustration.
-- PlayStation Portable: simplified light-gray handheld illustration for the coming-soon target.
+- PlayStation Vita PCH-1101-FL: https://commons.wikimedia.org/wiki/File:PlayStation-Vita-1101-FL.png
+- Nintendo 3DS Aqua Blue: https://commons.wikimedia.org/wiki/File:Nintendo-3DS-AquaOpen.png
+- Nintendo DS Fat Blue: https://commons.wikimedia.org/wiki/File:Nintendo-DS-Fat-Blue.png
 
-These illustrations are decorative and have no effect on compatibility, routing, or transfer logic.
+The Evan-Amos references above are public-domain photographs; they are not required at runtime and are not bundled by RommHeld.
 
 ## Asset policy
 
-Platform/device definitions should reference artwork through the data-driven asset registry in `romm_vita_manager/platform_assets.py`. Do not scatter asset paths through device or transfer code.
+Platform/device definitions reference artwork through `romm_vita_manager/platform_assets.py`. Do not scatter asset paths through device or transfer code.
 
-All assets required by the normal UI must be present in the repository or packaged application. A user should never need to run a separate asset-download script for the application to render correctly.
+Missing artwork must fall back gracefully. UI functionality must never depend on an asset being present or on an external CDN.
 
-Missing artwork must fall back gracefully. UI functionality must never depend on an external artwork server being reachable.
-
-Do not bundle screenshots of proprietary console interfaces, commercial fonts, game box art, copyrighted game artwork, or manufacturer UI assets unless a clear redistribution license or permission is documented.
+Do not bundle screenshots of proprietary console interfaces, commercial fonts, game box art, copyrighted game artwork, or third-party licensed assets unless a clear redistribution license or permission is documented.
