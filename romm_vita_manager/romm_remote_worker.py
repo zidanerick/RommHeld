@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-
 from PySide6.QtCore import QThread, Signal
 
-from .romm_remote import _items, _json_request, _list_games_for_platform_slugs
+from .romm_remote import _as_int, _items, _json_request, _list_games_for_platform_slugs
 from .three_ds_targets import RETROARCH_PLATFORM_SLUGS
 
 
@@ -23,13 +21,12 @@ _PLATFORM_PRIORITY = (
 
 
 class RomMLibraryWorker(QThread):
-    """Fetch a bounded slice of the compatible RomM library without one giant query."""
+    """Fetch RomM library data incrementally so the UI never waits for a batch of platforms."""
 
     loaded = Signal(object)
     platforms_loaded = Signal(object)
+    progress = Signal(str)
     failed = Signal(str)
-
-    PLATFORM_BATCH_SIZE = 4
 
     def __init__(
         self,
@@ -57,7 +54,7 @@ class RomMLibraryWorker(QThread):
             for item in platforms
             if isinstance(item, dict)
             and str(item.get("slug", "")).lower() in RETROARCH_PLATFORM_SLUGS
-            and isinstance(item.get("id"), int)
+            and _as_int(item.get("id")) is not None
         ]
         if self.platform_slug:
             wanted = [
@@ -68,13 +65,13 @@ class RomMLibraryWorker(QThread):
         return sorted(
             wanted,
             key=lambda item: (
-                0 if int(item.get("rom_count") or item.get("roms_count") or 0) > 0 else 1,
+                0 if _as_int(item.get("rom_count") or item.get("roms_count")) else 1,
                 priority.get(str(item.get("slug", "")).lower(), len(priority)),
                 str(item.get("name") or item.get("slug") or "").casefold(),
             ),
         )
 
-    def _fetch_platform(self, platform: dict, limit: int):
+    def _fetch_platform(self, platform: dict):
         slug = str(platform.get("slug") or "").lower()
         if not slug:
             return []
@@ -82,71 +79,28 @@ class RomMLibraryWorker(QThread):
             self.instance_url,
             self.token,
             {slug},
-            limit=limit,
-            offset=0,
+            limit=self.page_size,
+            offset=self.offset if self.platform_slug else 0,
             missing_message="RomM has no platforms currently recognised as compatible with the 3DS targets.",
             platform_items=[platform],
             search_term=self.search_term,
             platform_slug=slug,
         )
 
-    def _fetch_batch(self, platforms: list[dict]) -> list:
-        if not platforms:
-            return []
-        per_platform = max(1, self.page_size // len(platforms))
-        results: dict[str, list] = {}
-        errors: list[str] = []
-        with ThreadPoolExecutor(max_workers=len(platforms)) as executor:
-            pending = {
-                executor.submit(self._fetch_platform, platform, per_platform): str(platform.get("slug") or "").lower()
-                for platform in platforms
-            }
-            for future in as_completed(pending):
-                slug = pending[future]
-                try:
-                    results[slug] = list(future.result())
-                except Exception as exc:
-                    errors.append(f"{slug}: {exc}")
-        ordered: list = []
-        for platform in platforms:
-            ordered.extend(results.get(str(platform.get("slug") or "").lower(), []))
-        if not ordered and errors and len(errors) == len(platforms):
-            raise RuntimeError("; ".join(errors))
-        return ordered
-
-    def _fetch_all_platforms(self, wanted: list[dict]) -> list:
-        """Fill one UI page by walking small platform groups until full or exhausted."""
-        start = min(self.offset, len(wanted))
-        consumed = 0
-        collected: list = []
-        while start < len(wanted):
-            group = wanted[start:start + self.PLATFORM_BATCH_SIZE]
-            results = self._fetch_batch(group)
-            consumed += len(group)
-            start += len(group)
-            collected.extend(results)
-            if len(collected) >= self.page_size:
-                break
+    def _emit_platform_results(self, platform: dict, consumed: int, results: list) -> int:
         self.platforms_consumed = consumed
-        return collected[:self.page_size]
-
-    def _fetch_browse(self, wanted: list[dict]) -> list:
-        if self.platform_slug:
-            return _list_games_for_platform_slugs(
-                self.instance_url,
-                self.token,
-                {self.platform_slug.lower()},
-                limit=self.page_size,
-                offset=self.offset,
-                missing_message="RomM has no platforms currently recognised as compatible with the 3DS targets.",
-                platform_items=[wanted[0]],
-                search_term=self.search_term,
-                platform_slug=self.platform_slug,
-            )
-        return self._fetch_all_platforms(wanted)
+        if not results:
+            return 0
+        self.progress.emit(
+            f"RomM: received {len(results):,} result{'s' if len(results) != 1 else ''} from "
+            f"{platform.get('name') or platform.get('slug')}."
+        )
+        self.loaded.emit(results[: self.page_size])
+        return len(results)
 
     def run(self) -> None:
         try:
+            self.progress.emit("Connecting to RomM…")
             platforms = _items(_json_request(self.instance_url, self.token, "platforms"))
             compatible = [
                 item for item in platforms
@@ -156,11 +110,38 @@ class RomMLibraryWorker(QThread):
             self.platforms_loaded.emit(compatible)
             wanted = self._wanted_platforms(platforms)
             self.platforms_total = len(wanted)
+            self.progress.emit(f"RomM: found {len(wanted):,} compatible platform(s).")
             if not wanted:
                 raise RuntimeError("RomM has no platforms currently recognised as compatible with the 3DS targets.")
 
-            batch = self._fetch_browse(wanted)
-            self.loaded.emit(batch)
+            if self.platform_slug:
+                platform = wanted[0]
+                self.progress.emit(f"RomM: loading {platform.get('name') or self.platform_slug}…")
+                results = self._fetch_platform(platform)
+                self.platforms_consumed = 1
+                self.loaded.emit(results)
+                return
+
+            start = min(self.offset, len(wanted))
+            collected = 0
+            for index in range(start, len(wanted)):
+                platform = wanted[index]
+                slug = str(platform.get("slug") or "").lower()
+                self.progress.emit(f"RomM: checking {platform.get('name') or slug}…")
+                try:
+                    results = self._fetch_platform(platform)
+                except Exception as exc:
+                    self.progress.emit(f"RomM: {platform.get('name') or slug} failed: {exc}")
+                    continue
+
+                self.platforms_consumed = index + 1
+                if not results:
+                    continue
+
+                collected += self._emit_platform_results(platform, index + 1, results)
+                if collected >= self.page_size:
+                    break
+
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -176,7 +157,7 @@ class RomM3DSLibraryWorker(RomMLibraryWorker):
                 for item in platforms
                 if isinstance(item, dict)
                 and str(item.get("slug", "")).lower() == "3ds"
-                and isinstance(item.get("id"), int)
+                and _as_int(item.get("id")) is not None
             ]
             self.platforms_total = len(wanted)
             self.platforms_consumed = len(wanted)
