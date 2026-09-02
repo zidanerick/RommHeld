@@ -87,7 +87,11 @@ The 3DS should support multiple target profiles rather than treating every file 
 - [x] Data-driven platform artwork registry.
 - [x] Local bundled handheld illustrations and logo variants.
 - [x] RommHeld application branding asset.
-- [ ] Replace legacy management layout with a fully console-themed management shell.
+- [x] Single-window console-aware workspace with real sections.
+- [x] Remove device-specific controls from unrelated console workspaces.
+- [x] Console-specific runtime preference presentation.
+- [x] Global settings page separated from Vita-only setup UI.
+- [ ] Embed Vita / 3DS / DS setup and transfer panels directly into tabs.
 - [ ] Device selection for transfer destinations.
 - [ ] Storage/target profile selector.
 - [ ] Polish responsive layout and accessibility across desktop sizes.
@@ -121,6 +125,8 @@ RetroAchievements must remain a capability rather than an assumption about a fro
 
 - [ ] Represent RA support separately from emulator/frontend support.
 - [ ] Identify RetroArch/core routes where appropriate.
+- [x] Verify current 3DS libretro/Citra achievement status before exposing an achievement-first route.
+- [x] Verify current DS melonDS/melonDS DS achievement-capable routes.
 - [ ] Research native 3DS DS/GBA achievement integrations.
 - [ ] Evaluate existing native DS + `rcheevos` work.
 - [ ] Preserve native runtimes where they provide materially better compatibility/performance.
@@ -130,6 +136,8 @@ RetroAchievements must remain a capability rather than an assumption about a fro
 ## 9. Library intelligence
 
 - [ ] Automatic platform-directory discovery.
+- [ ] Remote RomM library provider.
+- [ ] Authenticated ROM download pipeline from RomM.
 - [ ] Better duplicate detection.
 - [ ] Optional hashes.
 - [ ] Artwork and metadata.
@@ -137,7 +145,6 @@ RetroAchievements must remain a capability rather than an assumption about a fro
 - [ ] Device-specific installed-state detection.
 - [ ] Transfer planning against available storage.
 - [ ] Multi-device comparison and recommended target.
-- [ ] Remote RomM library provider.
 
 ## 10. Future devices
 
