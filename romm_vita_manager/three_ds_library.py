@@ -2,17 +2,9 @@ from __future__ import annotations
 
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QSortFilterProxyModel, QTimer, Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import (
-    QComboBox,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QListView,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QLineEdit, QListView, QPushButton, QVBoxLayout, QWidget
 
+from .romm_library_cache import load_cached_page, save_cached_page
 from .romm_remote import RomMRemoteGame
 from .romm_remote_worker import RomMLibraryWorker
 from .three_ds_targets import available_targets, default_destination
@@ -54,38 +46,17 @@ class RomMGameListModel(QAbstractListModel):
 
 
 class RomMGameFilterProxy(QSortFilterProxyModel):
-    """Fast local filtering of whichever server-side page is currently loaded."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.query = ""
-        self.platform = "All platforms"
-        self.setDynamicSortFilter(True)
-
-    def set_query(self, query: str) -> None:
-        self.query = query.strip().casefold()
-        self.invalidateFilter()
-
-    def set_platform(self, platform: str) -> None:
-        self.platform = platform
-        self.invalidateFilter()
+    """Pass-through proxy retained for compatibility with existing UI code."""
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
         index = self.sourceModel().index(source_row, 0, source_parent)
-        game = index.data(Qt.ItemDataRole.UserRole)
-        if not isinstance(game, RomMRemoteGame):
-            return False
-        if self.platform != "All platforms" and game.platform != self.platform:
-            return False
-        if not self.query:
-            return True
-        return self.query in game.name.casefold() or self.query in game.filename.casefold()
+        return isinstance(index.data(Qt.ItemDataRole.UserRole), RomMRemoteGame)
 
 
 class ThreeDSLibraryWidget(QWidget):
-    """Lazy, server-searched RomM browser for large 3DS-compatible libraries."""
+    """Lazy, server-searched RomM browser with an instant local first-page cache."""
 
-    PAGE_SIZE = 100
+    PAGE_SIZE = 24
     SCROLL_THRESHOLD = 15
 
     def __init__(self, config: dict, open_manager_callback, parent=None):
@@ -98,6 +69,7 @@ class ThreeDSLibraryWidget(QWidget):
         self._loading = False
         self._offset = 0
         self._generation = 0
+        self._cache_displayed = False
         self._filter_timer = QTimer(self)
         self._filter_timer.setSingleShot(True)
         self._filter_timer.setInterval(180)
@@ -174,22 +146,24 @@ class ThreeDSLibraryWidget(QWidget):
         return (url, token) if url and token else None
 
     def refresh_library(self) -> None:
+        self._filter_timer.stop()
+        self.search.blockSignals(True)
         self.search.clear()
-        self._offset = 0
+        self.search.blockSignals(False)
         self._generation += 1
         self._clear_results()
-        self._start_page(reset=True)
+        self._start_page(reset=True, prefer_cache=True)
 
     def _clear_results(self) -> None:
         self._loading = False
+        self._cache_displayed = False
         self.games = []
+        self._offset = 0
         self.list_model.clear_games()
         self.platforms.blockSignals(True)
         self.platforms.clear()
         self.platforms.addItem("All platforms", "")
         self.platforms.blockSignals(False)
-        self.list_proxy.set_query("")
-        self.list_proxy.set_platform("All platforms")
         self._clear_details()
 
     def _schedule_filter(self) -> None:
@@ -199,12 +173,26 @@ class ThreeDSLibraryWidget(QWidget):
         if self.library_worker and self.library_worker.isRunning():
             self._filter_timer.start()
             return
-        self._offset = 0
         self._generation += 1
         self._clear_results()
-        self._start_page(reset=True)
+        self._start_page(reset=True, prefer_cache=True)
 
-    def _start_page(self, *, reset: bool = False) -> None:
+    def _cached_query(self) -> tuple[str, str | None]:
+        return self.search.text().strip(), str(self.platforms.currentData() or "") or None
+
+    def _show_cached_page(self, instance_url: str) -> bool:
+        search_term, platform_slug = self._cached_query()
+        cached = load_cached_page(instance_url, search_term, platform_slug)
+        if not cached:
+            return False
+        self.games = list(cached)
+        self._offset = len(cached)
+        self._cache_displayed = True
+        self.list_model.add_games(cached)
+        self.status.setText(f"Showing {len(cached):,} cached results. Refreshing RomM…")
+        return True
+
+    def _start_page(self, *, reset: bool = False, prefer_cache: bool = False) -> None:
         source = self._source()
         if source is None:
             self.status.setText("Set the library source to RomM Server in Settings to browse the remote library.")
@@ -219,22 +207,25 @@ class ThreeDSLibraryWidget(QWidget):
             self._offset = 0
             self.list_model.clear_games()
             self.games = []
+            self._cache_displayed = False
+            if prefer_cache:
+                self._show_cached_page(url)
 
         self._loading = True
         self.refresh_button.setEnabled(False)
-        if search_term:
-            scope = f" for ‘{search_term}’"
-        elif platform_slug:
-            scope = f" for {self.platforms.currentText()}"
-        else:
-            scope = ""
-        self.status.setText(f"Loading RomM library{scope}…")
+        scope = f" for ‘{search_term}’" if search_term else (f" for {self.platforms.currentText()}" if platform_slug else "")
+        self.status.setText(
+            f"Showing cached results{scope}. Refreshing RomM…"
+            if self._cache_displayed
+            else f"Loading RomM library{scope}…"
+        )
 
+        request_offset = 0 if self._cache_displayed else self._offset
         worker = RomMLibraryWorker(
             url,
             token,
             page_size=self.PAGE_SIZE,
-            offset=self._offset,
+            offset=request_offset,
             search_term=search_term,
             platform_slug=platform_slug,
         )
@@ -252,9 +243,7 @@ class ThreeDSLibraryWidget(QWidget):
         existing = {self.platforms.itemText(index) for index in range(self.platforms.count())}
         additions = [
             item for item in platforms
-            if isinstance(item, dict)
-            and item.get("name")
-            and str(item.get("name")) not in existing
+            if isinstance(item, dict) and item.get("name") and str(item.get("name")) not in existing
         ]
         if not additions:
             return
@@ -270,16 +259,30 @@ class ThreeDSLibraryWidget(QWidget):
         if generation != self._generation:
             return
         batch = list(batch)
+        search_term, platform_slug = self._cached_query()
+        replacing_cache = self._cache_displayed
+        if replacing_cache:
+            self.list_model.clear_games()
+            self.games = []
+            self._offset = 0
+            self._cache_displayed = False
         if not batch:
+            self._loading = False
+            self.refresh_button.setEnabled(True)
+            if replacing_cache or not self.games:
+                self.status.setText("No matching games found in RomM.")
+                self._clear_details()
             return
         self.games.extend(batch)
         self.list_model.add_games(batch)
         self._offset += len(batch)
         self._loading = False
         self.refresh_button.setEnabled(True)
-        scope = " results" if self.search.text().strip() or self.platforms.currentData() else " compatible files"
-        self.status.setText(f"Loaded {len(self.games):,}{scope}. Scroll for more.")
-        self._apply_filter()
+        if replacing_cache or self._offset == len(batch):
+            source = self._source()
+            if source is not None:
+                save_cached_page(source[0], batch, search_term, platform_slug)
+        self.status.setText(f"Showing {len(self.games):,} loaded results. Scroll for more.")
 
     def _scroll_changed(self, value: int) -> None:
         bar = self.game_list.verticalScrollBar()
@@ -295,7 +298,7 @@ class ThreeDSLibraryWidget(QWidget):
         self._loading = False
         self.refresh_button.setEnabled(True)
         self.status.setText(
-            f"RomM library load stopped after {len(self.games):,} files: {message}"
+            f"Showing {len(self.games):,} cached/loaded files • RomM refresh failed: {message}"
             if self.games
             else f"RomM library unavailable: {message}"
         )
@@ -306,16 +309,11 @@ class ThreeDSLibraryWidget(QWidget):
         self.library_worker = None
         self._loading = False
         self.refresh_button.setEnabled(True)
-
-    def _apply_filter(self) -> None:
-        self.list_proxy.set_query("")
-        self.list_proxy.set_platform("All platforms")
-        if self.games:
-            self.status.setText(
-                f"Showing {len(self.games):,} loaded results. Scroll for more."
-            )
-        elif not self._loading:
-            self._clear_details()
+        if not self.games and not self.status.text().startswith("RomM library unavailable"):
+            self.status.setText("No matching games found in RomM.")
+        if self._filter_timer.isActive():
+            self._filter_timer.stop()
+            QTimer.singleShot(0, self._reload_for_filter)
 
     def _selected_game(self) -> RomMRemoteGame | None:
         index = self.game_list.currentIndex()
@@ -374,9 +372,7 @@ class ThreeDSLibraryWidget(QWidget):
         if not pixmap.loadFromData(data):
             self.artwork.setText("Artwork unavailable")
             return
-        self.artwork.setPixmap(
-            pixmap.scaled(220, 220, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        )
+        self.artwork.setPixmap(pixmap.scaled(220, 220, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
 
     def _clear_details(self) -> None:
         self.artwork.clear()
