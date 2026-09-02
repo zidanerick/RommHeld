@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Fetch the Icons8 Color assets used by the handheld selector.
+"""Vendor the Icons8 artwork used by the handheld selector.
 
-The application itself never fetches these assets at runtime. Run this script
-when updating the bundled artwork or preparing a release, then commit the
-resulting files under assets/handhelds/icons8/.
+Run this script when preparing a checkout/release that should contain the
+artwork locally. RommHeld does not fetch artwork from the network at runtime.
 """
 from __future__ import annotations
 
@@ -14,10 +13,10 @@ ROOT = Path(__file__).resolve().parents[1]
 DEST = ROOT / "assets" / "handhelds" / "icons8"
 
 ASSETS = {
-    "3ds_console.png": "https://img.icons8.com/color/1200/3ds-console.jpg",
-    "nintendo_ds.png": "https://img.icons8.com/color/1200/nintendo-ds.png",
-    "playstation.png": "https://img.icons8.com/color/1200/playstation.png",
-    "playstation_portable.png": "https://img.icons8.com/color/1200/playstation-portable.png",
+    "vita.png": "https://img.icons8.com/color/96/playstation.png",
+    "3ds.png": "https://img.icons8.com/color/96/3ds-console.png",
+    "ds.png": "https://img.icons8.com/color/96/nintendo-ds.png",
+    "psp.png": "https://img.icons8.com/color/96/playstation-portable.png",
 }
 
 
@@ -36,7 +35,8 @@ def main() -> int:
     DEST.mkdir(parents=True, exist_ok=True)
     for name, url in ASSETS.items():
         download(name, url)
-    print(f"Bundled Icons8 assets in {DEST}")
+    print(f"Icons8 assets are ready in: {DEST}")
+    print("Review and commit the generated files before packaging a release.")
     return 0
 
 
