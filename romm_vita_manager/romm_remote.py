@@ -62,17 +62,18 @@ def _items(payload) -> list:
 
 
 def resolve_cover_url(instance_url: str, cover: str | None) -> str | None:
+    """Resolve a RomM cover path using the same resource base as RomM's frontend."""
     if not cover:
         return None
     value = str(cover).strip()
     if value.startswith(("http://", "https://")):
         return value
     base = normalize_romm_url(instance_url)
-    return f"{base}/{value.lstrip('/')}"
+    return f"{base}/assets/romm/resources/{value.lstrip('/')}"
 
 
 def _platform_name(item: dict) -> str:
-    value = item.get("platform_name")
+    value = item.get("platform_name") or item.get("platform_display_name")
     if value:
         return str(value)
     platform = item.get("platform")
@@ -97,7 +98,7 @@ def _platform_slug(item: dict, by_id: dict[int, str], by_name: dict[str, str]) -
         name = nested.get("name")
         if name and str(name).lower() in by_name:
             return by_name[str(name).lower()]
-    name = item.get("platform_name")
+    name = item.get("platform_name") or item.get("platform_display_name")
     if name and str(name).lower() in by_name:
         return by_name[str(name).lower()]
     return ""
@@ -143,8 +144,14 @@ def _list_games_for_platform_slugs(instance_url: str, token: str, allowed_slugs:
         platform = names.get(item.get("platform_id"), _platform_name(item))
         filename = str(item.get("fs_name") or item.get("file_name") or item.get("name") or "")
         name = str(item.get("name") or filename)
-        size = int(item.get("size_bytes") or item.get("size") or 0)
-        cover = item.get("cover_path") or item.get("cover_url")
+        size = int(item.get("fs_size_bytes") or item.get("size_bytes") or item.get("size") or 0)
+        cover = (
+            item.get("path_cover_large")
+            or item.get("path_cover_small")
+            or item.get("url_cover")
+            or item.get("cover_path")
+            or item.get("cover_url")
+        )
         games.append(RomMRemoteGame(item["id"], name, filename, platform, size, resolve_cover_url(instance_url, cover), slug))
     return games
 
@@ -167,7 +174,6 @@ def list_3ds_games(instance_url: str, token: str, *, limit: int = 1000) -> list[
         limit=limit,
         missing_message="RomM has no Nintendo 3DS platform (slug: 3ds).",
     )
-    # Keep the old helper's value shape stable for existing callers/tests.
     return [
         RomMRemoteGame(game.rom_id, game.name, game.filename, game.platform, game.size, game.cover_url)
         for game in games
