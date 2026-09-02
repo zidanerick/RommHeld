@@ -74,8 +74,6 @@ class _RomMHTTPHandler(request.HTTPHandler):
 
 class _RomMHTTPSHandler(request.HTTPSHandler):
     def https_open(self, req):
-        # HTTPSHandler's check_hostname attribute is not present on all Python
-        # releases. Let HTTPSConnection retain its normal SSL hostname check.
         return self.do_open(
             _RomMHTTPSConnection,
             req,
@@ -117,6 +115,18 @@ def _items(payload) -> list:
     return []
 
 
+def _as_int(value) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        if isinstance(value, int):
+            return value
+        text = str(value).strip()
+        return int(text) if text else None
+    except (TypeError, ValueError):
+        return None
+
+
 def resolve_cover_url(instance_url: str, cover: str | None) -> str | None:
     """Resolve a RomM cover path using RomM's frontend resource base."""
     if not cover:
@@ -146,8 +156,8 @@ def _platform_slug(item: dict, by_id: dict[int, str], by_name: dict[str, str]) -
     value = item.get("platform_slug")
     if value:
         return str(value).lower()
-    platform_id = item.get("platform_id")
-    if isinstance(platform_id, int) and platform_id in by_id:
+    platform_id = _as_int(item.get("platform_id"))
+    if platform_id is not None and platform_id in by_id:
         return by_id[platform_id]
     nested = item.get("platform")
     if isinstance(nested, dict):
@@ -182,7 +192,7 @@ def _list_games_for_platform_slugs(
             for item in platforms
             if isinstance(item, dict)
             and str(item.get("slug", "")).lower() in allowed_slugs
-            and isinstance(item.get("id"), int)
+            and _as_int(item.get("id")) is not None
         ]
     else:
         wanted = platform_items
@@ -191,16 +201,28 @@ def _list_games_for_platform_slugs(
     if not wanted:
         raise RomMApiError(missing_message)
 
-    platform_ids = [item["id"] for item in wanted]
-    by_id = {item["id"]: str(item.get("slug") or "").lower() for item in wanted}
+    platform_ids: list[int] = []
+    for item in wanted:
+        platform_id = _as_int(item.get("id"))
+        if platform_id is not None:
+            platform_ids.append(platform_id)
+    if not platform_ids:
+        raise RomMApiError(missing_message)
+
+    by_id = {
+        platform_id: str(item.get("slug") or "").lower()
+        for item in wanted
+        if (platform_id := _as_int(item.get("id"))) is not None
+    }
     by_name = {
         str(item.get("name") or item.get("slug") or "").lower(): str(item.get("slug") or "").lower()
         for item in wanted
         if item.get("name") or item.get("slug")
     }
     names = {
-        item["id"]: str(item.get("name") or item.get("slug") or "Unknown platform")
+        platform_id: str(item.get("name") or item.get("slug") or "Unknown platform")
         for item in wanted
+        if (platform_id := _as_int(item.get("id"))) is not None
     }
 
     params = {
@@ -222,15 +244,19 @@ def _list_games_for_platform_slugs(
 
     games: list[RomMRemoteGame] = []
     for item in rows:
-        if not isinstance(item, dict) or not isinstance(item.get("id"), int):
+        if not isinstance(item, dict):
+            continue
+        rom_id = _as_int(item.get("id"))
+        if rom_id is None:
             continue
         slug = _platform_slug(item, by_id, by_name)
         if slug not in allowed_slugs:
             continue
-        platform = names.get(item.get("platform_id"), _platform_name(item))
+        platform_id = _as_int(item.get("platform_id"))
+        platform = names.get(platform_id, _platform_name(item))
         filename = str(item.get("fs_name") or item.get("file_name") or item.get("name") or "")
         name = str(item.get("name") or filename)
-        size = int(item.get("fs_size_bytes") or item.get("size_bytes") or item.get("size") or 0)
+        size = _as_int(item.get("fs_size_bytes") or item.get("size_bytes") or item.get("size")) or 0
         cover = (
             item.get("path_cover_large")
             or item.get("path_cover_small")
@@ -240,7 +266,7 @@ def _list_games_for_platform_slugs(
         )
         games.append(
             RomMRemoteGame(
-                item["id"],
+                rom_id,
                 name,
                 filename,
                 platform,
