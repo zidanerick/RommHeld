@@ -138,6 +138,7 @@ class ConsoleGrid(QWidget):
         self.grid.setContentsMargins(0, 0, 0, 0)
         self.grid.setHorizontalSpacing(14)
         self.grid.setVerticalSpacing(14)
+        self.grid.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._columns = 0
         self._relayout()
@@ -148,7 +149,7 @@ class ConsoleGrid(QWidget):
 
     def _column_count(self) -> int:
         width = max(280, self.width())
-        return max(1, min(3, (width + 14) // (280 + 14)))
+        return max(1, min(3, int((width + 14) // 294)))
 
     def _relayout(self) -> None:
         columns = int(self._column_count())
