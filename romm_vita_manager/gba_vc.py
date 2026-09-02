@@ -2,10 +2,22 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from agbcia.banner.image import ImageSource
-from agbcia.gba.footer import extract_logo
-from agbcia.inject.pipeline import InjectionRequest, inject
+if TYPE_CHECKING:
+    from agbcia.banner.image import ImageSource
+
+
+def _require_agbcia():
+    try:
+        from agbcia.gba.footer import extract_logo
+        from agbcia.inject.pipeline import InjectionRequest, inject
+    except ImportError as exc:
+        raise RuntimeError(
+            "Native GBA packaging requires the 'agbcia' package. "
+            "Install it with: python -m pip install -r requirements.txt"
+        ) from exc
+    return extract_logo, InjectionRequest, inject
 
 
 def native_title_id_for_romm_id(romm_id: int) -> bytes:
@@ -26,12 +38,13 @@ def read_asset(path: Path) -> bytes:
 
 def extract_native_boot_logo(donor_cia: Path, boot9: Path) -> bytes:
     """Extract the AGB_FIRM boot logo from a donor CIA the user owns."""
+    extract_logo, _, _ = _require_agbcia()
     return extract_logo(read_asset(donor_cia), read_asset(boot9))
 
 
 def build_native_gba_cia(
     rom: bytes,
-    artwork: ImageSource,
+    artwork: "ImageSource",
     *,
     boot_logo: bytes,
     title_id: bytes,
@@ -42,6 +55,7 @@ def build_native_gba_cia(
     title_version: int = 0,
 ) -> bytes:
     """Build an installable GBA CIA that boots through AGB_FIRM."""
+    _, InjectionRequest, inject = _require_agbcia()
     request = InjectionRequest(
         mode="native",
         rom=rom,
