@@ -61,7 +61,7 @@ class WorkspaceDashboardWindow(BaseWorkspaceDashboardWindow):
     def open_3ds(self) -> None:
         source = get_library_source(self._reload_config())
         library_root = Path(source.local_root).expanduser() if source.mode == "local" and source.local_root else None
-        dialog = ThreeDSManagerDialog(load_config(), library_root, self)
+        dialog = ThreeDSManagerDialog(self._reload_config(), library_root, self)
         dialog.exec()
         self.config = self._reload_config()
         self.refresh_device_page()
