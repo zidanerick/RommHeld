@@ -34,8 +34,9 @@ def test_validate_r4_storage(tmp_path: Path):
 
     result = validate_storage(tmp_path)
 
-    assert result.kind == "ds-flashcart"
+    assert result.kind == "ds-flashcard"
     assert result.confidence == "medium"
+    assert "__rpg/" in result.signatures
 
 
 def test_validate_unknown_storage(tmp_path: Path):
