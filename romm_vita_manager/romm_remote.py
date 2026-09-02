@@ -35,7 +35,13 @@ def _json_request(instance_url: str, token: str, path: str, params: dict | None 
         with request.urlopen(req, timeout=15) as response:
             return json.load(response)
     except error.HTTPError as exc:
-        raise RomMApiError(f"RomM API returned HTTP {exc.code}.", exc.code) from exc
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            pass
+        suffix = f" {detail[:240]}" if detail else ""
+        raise RomMApiError(f"RomM API returned HTTP {exc.code}.{suffix}", exc.code) from exc
     except (error.URLError, TimeoutError) as exc:
         reason = getattr(exc, "reason", exc)
         raise RomMApiError(f"Unable to reach the RomM server: {reason}") from exc
@@ -63,18 +69,26 @@ def _download(instance_url: str, token: str, rom: RomMRemoteGame, destination: P
     return destination
 
 
-def list_3ds_games(instance_url: str, token: str, *, limit: int = 1000) -> list[RomMRemoteGame]:
-    platforms = _json_request(instance_url, token, "platforms")
-    if isinstance(platforms, dict):
-        platforms = platforms.get("items", platforms.get("data", []))
-    if not isinstance(platforms, list):
-        raise RomMApiError("RomM returned an unexpected platform response.")
+def _unwrap_items(payload):
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    for key in ("items", "results", "data"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+    return []
 
+
+def list_3ds_games(instance_url: str, token: str, *, limit: int = 1000) -> list[RomMRemoteGame]:
+    platforms = _unwrap_items(_json_request(instance_url, token, "platforms"))
     platform_ids = [
         item.get("id")
         for item in platforms
         if isinstance(item, dict)
         and str(item.get("slug", "")).lower() == "3ds"
+        and isinstance(item.get("id"), int)
     ]
     if not platform_ids:
         raise RomMApiError("RomM has no Nintendo 3DS platform (slug: 3ds).")
@@ -85,12 +99,7 @@ def list_3ds_games(instance_url: str, token: str, *, limit: int = 1000) -> list[
         "roms",
         {"platform_ids": platform_ids, "limit": limit, "offset": 0, "with_total": False},
     )
-    if isinstance(payload, dict):
-        rows = payload.get("items", payload.get("data", []))
-    else:
-        rows = payload
-    if not isinstance(rows, list):
-        raise RomMApiError("RomM returned an unexpected ROM list response.")
+    rows = _unwrap_items(payload)
 
     games: list[RomMRemoteGame] = []
     for item in rows:
@@ -101,7 +110,10 @@ def list_3ds_games(instance_url: str, token: str, *, limit: int = 1000) -> list[
             continue
         filename = str(item.get("fs_name") or item.get("file_name") or item.get("name") or "")
         name = str(item.get("name") or filename)
-        platform = str(item.get("platform_name") or "Nintendo 3DS")
+        platform = str(
+            item.get("platform_name")
+            or (item.get("platform") or {}).get("name") if isinstance(item.get("platform"), dict) else "Nintendo 3DS"
+        )
         size = int(item.get("size_bytes") or item.get("size") or 0)
         cover = item.get("cover_path") or item.get("cover_url")
         games.append(RomMRemoteGame(rom_id, name, filename, platform, size, str(cover) if cover else None))
