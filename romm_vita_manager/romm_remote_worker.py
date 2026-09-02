@@ -68,6 +68,7 @@ class RomMLibraryWorker(QThread):
         return sorted(
             wanted,
             key=lambda item: (
+                0 if int(item.get("rom_count") or item.get("roms_count") or 0) > 0 else 1,
                 priority.get(str(item.get("slug", "")).lower(), len(priority)),
                 str(item.get("name") or item.get("slug") or "").casefold(),
             ),
@@ -91,7 +92,6 @@ class RomMLibraryWorker(QThread):
 
     def _fetch_batch(self, platforms: list[dict]) -> list:
         if not platforms:
-            self.platforms_consumed = 0
             return []
         per_platform = max(1, self.page_size // len(platforms))
         results: dict[str, list] = {}
@@ -116,8 +116,7 @@ class RomMLibraryWorker(QThread):
 
     def _fetch_all_platforms(self, wanted: list[dict]) -> list:
         """Fill one UI page by walking small platform groups until full or exhausted."""
-        page_number = self.offset // self.page_size
-        start = min(page_number * self.PLATFORM_BATCH_SIZE, len(wanted))
+        start = min(self.offset, len(wanted))
         consumed = 0
         collected: list = []
         while start < len(wanted):
