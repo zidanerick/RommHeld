@@ -99,16 +99,23 @@ class FakeFTP:
         pass
 
 
+class NoRestFTP(FakeFTP):
+    def storbinary(self, command, fp, blocksize=8192, callback=None, rest=None):
+        if rest:
+            raise ftplib.error_perm("500 REST not implemented")
+        return super().storbinary(command, fp, blocksize=blocksize, callback=callback, rest=rest)
+
+
 @pytest.fixture(autouse=True)
 def reset_fake():
     FakeFTP.files = {}
     FakeFTP.dirs = {"/"}
 
 
-def make_backend(remote_root: str = "/") -> ThreeDSFtpBackend:
+def make_backend(remote_root: str = "/", ftp_factory=FakeFTP) -> ThreeDSFtpBackend:
     backend = ThreeDSFtpBackend(
         ThreeDSFtpSettings(host="192.0.2.10", remote_root=remote_root),
-        ftp_factory=FakeFTP,
+        ftp_factory=ftp_factory,
     )
     backend.connect()
     return backend
@@ -172,6 +179,19 @@ def test_upload_can_resume_partial_remote_file(tmp_path: Path):
 
     result, written = backend.upload(source, "/roms/test.bin", resume=True)
     assert result == "resumed"
+    assert written == len(source.read_bytes())
+    assert FakeFTP.files["/roms/test.bin"] == source.read_bytes()
+
+
+def test_upload_falls_back_to_fresh_copy_when_rest_is_unsupported(tmp_path: Path):
+    source = tmp_path / "test.bin"
+    source.write_bytes(b"0123456789")
+    FakeFTP.files["/roms/test.bin"] = b"0123"
+    FakeFTP.dirs.add("/roms")
+    backend = make_backend(ftp_factory=NoRestFTP)
+
+    result, written = backend.upload(source, "/roms/test.bin", resume=True)
+    assert result == "copied"
     assert written == len(source.read_bytes())
     assert FakeFTP.files["/roms/test.bin"] == source.read_bytes()
 
