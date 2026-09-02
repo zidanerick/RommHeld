@@ -26,7 +26,7 @@ WORKSPACE_PROFILES = {
 
 
 class ManagementShell(QWidget):
-    """Single-window management shell with real, switchable workspace tabs."""
+    """Single-window management shell with console-aware sections and device status."""
 
     navigation_requested = Signal(str)
     change_handheld_requested = Signal()
@@ -72,11 +72,53 @@ class ManagementShell(QWidget):
         footer = QFrame()
         footer.setObjectName("workspaceFooter")
         footer_layout = QHBoxLayout(footer)
-        footer_layout.setContentsMargins(10, 5, 10, 5)
-        self.footer_label = QLabel(f"{profile.name} • LIBRARY")
-        footer_layout.addWidget(self.footer_label)
+        footer_layout.setContentsMargins(10, 4, 10, 4)
+        self.footer_section = QLabel(f"{profile.name} • LIBRARY")
+        self.footer_section.setObjectName("footerSection")
+        footer_layout.addWidget(self.footer_section)
         footer_layout.addStretch()
+        self.footer_devices = {}
+        for key, label in (("vita", "Vita"), ("3ds", "3DS"), ("ds", "DS")):
+            widget = self._make_device_status(label, key)
+            self.footer_devices[key] = widget
+            footer_layout.addWidget(widget)
         root.addWidget(footer)
+
+    def _make_device_status(self, label: str, key: str) -> QWidget:
+        container = QWidget()
+        row = QHBoxLayout(container)
+        row.setContentsMargins(6, 0, 6, 0)
+        row.setSpacing(4)
+        icon = QLabel()
+        icon.setFixedSize(18, 18)
+        assets = get_platform_assets(key)
+        if assets:
+            icon_path = assets.path("device_small")
+            if icon_path.is_file():
+                icon.setPixmap(
+                    QPixmap(str(icon_path)).scaled(
+                        18,
+                        18,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
+        row.addWidget(icon)
+        text = QLabel(f"{label}: Not detected")
+        text.setObjectName("footerDeviceText")
+        row.addWidget(text)
+        return container
+
+    def set_device_statuses(self, vita: str, three_ds: str, ds: str) -> None:
+        values = {"vita": vita, "3ds": three_ds, "ds": ds}
+        for key, text in values.items():
+            widget = self.footer_devices.get(key)
+            if widget is None:
+                continue
+            labels = widget.findChildren(QLabel)
+            if labels:
+                prefix = {"vita": "Vita", "3ds": "3DS", "ds": "DS"}[key]
+                labels[-1].setText(f"{prefix}: {text}")
 
     def _load_logo(self) -> None:
         assets = get_platform_assets(self.profile.key)
@@ -99,7 +141,9 @@ class ManagementShell(QWidget):
     def set_profile(self, profile: WorkspaceProfile) -> None:
         self.profile = profile
         self.title.setText(profile.name.upper())
-        self.footer_label.setText(f"{profile.name} • {self.tabs.tabText(self.tabs.currentIndex()).upper() if self.tabs.count() else 'READY'}")
+        self.footer_section.setText(
+            f"{profile.name} • {self.tabs.tabText(self.tabs.currentIndex()).upper() if self.tabs.count() else 'READY'}"
+        )
         self._load_logo()
         self.setStyleSheet(self._stylesheet())
 
@@ -124,14 +168,11 @@ class ManagementShell(QWidget):
                 self.tabs.setCurrentIndex(index)
                 return
 
-    def set_content(self, widget: QWidget) -> None:
-        self.add_section("Library", widget, persistent=True)
-
     def _tab_changed(self, index: int) -> None:
         if index < 0:
             return
         section = self.tabs.tabText(index).lower()
-        self.footer_label.setText(f"{self.profile.name} • {section.upper()}")
+        self.footer_section.setText(f"{self.profile.name} • {section.upper()}")
         self.navigation_requested.emit(section)
 
     def _stylesheet(self) -> str:
@@ -148,4 +189,6 @@ class ManagementShell(QWidget):
         QTabBar::tab:hover {{ color:#ffffff; border-color:{p.accent}; }}
         QTabBar::tab:selected {{ background:#171d26; color:{p.accent}; border-color:{p.accent}; }}
         QFrame#workspaceFooter {{ background:#12161c; border-top:2px solid {p.accent}; }}
+        QLabel#footerSection {{ color:#b7c0ca; font-size:10px; font-weight:800; }}
+        QLabel#footerDeviceText {{ color:#aab3bf; font-size:10px; }}
         """
