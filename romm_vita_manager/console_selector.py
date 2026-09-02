@@ -41,7 +41,7 @@ class ConsoleProfile:
 CONSOLES = (
     ConsoleProfile("vita", "PlayStation Vita", "supported", "#3b9cf5", "USB / VitaShell • RetroFlow • Adrenaline"),
     ConsoleProfile("3ds", "Nintendo 3DS", "supported", "#d12228", "FTP / SD card • native 3DS runtimes"),
-    ConsoleProfile("ds", "Nintendo DS", "supported", "#54b8ff", "TWiLight Menu++ • nds-bootstrap • flashcards"),
+    ConsoleProfile("ds", "Nintendo DS", "research", "#54b8ff", "Target research • TWiLight Menu++ / flashcards"),
     ConsoleProfile("psp", "PlayStation Portable", "coming", "#8a8f98", "Coming soon"),
     ConsoleProfile("mobile", "Mobile", "coming", "#8a8f98", "Coming soon"),
 )
@@ -78,8 +78,9 @@ class ConsoleTile(QPushButton):
     def __init__(self, profile: ConsoleProfile, parent=None):
         super().__init__(parent)
         self.profile = profile
-        self.setCheckable(profile.state == "supported")
-        self.setEnabled(profile.state == "supported")
+        selectable = profile.state in {"supported", "research"}
+        self.setCheckable(selectable)
+        self.setEnabled(selectable)
         self.setFixedSize(QSize(self.TILE_WIDTH, self.TILE_HEIGHT))
         self.setCursor(Qt.CursorShape.PointingHandCursor if self.isEnabled() else Qt.CursorShape.ArrowCursor)
         self.setStyleSheet(self._style())
@@ -97,7 +98,8 @@ class ConsoleTile(QPushButton):
         sub.setStyleSheet("background:transparent;border:none;color:#8f98a6;font-size:10px;padding:0;")
         layout.addWidget(sub)
 
-        state = QLabel("SUPPORTED" if profile.state == "supported" else "COMING SOON")
+        labels = {"supported": "SUPPORTED", "research": "RESEARCH", "coming": "COMING SOON"}
+        state = QLabel(labels.get(profile.state, profile.state.upper()))
         state.setAlignment(Qt.AlignmentFlag.AlignCenter)
         state.setStyleSheet(
             f"background:transparent;border:none;color:{profile.accent};font-size:9px;font-weight:800;letter-spacing:1px;"
@@ -290,7 +292,7 @@ class PlatformSelectorDialog(QDialog):
 
     def select_console(self, key: str) -> None:
         profile = next((item for item in CONSOLES if item.key == key), None)
-        if profile is None or profile.state != "supported":
+        if profile is None or profile.state not in {"supported", "research"}:
             return
         self.selected_console = key
         self.selected_profile = profile
