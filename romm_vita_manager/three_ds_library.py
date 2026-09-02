@@ -20,7 +20,7 @@ from .three_ds_manager import RomMArtworkWorker
 
 
 class RomMGameListModel(QAbstractListModel):
-    """Compact Qt model that can hold large RomM libraries without rebuilding widgets."""
+    """Compact Qt model for large RomM libraries."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,14 +48,13 @@ class RomMGameListModel(QAbstractListModel):
         if not games:
             return
         start = len(self.games)
-        end = start + len(games) - 1
-        self.beginInsertRows(QModelIndex(), start, end)
+        self.beginInsertRows(QModelIndex(), start, start + len(games) - 1)
         self.games.extend(games)
         self.endInsertRows()
 
 
 class RomMGameFilterProxy(QSortFilterProxyModel):
-    """Fast in-process search/filter over the loaded RomM library."""
+    """Fast local filtering of whichever server-side page is currently loaded."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -84,7 +83,10 @@ class RomMGameFilterProxy(QSortFilterProxyModel):
 
 
 class ThreeDSLibraryWidget(QWidget):
-    """Responsive, incremental RomM browser for content deployable to a 3DS."""
+    """Lazy, server-searched RomM browser for large 3DS-compatible libraries."""
+
+    PAGE_SIZE = 100
+    SCROLL_THRESHOLD = 15
 
     def __init__(self, config: dict, open_manager_callback, parent=None):
         super().__init__(parent)
@@ -94,19 +96,21 @@ class ThreeDSLibraryWidget(QWidget):
         self.artwork_worker: RomMArtworkWorker | None = None
         self.games: list[RomMRemoteGame] = []
         self._loading = False
+        self._offset = 0
+        self._generation = 0
         self._filter_timer = QTimer(self)
         self._filter_timer.setSingleShot(True)
-        self._filter_timer.setInterval(120)
-        self._filter_timer.timeout.connect(self._apply_filter)
+        self._filter_timer.setInterval(180)
+        self._filter_timer.timeout.connect(self._reload_for_filter)
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search compatible games…")
         self.platforms = QComboBox()
-        self.platforms.addItem("All platforms")
+        self.platforms.addItem("All platforms", "")
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.clicked.connect(self.refresh_library)
         self.search.textChanged.connect(self._schedule_filter)
-        self.platforms.currentIndexChanged.connect(self._apply_filter)
+        self.platforms.currentIndexChanged.connect(self._schedule_filter)
 
         self.list_model = RomMGameListModel(self)
         self.list_proxy = RomMGameFilterProxy(self)
@@ -116,6 +120,7 @@ class ThreeDSLibraryWidget(QWidget):
         self.game_list.setUniformItemSizes(True)
         self.game_list.setSelectionMode(QListView.SelectionMode.SingleSelection)
         self.game_list.selectionModel().currentChanged.connect(self._selected_changed)
+        self.game_list.verticalScrollBar().valueChanged.connect(self._scroll_changed)
 
         self.artwork = QLabel("Select a game")
         self.artwork.setFixedSize(220, 220)
@@ -159,91 +164,155 @@ class ThreeDSLibraryWidget(QWidget):
 
         self.refresh_library()
 
-    def _schedule_filter(self) -> None:
-        self._filter_timer.start()
-
-    def refresh_library(self) -> None:
-        if self.library_worker and self.library_worker.isRunning():
-            return
+    def _source(self) -> tuple[str, str] | None:
         source = self.config.get("library_source", {})
         mode = str(source.get("mode", "local")).lower() if isinstance(source, dict) else "local"
         if mode != "romm_api":
-            self.games = []
-            self.list_model.clear_games()
-            self.status.setText("Set the library source to RomM Server in Settings to browse the remote library.")
-            return
+            return None
         url = str(source.get("romm_url", "")).strip()
         token = str(source.get("api_token", "")).strip()
-        if not url or not token:
-            self.status.setText("RomM Server is selected but the URL or Client API Token is missing.")
-            return
+        return (url, token) if url and token else None
 
+    def refresh_library(self) -> None:
+        self.search.clear()
+        self._offset = 0
+        self._generation += 1
+        self._clear_results()
+        self._start_page(reset=True)
+
+    def _clear_results(self) -> None:
+        self._loading = False
         self.games = []
         self.list_model.clear_games()
         self.platforms.blockSignals(True)
         self.platforms.clear()
-        self.platforms.addItem("All platforms")
+        self.platforms.addItem("All platforms", "")
         self.platforms.blockSignals(False)
+        self.list_proxy.set_query("")
         self.list_proxy.set_platform("All platforms")
+        self._clear_details()
+
+    def _schedule_filter(self) -> None:
+        self._filter_timer.start()
+
+    def _reload_for_filter(self) -> None:
+        if self.library_worker and self.library_worker.isRunning():
+            self._filter_timer.start()
+            return
+        self._offset = 0
+        self._generation += 1
+        self._clear_results()
+        self._start_page(reset=True)
+
+    def _start_page(self, *, reset: bool = False) -> None:
+        source = self._source()
+        if source is None:
+            self.status.setText("Set the library source to RomM Server in Settings to browse the remote library.")
+            return
+        if self.library_worker and self.library_worker.isRunning():
+            return
+
+        url, token = source
+        search_term = self.search.text().strip()
+        platform_slug = str(self.platforms.currentData() or "") or None
+        if reset:
+            self._offset = 0
+            self.list_model.clear_games()
+            self.games = []
+
         self._loading = True
         self.refresh_button.setEnabled(False)
-        self.status.setText(f"Loading compatible RomM library from {url}…")
-        self.library_worker = RomMLibraryWorker(url, token)
-        self.library_worker.loaded.connect(self._loaded_batch)
-        self.library_worker.failed.connect(self._failed)
-        self.library_worker.finished.connect(self._finished)
-        self.library_worker.start()
+        if search_term:
+            scope = f" for ‘{search_term}’"
+        elif platform_slug:
+            scope = f" for {self.platforms.currentText()}"
+        else:
+            scope = ""
+        self.status.setText(f"Loading RomM library{scope}…")
 
-    def _loaded_batch(self, batch) -> None:
+        worker = RomMLibraryWorker(
+            url,
+            token,
+            page_size=self.PAGE_SIZE,
+            offset=self._offset,
+            search_term=search_term,
+            platform_slug=platform_slug,
+        )
+        generation = self._generation
+        worker.loaded.connect(lambda batch, g=generation: self._loaded_batch(batch, g))
+        worker.platforms_loaded.connect(lambda platforms, g=generation: self._platforms_loaded(platforms, g))
+        worker.failed.connect(lambda message, g=generation: self._failed(message, g))
+        worker.finished.connect(lambda g=generation: self._finished(g))
+        self.library_worker = worker
+        worker.start()
+
+    def _platforms_loaded(self, platforms, generation: int) -> None:
+        if generation != self._generation:
+            return
+        existing = {self.platforms.itemText(index) for index in range(self.platforms.count())}
+        additions = [
+            item for item in platforms
+            if isinstance(item, dict)
+            and item.get("name")
+            and str(item.get("name")) not in existing
+        ]
+        if not additions:
+            return
+        current_slug = str(self.platforms.currentData() or "")
+        self.platforms.blockSignals(True)
+        for item in sorted(additions, key=lambda x: str(x.get("name")).casefold()):
+            self.platforms.addItem(str(item["name"]), str(item.get("slug") or "").lower())
+        index = self.platforms.findData(current_slug)
+        self.platforms.setCurrentIndex(index if index >= 0 else 0)
+        self.platforms.blockSignals(False)
+
+    def _loaded_batch(self, batch, generation: int) -> None:
+        if generation != self._generation:
+            return
         batch = list(batch)
         if not batch:
             return
         self.games.extend(batch)
         self.list_model.add_games(batch)
-
-        existing_platforms = {
-            self.platforms.itemText(index)
-            for index in range(self.platforms.count())
-        }
-        new_platforms = sorted(
-            {game.platform for game in batch if game.platform not in existing_platforms},
-            key=str.lower,
-        )
-        if new_platforms:
-            current = self.platforms.currentText()
-            self.platforms.blockSignals(True)
-            self.platforms.addItems(new_platforms)
-            self.platforms.setCurrentText(current)
-            self.platforms.blockSignals(False)
-
-        self.status.setText(
-            f"Loading RomM library… {len(self.games):,} compatible files loaded."
-        )
-
-    def _failed(self, message: str) -> None:
+        self._offset += len(batch)
         self._loading = False
         self.refresh_button.setEnabled(True)
-        if self.games:
-            self.status.setText(
-                f"RomM library load stopped after {len(self.games):,} files: {message}"
-            )
-        else:
-            self.status.setText(f"RomM library unavailable: {message}")
+        scope = " results" if self.search.text().strip() or self.platforms.currentData() else " compatible files"
+        self.status.setText(f"Loaded {len(self.games):,}{scope}. Scroll for more.")
+        self._apply_filter()
 
-    def _finished(self) -> None:
+    def _scroll_changed(self, value: int) -> None:
+        bar = self.game_list.verticalScrollBar()
+        if bar.maximum() - value > self.SCROLL_THRESHOLD:
+            return
+        if self._loading or not self.games:
+            return
+        self._start_page()
+
+    def _failed(self, message: str, generation: int) -> None:
+        if generation != self._generation:
+            return
+        self._loading = False
+        self.refresh_button.setEnabled(True)
+        self.status.setText(
+            f"RomM library load stopped after {len(self.games):,} files: {message}"
+            if self.games
+            else f"RomM library unavailable: {message}"
+        )
+
+    def _finished(self, generation: int) -> None:
+        if generation != self._generation:
+            return
         self.library_worker = None
         self._loading = False
         self.refresh_button.setEnabled(True)
-        if self.games:
-            self.status.setText(f"RomM library ready: {len(self.games):,} compatible files.")
 
     def _apply_filter(self) -> None:
-        self.list_proxy.set_query(self.search.text())
-        self.list_proxy.set_platform(self.platforms.currentText())
+        self.list_proxy.set_query("")
+        self.list_proxy.set_platform("All platforms")
         if self.games:
             self.status.setText(
-                f"{self.list_proxy.rowCount():,} matches from {len(self.games):,} loaded files"
-                + (" • loading more…" if self._loading else "")
+                f"Showing {len(self.games):,} loaded results. Scroll for more."
             )
         elif not self._loading:
             self._clear_details()
