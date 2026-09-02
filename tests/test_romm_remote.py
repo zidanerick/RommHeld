@@ -4,6 +4,7 @@ from pathlib import Path
 
 from romm_vita_manager.romm_remote import (
     RomMRemoteGame,
+    _create_romm_connection,
     _download,
     list_3ds_games,
     list_compatible_games,
@@ -133,7 +134,7 @@ def test_download_streams_to_destination(monkeypatch, tmp_path: Path):
         done = False
 
     monkeypatch.setattr(
-        "romm_vita_manager.romm_remote.request.urlopen",
+        "romm_vita_manager.romm_remote._ROMM_OPENER.open",
         lambda *args, **kwargs: FakeResponse(),
     )
     game = RomMRemoteGame(7, "Test", "test.gba", "Game Boy Advance", 8)
@@ -143,3 +144,36 @@ def test_download_streams_to_destination(monkeypatch, tmp_path: Path):
 
     assert result == destination
     assert destination.read_bytes() == b"rom-data"
+
+
+def test_romm_connection_prefers_ipv4(monkeypatch):
+    attempts = []
+
+    class FakeSocket:
+        def __init__(self, family, socktype, proto):
+            self.family = family
+            self.socktype = socktype
+            self.proto = proto
+
+        def settimeout(self, timeout):
+            pass
+
+        def connect(self, sockaddr):
+            attempts.append((self.family, sockaddr))
+            if self.family == 2:
+                return
+            raise OSError("IPv6 unavailable")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        "romm_vita_manager.romm_remote.socket.getaddrinfo",
+        lambda host, port, family, socktype: [(family, socktype, 6, "", ("127.0.0.1", port))],
+    )
+    monkeypatch.setattr("romm_vita_manager.romm_remote.socket.socket", FakeSocket)
+
+    sock = _create_romm_connection(("games.example", 443), timeout=1)
+
+    assert sock.family == 2
+    assert attempts == [(2, ("127.0.0.1", 443))]
