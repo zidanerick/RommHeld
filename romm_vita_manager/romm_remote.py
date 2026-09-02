@@ -115,15 +115,19 @@ def _list_games_for_platform_slugs(
     limit: int = 200,
     offset: int = 0,
     missing_message: str,
+    platform_items: list[dict] | None = None,
 ) -> list[RomMRemoteGame]:
-    platforms = _items(_json_request(instance_url, token, "platforms"))
-    wanted = [
-        item
-        for item in platforms
-        if isinstance(item, dict)
-        and str(item.get("slug", "")).lower() in allowed_slugs
-        and isinstance(item.get("id"), int)
-    ]
+    if platform_items is None:
+        platforms = _items(_json_request(instance_url, token, "platforms"))
+        wanted = [
+            item
+            for item in platforms
+            if isinstance(item, dict)
+            and str(item.get("slug", "")).lower() in allowed_slugs
+            and isinstance(item.get("id"), int)
+        ]
+    else:
+        wanted = platform_items
     if not wanted:
         raise RomMApiError(missing_message)
 
