@@ -180,6 +180,14 @@ class ThreeDSFtpBackend:
             except Exception:
                 pass
 
+    @staticmethod
+    def _rest_not_supported(exc: BaseException) -> bool:
+        """Return True only for standard FTP responses indicating REST is unsupported."""
+        message = str(exc).upper()
+        if "REST" not in message:
+            return False
+        return bool(re.search(r"\b(?:500|501|502|504)\b", message))
+
     def upload(
         self,
         local_path,
@@ -190,7 +198,7 @@ class ThreeDSFtpBackend:
         cancel_event=None,
         progress: ProgressCallback | None = None,
     ) -> tuple[str, int]:
-        """Upload a local file using FTP, returning status and bytes transferred."""
+        """Upload a local file, resuming partial files when the server supports REST."""
         ftp = self._require_connection()
         local_path = local_path.expanduser()
         if not local_path.is_file():
@@ -209,22 +217,22 @@ class ThreeDSFtpBackend:
             return "different", 0
 
         offset = remote_existing if resume and remote_existing and remote_existing < source_size else 0
-        transferred = offset
         blocksize = 256 * 1024
 
-        try:
-            with local_path.open("rb") as src:
-                if offset:
-                    src.seek(offset)
+        with local_path.open("rb") as src:
+            transferred = offset
+            if offset:
+                src.seek(offset)
 
-                def callback(chunk: bytes) -> None:
-                    nonlocal transferred
-                    transferred += len(chunk)
-                    if progress is not None:
-                        progress(transferred)
-                    if cancel_event is not None and cancel_event.is_set():
-                        raise InterruptedError("Transfer cancelled.")
+            def callback(chunk: bytes) -> None:
+                nonlocal transferred
+                transferred += len(chunk)
+                if progress is not None:
+                    progress(transferred)
+                if cancel_event is not None and cancel_event.is_set():
+                    raise InterruptedError("Transfer cancelled.")
 
+            try:
                 ftp.storbinary(
                     f"STOR {remote}",
                     src,
@@ -232,12 +240,32 @@ class ThreeDSFtpBackend:
                     callback=callback,
                     rest=offset or None,
                 )
-        except InterruptedError:
-            try:
-                ftp.abort()
-            except Exception:
-                pass
-            return "cancelled", transferred
+            except InterruptedError:
+                try:
+                    ftp.abort()
+                except Exception:
+                    pass
+                return "cancelled", transferred
+            except (ftplib.error_perm, ftplib.error_reply) as exc:
+                if not offset or not self._rest_not_supported(exc):
+                    raise
+                src.seek(0)
+                transferred = 0
+                if progress is not None:
+                    progress(0)
+                try:
+                    ftp.storbinary(
+                        f"STOR {remote}",
+                        src,
+                        blocksize=blocksize,
+                        callback=callback,
+                    )
+                except InterruptedError:
+                    try:
+                        ftp.abort()
+                    except Exception:
+                        pass
+                    return "cancelled", transferred
 
         final_size = self.remote_size(remote_path)
         if final_size != source_size:
