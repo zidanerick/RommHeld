@@ -10,6 +10,7 @@ class RomMLibraryWorker(QThread):
     """Fetch a large compatible RomM library incrementally in API pages."""
 
     loaded = Signal(object)
+    failed = Signal(str)
 
     def __init__(self, instance_url: str, token: str, *, page_size: int = 200):
         super().__init__()
