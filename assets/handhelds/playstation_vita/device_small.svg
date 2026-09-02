@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 64" role="img" aria-label="PlayStation Vita small illustration">
-<rect x="4" y="12" width="120" height="40" rx="15" fill="#151a20" stroke="#657384" stroke-width="3"/>
-<rect x="36" y="18" width="56" height="22" rx="3" fill="#20313f" stroke="#8995a3" stroke-width="2"/>
-<circle cx="22" cy="33" r="8" fill="#10151a" stroke="#687687" stroke-width="2"/><circle cx="106" cy="33" r="8" fill="#10151a" stroke="#687687" stroke-width="2"/>
-<path d="M12 44h16M20 36v16" stroke="#d5dbe2" stroke-width="3" stroke-linecap="round"/>
-<circle cx="106" cy="23" r="2.8" fill="#59a9ff"/><circle cx="113" cy="30" r="2.8" fill="#59a9ff"/><circle cx="106" cy="37" r="2.8" fill="#59a9ff"/><circle cx="99" cy="30" r="2.8" fill="#59a9ff"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 86" role="img" aria-label="PlayStation Vita small illustration"><path d="M15 22Q18 13 34 10Q90 2 146 10Q162 13 165 22L172 57Q173 64 163 68Q154 73 138 75Q90 81 42 75Q26 73 17 68Q7 64 8 57Z" fill="#11151a" stroke="#67727e" stroke-width="3"/><rect x="48" y="17" width="84" height="39" rx="4" fill="#1e2d39" stroke="#84909c" stroke-width="2"/><circle cx="43" cy="54" r="10" fill="#0a0d11" stroke="#6e7a87" stroke-width="2"/><circle cx="137" cy="54" r="10" fill="#0a0d11" stroke="#6e7a87" stroke-width="2"/><path d="M26 66h34M43 49v34" stroke="#e1e5e9" stroke-width="4" stroke-linecap="round"/><circle cx="144" cy="44" r="3" fill="#ef5965"/><circle cx="151" cy="51" r="3" fill="#58c879"/><circle cx="144" cy="58" r="3" fill="#e5c750"/><circle cx="137" cy="51" r="3" fill="#6584ef"/></svg>
