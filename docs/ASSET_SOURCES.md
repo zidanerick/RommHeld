@@ -19,11 +19,12 @@ The PlayStation Vita wordmark path was cross-checked against the Simple Icons Pl
 
 ## Device illustrations
 
-The current handheld illustrations in `assets/handhelds/` are original RommHeld SVG artwork created for the application. They are not copies of console manufacturer interface artwork or product photography.
+The handheld illustrations in `assets/handhelds/` are original RommHeld SVG artwork. They use the user's selected Icons8 Color handheld set as a visual reference for a clean, modern flat-icon treatment, but they are not copied Icons8 files.
 
-- PlayStation Vita: original simplified black-hardware illustration.
-- Nintendo 3DS: original simplified Aqua Blue clamshell illustration.
-- Nintendo DS: original simplified light-gray clamshell illustration.
+- PlayStation Vita: simplified black-hardware illustration.
+- Nintendo 3DS: simplified Aqua Blue clamshell illustration.
+- Nintendo DS: simplified light-gray clamshell illustration.
+- PlayStation Portable: simplified light-gray handheld illustration for the coming-soon target.
 
 These illustrations are decorative and have no effect on compatibility, routing, or transfer logic.
 
@@ -31,6 +32,8 @@ These illustrations are decorative and have no effect on compatibility, routing,
 
 Platform/device definitions should reference artwork through the data-driven asset registry in `romm_vita_manager/platform_assets.py`. Do not scatter asset paths through device or transfer code.
 
-Missing artwork must fall back gracefully. UI functionality must never depend on an asset being present.
+All assets required by the normal UI must be present in the repository or packaged application. A user should never need to run a separate asset-download script for the application to render correctly.
+
+Missing artwork must fall back gracefully. UI functionality must never depend on an external artwork server being reachable.
 
 Do not bundle screenshots of proprietary console interfaces, commercial fonts, game box art, copyrighted game artwork, or manufacturer UI assets unless a clear redistribution license or permission is documented.
