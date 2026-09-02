@@ -180,7 +180,7 @@ def list_3ds_games(instance_url: str, token: str, *, limit: int = 1000) -> list[
     ]
 
 
-def download_rom(instance_url: str, token: str, rom: RomMRemoteGame, destination: Path) -> Path:
+def _download(instance_url: str, token: str, rom: RomMRemoteGame, destination: Path) -> Path:
     base = normalize_romm_url(instance_url)
     url = f"{base}/api/roms/{rom.rom_id}/content/{quote(rom.filename, safe='')}"
     destination = destination.expanduser()
@@ -198,3 +198,7 @@ def download_rom(instance_url: str, token: str, rom: RomMRemoteGame, destination
     except (error.URLError, TimeoutError) as exc:
         raise RomMApiError(f"Unable to download from RomM: {getattr(exc, 'reason', exc)}") from exc
     return destination
+
+
+def download_rom(instance_url: str, token: str, rom: RomMRemoteGame, destination: Path) -> Path:
+    return _download(instance_url, token, rom, destination)
