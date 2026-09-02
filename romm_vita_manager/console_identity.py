@@ -12,11 +12,19 @@ from .platform_assets import get_platform_assets
 class ConsoleIdentity(QWidget):
     """Render bundled, recognisable handheld artwork with no runtime network dependency."""
 
+    DISPLAY_SIZE = {
+        "vita": (186, 104),
+        "3ds": (168, 132),
+        "ds": (168, 132),
+        "psp": (186, 120),
+    }
+
     def __init__(self, console_key: str, name: str, parent: QWidget | None = None):
         super().__init__(parent)
         self.console_key = console_key
         self.name = name
         self.assets = get_platform_assets(console_key)
+        width, height = self.DISPLAY_SIZE.get(console_key, (168, 132))
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -25,7 +33,7 @@ class ConsoleIdentity(QWidget):
 
         self.device = QLabel()
         self.device.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.device.setFixedSize(160, 118)
+        self.device.setFixedSize(width, height)
         self.device.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.device.setStyleSheet("background:transparent;border:none;")
         root.addWidget(self.device, 0, Qt.AlignmentFlag.AlignCenter)
@@ -50,10 +58,10 @@ class ConsoleIdentity(QWidget):
         pixmap = QPixmap(str(artwork_path))
         if pixmap.isNull():
             return
+        target = self.device.size()
         self.device.setPixmap(
             pixmap.scaled(
-                150,
-                110,
+                target,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
