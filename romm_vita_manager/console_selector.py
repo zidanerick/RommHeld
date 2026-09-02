@@ -72,18 +72,21 @@ class RomMConnectionWorker(QObject):
 
 
 class ConsoleTile(QPushButton):
+    TILE_WIDTH = 260
+    TILE_HEIGHT = 205
+
     def __init__(self, profile: ConsoleProfile, parent=None):
         super().__init__(parent)
         self.profile = profile
         self.setCheckable(profile.state == "supported")
         self.setEnabled(profile.state == "supported")
-        self.setFixedSize(QSize(280, 230))
+        self.setFixedSize(QSize(self.TILE_WIDTH, self.TILE_HEIGHT))
         self.setCursor(Qt.CursorShape.PointingHandCursor if self.isEnabled() else Qt.CursorShape.ArrowCursor)
         self.setStyleSheet(self._style())
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 14)
-        layout.setSpacing(8)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(6)
 
         identity = ConsoleIdentity(profile.key, profile.name, self)
         layout.addWidget(identity, 1)
@@ -91,9 +94,7 @@ class ConsoleTile(QPushButton):
         sub = QLabel(profile.subtitle)
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub.setWordWrap(True)
-        sub.setStyleSheet(
-            "background:transparent;border:none;color:#8f98a6;font-size:10px;padding:0;"
-        )
+        sub.setStyleSheet("background:transparent;border:none;color:#8f98a6;font-size:10px;padding:0;")
         layout.addWidget(sub)
 
         state = QLabel("SUPPORTED" if profile.state == "supported" else "COMING SOON")
@@ -106,8 +107,7 @@ class ConsoleTile(QPushButton):
     def _style(self) -> str:
         if self.profile.state == "coming":
             return (
-                "QPushButton { background:#12161c; border:1px solid #2b3139; "
-                "border-radius:16px; }"
+                "QPushButton { background:#12161c; border:1px solid #2b3139; border-radius:16px; }"
                 "QPushButton:disabled { color:#707782; }"
             )
         accent = self.profile.accent
@@ -117,19 +117,13 @@ class ConsoleTile(QPushButton):
                 border:1px solid #2b3139;
                 border-radius:16px;
             }}
-            QPushButton:hover {{
-                border-color:{accent};
-                background:#141a22;
-            }}
-            QPushButton:checked {{
-                border:2px solid {accent};
-                background:#171d26;
-            }}
+            QPushButton:hover {{ border-color:{accent}; background:#141a22; }}
+            QPushButton:checked {{ border:2px solid {accent}; background:#171d26; }}
         """
 
 
 class ConsoleGrid(QWidget):
-    """Responsive, non-overlapping grid that wraps from three to one column."""
+    """Responsive grid that always wraps whole cards and never overlays siblings."""
 
     def __init__(self, tiles: list[ConsoleTile], parent=None):
         super().__init__(parent)
@@ -148,26 +142,25 @@ class ConsoleGrid(QWidget):
         self._relayout()
 
     def _column_count(self) -> int:
-        width = max(280, self.width())
-        return max(1, min(3, int((width + 14) // 294)))
+        usable = max(0, self.width())
+        return max(1, min(3, int((usable + 14) // (ConsoleTile.TILE_WIDTH + 14))))
 
     def _relayout(self) -> None:
-        columns = int(self._column_count())
+        columns = self._column_count()
         if columns == self._columns:
             return
         self._columns = columns
 
         while self.grid.count():
             item = self.grid.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.setParent(self)
+            if item.widget() is not None:
+                item.widget().setParent(self)
 
         for index, tile in enumerate(self.tiles):
             self.grid.addWidget(tile, index // columns, index % columns)
 
         rows = (len(self.tiles) + columns - 1) // columns
-        height = rows * 230 + max(0, rows - 1) * 14
+        height = rows * ConsoleTile.TILE_HEIGHT + max(0, rows - 1) * 14
         self.setMinimumHeight(height)
 
 
@@ -199,6 +192,8 @@ class PlatformSelectorDialog(QDialog):
             QPushButton#exit { background:#171b22; color:#c6ccd5; border:1px solid #333943; border-radius:8px; padding:8px 14px; }
             QLabel#muted { color:#8d96a4; }
             QScrollArea { border:none; background:transparent; }
+            QScrollBar:vertical { width:10px; background:#0e1116; margin:0; }
+            QScrollBar::handle:vertical { background:#2f657e; border-radius:5px; min-height:28px; }
         """)
 
         root = QVBoxLayout(self)
@@ -392,7 +387,6 @@ class PlatformSelectorDialog(QDialog):
     def continue_selected(self) -> None:
         if self.selected_profile is None:
             return
-
         if self.local_radio.isChecked():
             root = Path(self.local_edit.text()).expanduser()
             if not root.is_dir():
@@ -410,7 +404,6 @@ class PlatformSelectorDialog(QDialog):
                 QMessageBox.warning(self, "RomM configuration", "Enter the RomM Client API Token.")
                 return
             source = LibrarySource(mode="romm_api", romm_url=url, api_token=token)
-
         updated = save_library_source(self.config, source)
         updated["active_console"] = self.selected_console
         updated["setup_complete"] = True
