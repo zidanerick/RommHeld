@@ -116,6 +116,8 @@ def _list_games_for_platform_slugs(
     offset: int = 0,
     missing_message: str,
     platform_items: list[dict] | None = None,
+    search_term: str = "",
+    platform_slug: str | None = None,
 ) -> list[RomMRemoteGame]:
     if platform_items is None:
         platforms = _items(_json_request(instance_url, token, "platforms"))
@@ -128,6 +130,8 @@ def _list_games_for_platform_slugs(
         ]
     else:
         wanted = platform_items
+    if platform_slug:
+        wanted = [item for item in wanted if str(item.get("slug", "")).lower() == platform_slug.lower()]
     if not wanted:
         raise RomMApiError(missing_message)
 
@@ -143,23 +147,20 @@ def _list_games_for_platform_slugs(
         for item in wanted
     }
 
-    rows = _items(
-        _json_request(
-            instance_url,
-            token,
-            "roms",
-            {
-                "platform_ids": platform_ids,
-                "limit": max(1, min(limit, 500)),
-                "offset": max(0, offset),
-                "with_total": False,
-                "with_char_index": False,
-                "with_filter_values": False,
-                "with_rom_id_index": False,
-                "group_by_meta_id": False,
-            },
-        )
-    )
+    params = {
+        "platform_ids": platform_ids,
+        "limit": max(1, min(limit, 500)),
+        "offset": max(0, offset),
+        "with_total": False,
+        "with_char_index": False,
+        "with_filter_values": False,
+        "with_rom_id_index": False,
+        "group_by_meta_id": False,
+    }
+    if search_term.strip():
+        params["search_term"] = search_term.strip()
+
+    rows = _items(_json_request(instance_url, token, "roms", params))
 
     games: list[RomMRemoteGame] = []
     for item in rows:
