@@ -1,23 +1,30 @@
 from __future__ import annotations
 
-import os
 import shutil
 from pathlib import Path
 
+from .platform_services import writable_volumes
+
+
+VITA_MARKERS = (
+    "app",
+    "appmeta",
+    "data",
+    "pspemu",
+    "tai",
+    "VitaShell",
+)
+
 
 def find_vita_mounts() -> list[Path]:
-    """Find likely VitaShell-mounted Vita filesystems without hard-coding a UUID."""
-    base = Path("/run/media") / os.environ.get("USER", "")
-    if not base.exists():
-        return []
-
+    """Find likely VitaShell-mounted filesystems without OS-specific mount paths."""
     found: list[Path] = []
-    markers = ("app", "appmeta", "data", "pspemu", "tai", "VitaShell")
-    for mount in sorted(base.iterdir()):
-        if not mount.is_dir():
+    for mount in writable_volumes():
+        try:
+            if sum((mount / marker).exists() for marker in VITA_MARKERS) >= 3:
+                found.append(mount)
+        except OSError:
             continue
-        if sum((mount / marker).exists() for marker in markers) >= 3:
-            found.append(mount)
     return found
 
 

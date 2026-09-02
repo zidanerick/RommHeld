@@ -17,22 +17,53 @@ from PySide6.QtWidgets import (
 
 from .app import MainWindow as BaseMainWindow, ThreeDSFtpDialog
 from .config import load_config, save_config
+from .management_shell import WORKSPACE_PROFILES, ManagementShell
 from .preferences import get_device_preference, preference_options, set_device_preference
 from .vita import find_vita_mounts, free_space
 
 ASSET_DIR = Path(__file__).resolve().parent.parent / "assets" / "icons"
 
+WORKSPACES = {
+    key: {
+        "name": profile.name,
+        "accent": profile.accent,
+        "icon": f"{key}.svg",
+    }
+    for key, profile in WORKSPACE_PROFILES.items()
+}
+
 
 class DeviceDashboardWindow(BaseMainWindow):
-    """RommHeld main window with persistent per-device management sections."""
+    """RommHeld management workspace with a shared game-menu shell."""
 
     def __init__(self, config: dict):
         super().__init__(config)
         self.setWindowTitle("RommHeld")
         self._three_ds_dialog: ThreeDSFtpDialog | None = None
+        self._next_workspace_window: DeviceDashboardWindow | None = None
+        self.workspace_key = str(config.get("active_console", "vita"))
+        if self.workspace_key not in WORKSPACE_PROFILES:
+            self.workspace_key = "vita"
+
         self._build_status_bar()
         self._build_device_sections()
+        self._apply_workspace_theme()
         self.refresh_device_sections()
+        self._wrap_in_management_shell()
+
+    def _wrap_in_management_shell(self) -> None:
+        legacy_content = self.takeCentralWidget()
+        if legacy_content is None:
+            return
+        shell = ManagementShell(WORKSPACE_PROFILES[self.workspace_key], self)
+        shell.set_content(legacy_content)
+        shell.navigation_requested.connect(self._navigation_requested)
+        shell.change_handheld_requested.connect(self.change_workspace)
+        self.management_shell = shell
+        self.setCentralWidget(shell)
+
+    def _navigation_requested(self, section: str) -> None:
+        self.status.setText(f"{section.title()} section is available from the workspace navigation.")
 
     def _build_device_sections(self) -> None:
         central = self.centralWidget()
@@ -61,11 +92,33 @@ class DeviceDashboardWindow(BaseMainWindow):
         if device_layout is None:
             return
 
+        self.workspace_banner = QWidget()
+        banner_layout = QHBoxLayout(self.workspace_banner)
+        banner_layout.setContentsMargins(2, 2, 2, 6)
+        banner_layout.setSpacing(8)
+        self.workspace_icon = QLabel()
+        self.workspace_icon.setFixedSize(28, 28)
+        banner_layout.addWidget(self.workspace_icon)
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(0)
+        self.workspace_heading = QLabel()
+        self.workspace_heading.setObjectName("workspaceHeading")
+        self.workspace_subtitle = QLabel("Current workspace")
+        self.workspace_subtitle.setObjectName("workspaceSubtitle")
+        text_layout.addWidget(self.workspace_heading)
+        text_layout.addWidget(self.workspace_subtitle)
+        banner_layout.addLayout(text_layout, 1)
+        change_button = QPushButton("Change handheld")
+        change_button.clicked.connect(self.change_workspace)
+        banner_layout.addWidget(change_button)
+        device_layout.insertWidget(0, self.workspace_banner)
+
         vita_heading = QLabel("PlayStation Vita")
         vita_heading.setObjectName("vitaHeading")
         vita_heading.setToolTip("USB / VitaShell device management")
-        device_layout.insertWidget(0, vita_heading)
-        device_layout.insertWidget(1, self._build_preference_box("vita", "Vita runtime priority"))
+        device_layout.insertWidget(1, vita_heading)
+        device_layout.insertWidget(2, self._build_preference_box("vita", "Vita runtime priority"))
 
         three_ds_box = QGroupBox("Nintendo 3DS")
         three_ds_box.setObjectName("threeDsCard")
@@ -73,7 +126,6 @@ class DeviceDashboardWindow(BaseMainWindow):
         self.three_ds_status = QLabel()
         self.three_ds_endpoint = QLabel()
         self.three_ds_endpoint.setTextInteractionFlags(Qt.TextSelectableByMouse)
-
         three_ds_layout.addWidget(self.three_ds_status)
         three_ds_layout.addWidget(self.three_ds_endpoint)
         three_ds_layout.addWidget(self._build_preference_box("3ds", "3DS runtime priority"))
@@ -82,20 +134,41 @@ class DeviceDashboardWindow(BaseMainWindow):
         three_ds_layout.addWidget(manage_button)
         three_ds_layout.addStretch()
         device_layout.addWidget(three_ds_box)
-
-        vita_box.setStyleSheet(
-            """
-            QGroupBox#devicesPanel { border: 1px solid #3c67d6; border-radius: 10px; margin-top: 8px; padding-top: 8px; }
-            QGroupBox#devicesPanel::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #3c67d6; font-weight: 700; }
-            QLabel#vitaHeading { color: #3157b7; font-size: 16px; font-weight: 700; padding: 3px 2px 8px 2px; }
-            QGroupBox#threeDsCard { border: 1px solid #d93636; border-radius: 10px; margin-top: 10px; padding-top: 8px; }
-            QGroupBox#threeDsCard::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #c72d2d; font-weight: 700; }
-            QGroupBox#threeDsCard QPushButton { min-height: 30px; }
-            """
-        )
+        device_layout.addStretch()
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 0)
         splitter.setSizes([850, 400])
+
+    def _apply_workspace_theme(self) -> None:
+        profile = WORKSPACE_PROFILES[self.workspace_key]
+        self.setWindowTitle(f"RommHeld • {profile.name}")
+        icon_path = ASSET_DIR / f"{self.workspace_key}.svg"
+        if icon_path.is_file():
+            self.workspace_icon.setPixmap(QIcon(str(icon_path)).pixmap(28, 28))
+        self.workspace_heading.setText(profile.name)
+        self.setStyleSheet(
+            f"""
+            QGroupBox#devicesPanel {{ border: 1px solid {profile.accent}; border-radius: 12px; margin-top: 8px; padding-top: 8px; }}
+            QGroupBox#devicesPanel::title {{ subcontrol-origin: margin; left: 12px; padding: 0 6px; color: {profile.accent}; font-weight: 700; }}
+            QLabel#workspaceHeading {{ color: {profile.accent}; font-size: 18px; font-weight: 800; padding: 0; }}
+            QLabel#workspaceSubtitle {{ color: #8d97a5; font-size: 10px; }}
+            QLabel#vitaHeading {{ color: #86bfff; font-size: 15px; font-weight: 700; padding: 3px 2px 8px 2px; }}
+            QGroupBox#threeDsCard {{ border: 1px solid #d93636; border-radius: 10px; margin-top: 10px; padding-top: 8px; }}
+            QGroupBox#threeDsCard::title {{ subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #e04444; font-weight: 700; }}
+            QGroupBox#threeDsCard QPushButton {{ min-height: 30px; }}
+            """
+        )
+
+    def change_workspace(self) -> None:
+        from .platform_selector import PlatformSelectorDialog
+
+        dialog = PlatformSelectorDialog(load_config(), self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            return
+        config = load_config()
+        self._next_workspace_window = DeviceDashboardWindow(config)
+        self._next_workspace_window.show()
+        self.hide()
 
     def _build_preference_box(self, device_key: str, title: str) -> QGroupBox:
         box = QGroupBox(title)
@@ -207,20 +280,3 @@ class DeviceDashboardWindow(BaseMainWindow):
     def _three_ds_closed(self, _result: int) -> None:
         self._three_ds_dialog = None
         self.refresh_device_sections()
-
-
-def main() -> None:
-    from PySide6.QtWidgets import QApplication, QDialog
-    app = QApplication.instance() or QApplication([])
-    app.setApplicationName("RommHeld")
-    app.setApplicationVersion("0.9")
-    config = load_config()
-    if not config.get("setup_complete"):
-        from .ui import SetupWizard
-        wizard = SetupWizard(config)
-        if wizard.exec() != QDialog.DialogCode.Accepted:
-            return
-        config = load_config()
-    window = DeviceDashboardWindow(config)
-    window.show()
-    app.exec()
