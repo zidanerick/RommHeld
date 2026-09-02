@@ -20,17 +20,8 @@ from PySide6.QtWidgets import (
 
 from .config import save_config
 from .romm import scan_games
-from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings, join_remote_path
-
-
-def default_3ds_destination(game_name: str, suffix: str) -> str:
-    """Return conservative destinations for formats with documented 3DS paths."""
-    suffix = suffix.lower()
-    if suffix == ".nds":
-        return join_remote_path("/", f"roms/nds/{game_name}")
-    if suffix == ".gba":
-        return join_remote_path("/", f"roms/gba/{game_name}")
-    return game_name
+from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
+from .three_ds_paths import default_3ds_destination
 
 
 class ThreeDSConnectionWorker(QThread):
