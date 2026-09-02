@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from .app import ThreeDSSetupDialog
+from .gba_vc_deploy import GbaVcDeployDialog
 from .library_sources import get_library_source
 from .management_shell import WORKSPACE_PROFILES
+from .romm_remote import RomMRemoteGame
 from .three_ds_library import ThreeDSLibraryWidget
 from .three_ds_manager import ThreeDSManagerDialog
 from .workspace_dashboard import WorkspaceDashboardWindow as BaseWorkspaceDashboardWindow
@@ -51,7 +53,6 @@ class WorkspaceDashboardWindow(BaseWorkspaceDashboardWindow):
             self.three_ds_library.config = self._reload_config()
             self.three_ds_library.refresh_library()
             return
-
         super().refresh_games()
         if self.workspace_key == "vita":
             return
@@ -65,16 +66,13 @@ class WorkspaceDashboardWindow(BaseWorkspaceDashboardWindow):
         super().refresh_device_page()
         if not hasattr(self, "shell"):
             return
-
         if self.workspace_key == "vita":
             vita_text = "Connected" if self.vita is not None else "Not detected"
         else:
             vita_text = "Connected" if self._safe_vita_mounts() else "Not detected"
-
         saved = self.config.get("devices", {}).get("3ds", {})
         host = str(saved.get("host", "")).strip()
         three_ds_text = "FTP configured" if host else "Not configured"
-
         ds_root = str(self.config.get("ds_sd_root", "")).strip()
         ds_text = "SD selected" if ds_root else "Not configured"
         self.shell.set_device_statuses(vita_text, three_ds_text, ds_text)
@@ -87,10 +85,15 @@ class WorkspaceDashboardWindow(BaseWorkspaceDashboardWindow):
         except OSError:
             return []
 
-    def open_3ds(self) -> None:
-        source = get_library_source(self._reload_config())
+    def open_3ds(self, game: RomMRemoteGame | None = None, target_key: str | None = None) -> None:
+        config = self._reload_config()
+        if game is not None and target_key in {"native_gba", "vc_cia"}:
+            GbaVcDeployDialog(config, game, target_key, self).exec()
+            return
+
+        source = get_library_source(config)
         library_root = Path(source.local_root).expanduser() if source.mode == "local" and source.local_root else None
-        dialog = ThreeDSManagerDialog(self._reload_config(), library_root, self)
+        dialog = ThreeDSManagerDialog(config, library_root, self)
         dialog.exec()
         self.config = self._reload_config()
         self.refresh_device_page()
