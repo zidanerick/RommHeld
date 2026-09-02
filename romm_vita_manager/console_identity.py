@@ -10,7 +10,7 @@ from .platform_assets import get_platform_assets
 
 
 class ConsoleIdentity(QWidget):
-    """Render a bundled handheld icon and clean platform name."""
+    """Render bundled handheld artwork with no runtime network dependency."""
 
     def __init__(self, console_key: str, name: str, parent: QWidget | None = None):
         super().__init__(parent)
@@ -43,10 +43,7 @@ class ConsoleIdentity(QWidget):
     def _load_icon(self) -> None:
         if not self.assets:
             return
-        icon_name = getattr(self.assets, "icons8_icon", None)
-        if not icon_name:
-            return
-        icon_path: Path = self.assets.path("icons8_icon")
+        icon_path: Path = self.assets.path("device_large")
         if not icon_path.is_file():
             return
 
