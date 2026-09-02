@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QWidget
 
 from .app import ThreeDSSetupDialog
+from .library_sources import get_library_source
 from .three_ds_manager import ThreeDSManagerDialog
 from .workspace_dashboard import WorkspaceDashboardWindow as BaseWorkspaceDashboardWindow
 
@@ -58,7 +59,8 @@ class WorkspaceDashboardWindow(BaseWorkspaceDashboardWindow):
             return []
 
     def open_3ds(self) -> None:
-        library_root = self.romm_root if getattr(self, "romm_root", None) else None
+        source = get_library_source(self._reload_config())
+        library_root = Path(source.local_root).expanduser() if source.mode == "local" and source.local_root else None
         dialog = ThreeDSManagerDialog(load_config(), library_root, self)
         dialog.exec()
         self.config = self._reload_config()
