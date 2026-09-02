@@ -3,6 +3,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QWidget
 
 from .app import ThreeDSSetupDialog
+from .three_ds_manager import ThreeDSManagerDialog
 from .workspace_dashboard import WorkspaceDashboardWindow as BaseWorkspaceDashboardWindow
 
 
@@ -55,6 +56,13 @@ class WorkspaceDashboardWindow(BaseWorkspaceDashboardWindow):
             return find_vita_mounts()
         except OSError:
             return []
+
+    def open_3ds(self) -> None:
+        library_root = self.romm_root if getattr(self, "romm_root", None) else None
+        dialog = ThreeDSManagerDialog(load_config(), library_root, self)
+        dialog.exec()
+        self.config = self._reload_config()
+        self.refresh_device_page()
 
     def open_3ds_setup(self) -> None:
         dialog = ThreeDSSetupDialog(self.config, self)
