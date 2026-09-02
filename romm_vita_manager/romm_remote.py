@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import http.client
 import json
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 from urllib import error, request
@@ -30,12 +32,74 @@ def _auth_headers(token: str, *, accept: str = "application/json") -> dict[str, 
     }
 
 
+def _create_romm_connection(address, timeout=None, source_address=None, *, all_errors=False):
+    """Open RomM connections IPv4-first, then fall back to IPv6."""
+    host, port = address
+    errors: list[OSError] = []
+    families = (socket.AF_INET, socket.AF_INET6)
+
+    for family in families:
+        try:
+            infos = socket.getaddrinfo(host, port, family, socket.SOCK_STREAM)
+        except OSError as exc:
+            errors.append(exc)
+            continue
+
+        for family_info, socktype, proto, _canonname, sockaddr in infos:
+            sock = socket.socket(family_info, socktype, proto)
+            try:
+                if timeout is not None:
+                    sock.settimeout(timeout)
+                if source_address:
+                    sock.bind(source_address)
+                sock.connect(sockaddr)
+                return sock
+            except OSError as exc:
+                errors.append(exc)
+                sock.close()
+
+    if not errors:
+        raise OSError(f"Unable to resolve {host}:{port}")
+    if all_errors:
+        try:
+            raise ExceptionGroup("RomM connection attempts failed", errors)
+        except NameError:
+            pass
+    raise errors[-1]
+
+
+class _RomMHTTPConnection(http.client.HTTPConnection):
+    _create_connection = staticmethod(_create_romm_connection)
+
+
+class _RomMHTTPSConnection(http.client.HTTPSConnection):
+    _create_connection = staticmethod(_create_romm_connection)
+
+
+class _RomMHTTPHandler(request.HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(_RomMHTTPConnection, req)
+
+
+class _RomMHTTPSHandler(request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(
+            _RomMHTTPSConnection,
+            req,
+            context=self._context,
+            check_hostname=self._check_hostname,
+        )
+
+
+_ROMM_OPENER = request.build_opener(_RomMHTTPHandler(), _RomMHTTPSHandler())
+
+
 def _json_request(instance_url: str, token: str, path: str, params: dict | None = None):
     base = normalize_romm_url(instance_url)
     query = f"?{urlencode(params, doseq=True)}" if params else ""
     req = request.Request(f"{base}/api/{path.lstrip('/')}{query}", headers=_auth_headers(token))
     try:
-        with request.urlopen(req, timeout=15) as response:
+        with _ROMM_OPENER.open(req, timeout=15) as response:
             return json.load(response)
     except error.HTTPError as exc:
         detail = ""
@@ -227,7 +291,7 @@ def _download(instance_url: str, token: str, rom: RomMRemoteGame, destination: P
     destination.parent.mkdir(parents=True, exist_ok=True)
     try:
         with (
-            request.urlopen(request.Request(url, headers=_auth_headers(token)), timeout=30)
+            _ROMM_OPENER.open(request.Request(url, headers=_auth_headers(token)), timeout=30)
             as response,
             destination.open("wb") as target,
         ):
