@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 import threading
 from pathlib import Path
 
@@ -19,7 +20,9 @@ from PySide6.QtWidgets import (
 )
 
 from .config import save_config
+from .library_sources import get_library_source
 from .romm import scan_games
+from .romm_remote import RomMRemoteGame, download_rom, list_3ds_games
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
 from .three_ds_paths import default_3ds_destination
 
@@ -46,26 +49,58 @@ class ThreeDSConnectionWorker(QThread):
 
 class ThreeDSTransferWorker(QThread):
     progress = Signal(int)
+    status_changed = Signal(str)
     completed = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, settings: ThreeDSFtpSettings, source: Path, destination: str):
+    def __init__(
+        self,
+        settings: ThreeDSFtpSettings,
+        source: Path | None,
+        destination: str,
+        *,
+        remote_game: RomMRemoteGame | None = None,
+        romm_url: str = "",
+        romm_token: str = "",
+    ):
         super().__init__()
         self.settings = settings
         self.source = source
         self.destination = destination
+        self.remote_game = remote_game
+        self.romm_url = romm_url
+        self.romm_token = romm_token
         self.cancel_event = threading.Event()
         self.backend: ThreeDSFtpBackend | None = None
+        self._temporary_path: Path | None = None
 
     def cancel(self) -> None:
         self.cancel_event.set()
 
+    def _resolve_source(self) -> Path:
+        if self.source is not None:
+            if not self.source.is_file():
+                raise FileNotFoundError(f"Source file does not exist: {self.source}")
+            return self.source
+        if self.remote_game is None:
+            raise ValueError("No transfer source was selected.")
+        if not self.romm_url.strip() or not self.romm_token.strip():
+            raise ValueError("RomM server credentials are not configured.")
+
+        handle = tempfile.NamedTemporaryFile(prefix="rommheld-3ds-", suffix=Path(self.remote_game.filename).suffix, delete=False)
+        handle.close()
+        self._temporary_path = Path(handle.name)
+        self.status_changed.emit(f"Downloading {self.remote_game.name} from RomM…")
+        return download_rom(self.romm_url, self.romm_token, self.remote_game, self._temporary_path)
+
     def run(self) -> None:
         try:
+            source = self._resolve_source()
+            self.status_changed.emit(f"Transferring {self.remote_game.name if self.remote_game else source.name} to the 3DS…")
             self.backend = ThreeDSFtpBackend(self.settings)
             self.backend.connect()
             result, _ = self.backend.upload(
-                self.source,
+                source,
                 self.destination,
                 cancel_event=self.cancel_event,
                 progress=self.progress.emit,
@@ -76,14 +111,20 @@ class ThreeDSTransferWorker(QThread):
         finally:
             if self.backend is not None:
                 self.backend.close()
+            if self._temporary_path is not None:
+                try:
+                    self._temporary_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
 
 class ThreeDSManagerDialog(QDialog):
-    """3DS deployment surface for local library content and FTP configuration."""
+    """3DS deployment surface for local or RomM-backed library content."""
 
     def __init__(self, config: dict, library_root: Path | None = None, parent=None):
         super().__init__(parent)
         self.config = config
+        self.library_source = get_library_source(config)
         self.library_root = library_root.expanduser() if library_root else None
         self.connection_worker: ThreeDSConnectionWorker | None = None
         self.worker: ThreeDSTransferWorker | None = None
@@ -117,7 +158,7 @@ class ThreeDSManagerDialog(QDialog):
         connection_row.addWidget(self.refresh_button)
         connection_row.addStretch()
 
-        self.status = QLabel("Connect to the 3DS FTP server to deploy a local game.")
+        self.status = QLabel("Connect to the 3DS FTP server to deploy a library game.")
         self.status.setWordWrap(True)
 
         self.game_list = QListWidget()
@@ -145,7 +186,7 @@ class ThreeDSManagerDialog(QDialog):
         layout.addLayout(form)
         layout.addLayout(connection_row)
         layout.addWidget(self.status)
-        layout.addWidget(QLabel("Local library games:"))
+        layout.addWidget(QLabel("Library games:"))
         layout.addWidget(self.game_list, 1)
         layout.addWidget(self.source_label)
         layout.addWidget(QLabel("Remote destination:"))
@@ -223,7 +264,27 @@ class ThreeDSManagerDialog(QDialog):
         self._update_controls()
 
     def refresh_library(self) -> None:
+        if self.worker and self.worker.isRunning():
+            return
         self.game_list.clear()
+        if self.library_source.mode == "romm_api":
+            self.source_label.setText("RomM Server • loading Nintendo 3DS library…")
+            try:
+                games = list_3ds_games(self.library_source.romm_url, self.library_source.api_token)
+            except Exception as exc:
+                self.source_label.setText(f"RomM Server • unable to load library: {exc}")
+                self._update_controls()
+                return
+            self.source_label.setText(f"RomM Server • {len(games)} Nintendo 3DS library files")
+            for game in games:
+                item = QListWidgetItem(f"{game.name} • {game.platform} • {game.size:,} bytes")
+                item.setData(256, game)
+                self.game_list.addItem(item)
+            if games:
+                self.game_list.setCurrentRow(0)
+            self._update_controls()
+            return
+
         root = self.library_root
         if root is None or not root.is_dir():
             self.source_label.setText("No local library directory is configured. Select a local library in Library Settings first.")
@@ -245,15 +306,21 @@ class ThreeDSManagerDialog(QDialog):
             self._update_controls()
             return
         game = item.data(256)
-        self.destination_edit.setText(default_3ds_destination(game.path.name, game.path.suffix))
+        filename = game.filename if isinstance(game, RomMRemoteGame) else game.path.name
+        suffix = Path(filename).suffix
+        self.destination_edit.setText(default_3ds_destination(filename, suffix))
         self._update_controls()
+
+    def _selected_game(self):
+        item = self.game_list.currentItem()
+        return item.data(256) if item is not None else None
 
     def _update_controls(self) -> None:
         running = bool(
             (self.connection_worker and self.connection_worker.isRunning())
             or (self.worker and self.worker.isRunning())
         )
-        selected = self.game_list.currentItem() is not None
+        selected = self._selected_game() is not None
         self.connect_button.setEnabled(not running)
         self.refresh_button.setEnabled(not running)
         self.send_button.setEnabled(self._connected and selected and not running)
@@ -262,13 +329,22 @@ class ThreeDSManagerDialog(QDialog):
             widget.setEnabled(not running)
 
     def send_selected(self) -> None:
-        item = self.game_list.currentItem()
-        if item is None:
+        selected = self._selected_game()
+        if selected is None:
             return
-        game = item.data(256)
-        if not game.path.is_file():
-            QMessageBox.warning(self, "File not found", "The selected library file is no longer available.")
-            return
+
+        source: Path | None = None
+        remote_game: RomMRemoteGame | None = None
+        if isinstance(selected, RomMRemoteGame):
+            remote_game = selected
+            game_name = selected.name
+        else:
+            source = selected.path
+            if not source.is_file():
+                QMessageBox.warning(self, "File not found", "The selected library file is no longer available.")
+                return
+            game_name = selected.name
+
         destination = self.destination_edit.text().strip()
         if not destination:
             QMessageBox.warning(self, "Destination required", "Enter a remote destination first.")
@@ -281,8 +357,16 @@ class ThreeDSManagerDialog(QDialog):
             return
 
         self.progress.setValue(0)
-        self.status.setText(f"Transferring {game.name}…")
-        self.worker = ThreeDSTransferWorker(settings, game.path, destination)
+        self.status.setText(f"Preparing {game_name}…")
+        self.worker = ThreeDSTransferWorker(
+            settings,
+            source,
+            destination,
+            remote_game=remote_game,
+            romm_url=self.library_source.romm_url,
+            romm_token=self.library_source.api_token,
+        )
+        self.worker.status_changed.connect(self.status.setText)
         self.worker.progress.connect(self.worker_progress)
         self.worker.completed.connect(self.worker_completed)
         self.worker.failed.connect(self.worker_failed)
@@ -291,11 +375,10 @@ class ThreeDSManagerDialog(QDialog):
         self.worker.start()
 
     def worker_progress(self, done: int) -> None:
-        item = self.game_list.currentItem()
-        if item is None:
+        selected = self._selected_game()
+        if selected is None:
             return
-        game = item.data(256)
-        total = game.path.stat().st_size if game.path.is_file() else 0
+        total = selected.size if isinstance(selected, RomMRemoteGame) else selected.path.stat().st_size if selected.path.is_file() else 0
         self.progress.setValue(int(done * 100 / total) if total else 100)
 
     def worker_completed(self, result: str) -> None:
@@ -328,8 +411,4 @@ class ThreeDSManagerDialog(QDialog):
             self.connection_worker.wait(1500)
         if self.worker is not None and self.worker.isRunning():
             self.worker.cancel()
-            self.worker.wait(1500)
         super().closeEvent(event)
-
-
-__all__ = ["ThreeDSManagerDialog", "default_3ds_destination"]
