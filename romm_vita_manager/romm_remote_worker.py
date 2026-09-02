@@ -27,10 +27,10 @@ class RomMLibraryWorker(QThread):
 
     loaded = Signal(object)
     platforms_loaded = Signal(object)
+    cursor_advanced = Signal(int)
     failed = Signal(str)
 
     PLATFORM_BATCH_SIZE = 4
-    SEARCH_BATCHES_PER_REQUEST = 3
 
     def __init__(
         self,
@@ -39,6 +39,7 @@ class RomMLibraryWorker(QThread):
         *,
         page_size: int = 100,
         offset: int = 0,
+        platform_offset: int = 0,
         search_term: str = "",
         platform_slug: str | None = None,
     ):
@@ -47,6 +48,7 @@ class RomMLibraryWorker(QThread):
         self.token = token
         self.page_size = max(1, min(page_size, 500))
         self.offset = max(0, offset)
+        self.platform_offset = max(0, platform_offset)
         self.search_term = search_term
         self.platform_slug = platform_slug
         self.platforms_consumed = 0
@@ -108,7 +110,6 @@ class RomMLibraryWorker(QThread):
                     results[slug] = list(future.result())
                 except Exception as exc:
                     errors.append(f"{slug}: {exc}")
-        self.platforms_consumed = len(platforms)
         ordered: list = []
         for platform in platforms:
             ordered.extend(results.get(str(platform.get("slug") or "").lower(), []))
@@ -116,24 +117,37 @@ class RomMLibraryWorker(QThread):
             raise RuntimeError("; ".join(errors))
         return ordered
 
+    def _fetch_all_platforms(self, wanted: list[dict]) -> list:
+        """Walk platform groups until the page is full or the compatible set is exhausted."""
+        start = min(self.platform_offset, len(wanted))
+        consumed = 0
+        collected: list = []
+        while start < len(wanted):
+            group = wanted[start:start + self.PLATFORM_BATCH_SIZE]
+            results = self._fetch_batch(group)
+            consumed += len(group)
+            start += len(group)
+            collected.extend(results)
+            if len(collected) >= self.page_size:
+                break
+        self.platforms_consumed = consumed
+        self.cursor_advanced.emit(consumed)
+        return collected[:self.page_size]
+
     def _fetch_browse(self, wanted: list[dict]) -> list:
         if self.platform_slug:
-            platform = wanted[0]
-            if self.offset:
-                return _list_games_for_platform_slugs(
-                    self.instance_url,
-                    self.token,
-                    {self.platform_slug.lower()},
-                    limit=self.page_size,
-                    offset=self.offset,
-                    missing_message="RomM has no platforms currently recognised as compatible with the 3DS targets.",
-                    platform_items=[platform],
-                    search_term=self.search_term,
-                    platform_slug=self.platform_slug,
-                )
-            return self._fetch_batch(wanted)
-        group = wanted[self.offset:self.offset + self.PLATFORM_BATCH_SIZE]
-        return self._fetch_batch(group)
+            return _list_games_for_platform_slugs(
+                self.instance_url,
+                self.token,
+                {self.platform_slug.lower()},
+                limit=self.page_size,
+                offset=self.offset,
+                missing_message="RomM has no platforms currently recognised as compatible with the 3DS targets.",
+                platform_items=[wanted[0]],
+                search_term=self.search_term,
+                platform_slug=self.platform_slug,
+            )
+        return self._fetch_all_platforms(wanted)
 
     def run(self) -> None:
         try:
@@ -148,23 +162,6 @@ class RomMLibraryWorker(QThread):
             self.platforms_total = len(wanted)
             if not wanted:
                 raise RuntimeError("RomM has no platforms currently recognised as compatible with the 3DS targets.")
-
-            if self.search_term.strip() and not self.platform_slug:
-                start = self.offset
-                collected: list = []
-                consumed = 0
-                max_platforms = self.PLATFORM_BATCH_SIZE * self.SEARCH_BATCHES_PER_REQUEST
-                while start < len(wanted) and consumed < max_platforms:
-                    group = wanted[start:start + self.PLATFORM_BATCH_SIZE]
-                    results = self._fetch_batch(group)
-                    collected.extend(results)
-                    consumed += len(group)
-                    start += len(group)
-                    if len(collected) >= self.page_size:
-                        break
-                self.platforms_consumed = consumed
-                self.loaded.emit(collected[:self.page_size])
-                return
 
             batch = self._fetch_browse(wanted)
             self.loaded.emit(batch)
