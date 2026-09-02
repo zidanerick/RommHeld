@@ -32,19 +32,16 @@ def _auth_headers(token: str, *, accept: str = "application/json") -> dict[str, 
     }
 
 
-def _create_romm_connection(address, timeout=None, source_address=None, *, all_errors=False):
+def _create_romm_connection(address, timeout=None, source_address=None):
     """Open RomM connections IPv4-first, then fall back to IPv6."""
     host, port = address
     errors: list[OSError] = []
-    families = (socket.AF_INET, socket.AF_INET6)
-
-    for family in families:
+    for family in (socket.AF_INET, socket.AF_INET6):
         try:
             infos = socket.getaddrinfo(host, port, family, socket.SOCK_STREAM)
         except OSError as exc:
             errors.append(exc)
             continue
-
         for family_info, socktype, proto, _canonname, sockaddr in infos:
             sock = socket.socket(family_info, socktype, proto)
             try:
@@ -57,15 +54,9 @@ def _create_romm_connection(address, timeout=None, source_address=None, *, all_e
             except OSError as exc:
                 errors.append(exc)
                 sock.close()
-
-    if not errors:
-        raise OSError(f"Unable to resolve {host}:{port}")
-    if all_errors:
-        try:
-            raise ExceptionGroup("RomM connection attempts failed", errors)
-        except NameError:
-            pass
-    raise errors[-1]
+    if errors:
+        raise errors[-1]
+    raise OSError(f"Unable to resolve {host}:{port}")
 
 
 class _RomMHTTPConnection(http.client.HTTPConnection):
