@@ -32,7 +32,7 @@ def test_client_token_prefix_is_checked():
 
 def test_403_is_reported_as_scope_error():
     with patch(
-        "romm_vita_manager.romm_api.request.urlopen",
+        "romm_vita_manager.romm_api._ROMM_OPENER.open",
         side_effect=__import__("urllib.error", fromlist=["HTTPError"]).HTTPError(
             "https://romm.example.test/api/platforms", 403, "Forbidden", {}, None
         ),
