@@ -112,13 +112,7 @@ def download_artwork(
     *,
     max_bytes: int = _MAX_REMOTE_ARTWORK_BYTES,
 ) -> bytes:
-    """Fetch a RomM artwork resource using RomM's IPv4-first transport.
-
-    The URL must use HTTP(S). Relative paths and RomM resource paths are
-    resolved against the configured RomM instance. External absolute URLs
-    are permitted because RomM can legitimately expose third-party artwork
-    such as IGDB covers.
-    """
+    """Fetch artwork using the same IPv4-first transport as RomM API calls."""
     target = str(url).strip()
     if not target:
         raise ValueError("Artwork URL is empty.")
@@ -128,13 +122,9 @@ def download_artwork(
         parsed = urlparse(target)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("RomM artwork URL must be an HTTP(S) resource.")
-
     req = request.Request(
         target,
-        headers=_auth_headers(
-            token,
-            accept="image/avif,image/webp,image/png,image/jpeg,*/*",
-        ),
+        headers=_auth_headers(token, accept="image/avif,image/webp,image/png,image/jpeg,*/*"),
     )
     try:
         with _ROMM_OPENER.open(req, timeout=10) as response:
