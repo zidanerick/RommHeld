@@ -5,7 +5,7 @@ import threading
 from pathlib import Path
 from urllib import error, request
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -55,13 +55,20 @@ class RomMArtworkWorker(QThread):
     loaded = Signal(bytes)
     failed = Signal(str)
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, token: str):
         super().__init__()
         self.url = url
+        self.token = token
 
     def run(self) -> None:
         try:
-            with request.urlopen(request.Request(self.url, headers={"User-Agent": "RommHeld"}), timeout=10) as response:
+            headers = {
+                "User-Agent": "RommHeld",
+                "Accept": "image/avif,image/webp,image/png,image/jpeg,*/*",
+            }
+            if self.token.strip():
+                headers["Authorization"] = f"Bearer {self.token.strip()}"
+            with request.urlopen(request.Request(self.url, headers=headers), timeout=10) as response:
                 data = response.read(8 * 1024 * 1024 + 1)
             if len(data) > 8 * 1024 * 1024:
                 raise ValueError("Artwork is larger than the 8 MiB safety limit.")
@@ -100,7 +107,11 @@ class ThreeDSTransferWorker(QThread):
             return self.source
         if not self.romm_url.strip() or not self.romm_token.strip():
             raise ValueError("RomM server credentials are not configured.")
-        handle = tempfile.NamedTemporaryFile(prefix="rommheld-3ds-", suffix=Path(self.remote_game.filename).suffix, delete=False)
+        handle = tempfile.NamedTemporaryFile(
+            prefix="rommheld-3ds-",
+            suffix=Path(self.remote_game.filename).suffix,
+            delete=False,
+        )
         handle.close()
         self._temporary_path = Path(handle.name)
         self.status_changed.emit(f"Downloading {self.remote_game.name} from RomM…")
@@ -113,7 +124,12 @@ class ThreeDSTransferWorker(QThread):
             self.status_changed.emit(f"Transferring {name} to the 3DS…")
             self.backend = ThreeDSFtpBackend(self.settings)
             self.backend.connect()
-            result, _ = self.backend.upload(source, self.destination, cancel_event=self.cancel_event, progress=self.progress.emit)
+            result, _ = self.backend.upload(
+                source,
+                self.destination,
+                cancel_event=self.cancel_event,
+                progress=self.progress.emit,
+            )
             self.completed.emit(result)
         except Exception as exc:
             self.failed.emit(str(exc))
@@ -128,7 +144,7 @@ class ThreeDSTransferWorker(QThread):
 
 
 class ThreeDSManagerDialog(QDialog):
-    """3DS deployment surface for local or RomM-backed compatible content."""
+    """3DS deployment surface for compatible local or RomM library content."""
 
     def __init__(self, config: dict, library_root: Path | None = None, parent=None):
         super().__init__(parent)
@@ -159,7 +175,13 @@ class ThreeDSManagerDialog(QDialog):
         self.refresh_button.clicked.connect(self.refresh_library)
 
         form = QFormLayout()
-        for label, widget in (("Host:", self.host_edit), ("Port:", self.port_edit), ("Username:", self.user_edit), ("Password:", self.password_edit), ("Remote root:", self.root_edit)):
+        for label, widget in (
+            ("Host:", self.host_edit),
+            ("Port:", self.port_edit),
+            ("Username:", self.user_edit),
+            ("Password:", self.password_edit),
+            ("Remote root:", self.root_edit),
+        ):
             form.addRow(label, widget)
 
         connection_row = QHBoxLayout()
@@ -169,14 +191,15 @@ class ThreeDSManagerDialog(QDialog):
 
         self.status = QLabel("Ready. RomM and 3DS connections operate independently.")
         self.status.setWordWrap(True)
+        self.source_label = QLabel("Library source: not loaded")
+        self.source_label.setWordWrap(True)
 
         self.game_list = QListWidget()
         self.game_list.itemSelectionChanged.connect(self.game_selected)
 
         self.artwork = QLabel("No artwork")
         self.artwork.setFixedSize(180, 180)
-        self.artwork.setAlignment(Qt.AlignmentFlag.AlignCenter) if False else None
-        self.artwork.setScaledContents(False)
+        self.artwork.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.details = QLabel("Select a game to see deployment options.")
         self.details.setWordWrap(True)
@@ -210,6 +233,7 @@ class ThreeDSManagerDialog(QDialog):
         layout.addLayout(form)
         layout.addLayout(connection_row)
         layout.addWidget(self.status)
+        layout.addWidget(self.source_label)
         layout.addWidget(QLabel("Compatible RomM library:"))
         layout.addWidget(self.game_list, 1)
         layout.addLayout(detail_row)
@@ -286,20 +310,20 @@ class ThreeDSManagerDialog(QDialog):
         if self.library_worker and self.library_worker.isRunning():
             return
         self.game_list.clear()
-        source = get_library_source(self.config)
-        self.library_source = source
         self._games = []
         self.target_combo.clear()
         self.artwork.clear()
         self.artwork.setText("No artwork")
+        source = get_library_source(self.config)
+        self.library_source = source
 
         if source.mode == "romm_api":
             if not source.romm_url.strip() or not source.api_token.strip():
-                self.source_label_text("RomM Server • URL or Client API Token is not configured.")
+                self.source_label.setText("RomM Server • URL or Client API Token is not configured.")
                 self.status.setText("Configure the RomM Server library source first.")
                 self._update_controls()
                 return
-            self.source_label_text(f"RomM Server • Loading compatible platforms from {source.romm_url}…")
+            self.source_label.setText(f"RomM Server • Loading compatible platforms from {source.romm_url}…")
             self.status.setText("Loading compatible RomM library…")
             self.library_worker = RomMLibraryWorker(source.romm_url, source.api_token)
             self.library_worker.loaded.connect(self._romm_library_loaded)
@@ -311,38 +335,35 @@ class ThreeDSManagerDialog(QDialog):
 
         root = self.library_root
         if root is None or not root.is_dir():
-            self.source_label_text("No local library directory is configured.")
+            self.source_label.setText("No local library directory is configured.")
             self.status.setText("Local library unavailable.")
             self._update_controls()
             return
-        games = scan_games(root)
-        self._games = list(games)
-        self.source_label_text(f"{root} • {len(games)} library files")
+        games = list(scan_games(root))
+        self._games = games
+        self.source_label.setText(f"{root} • {len(games)} library files")
         for game in games:
             item = QListWidgetItem(f"{game.name} • {game.source_platform} • {game.size:,} bytes")
-            item.setData(256, game)
+            item.setData(Qt.ItemDataRole.UserRole, game)
             self.game_list.addItem(item)
         if games:
             self.game_list.setCurrentRow(0)
         self._update_controls()
 
-    def source_label_text(self, text: str) -> None:
-        self.status.setText(text) if not hasattr(self, "source_label") else self.source_label.setText(text)
-
     def _romm_library_loaded(self, games) -> None:
         self._games = list(games)
-        self.source_label_text(f"RomM Server • {len(self._games)} compatible library files")
+        self.source_label.setText(f"RomM Server • {len(self._games)} compatible library files")
         self.status.setText(f"RomM library loaded: {len(self._games)} compatible files.")
         for game in self._games:
             item = QListWidgetItem(f"{game.name} • {game.platform} • {game.size:,} bytes")
-            item.setData(256, game)
+            item.setData(Qt.ItemDataRole.UserRole, game)
             self.game_list.addItem(item)
         if self._games:
             self.game_list.setCurrentRow(0)
         self._update_controls()
 
     def _romm_library_failed(self, message: str) -> None:
-        self.source_label_text(f"RomM Server • unable to load library: {message}")
+        self.source_label.setText(f"RomM Server • unable to load library: {message}")
         self.status.setText(f"RomM library load failed: {message}")
         self._update_controls()
 
@@ -352,7 +373,7 @@ class ThreeDSManagerDialog(QDialog):
 
     def _selected_game(self):
         item = self.game_list.currentItem()
-        return item.data(256) if item else None
+        return item.data(Qt.ItemDataRole.UserRole) if item else None
 
     def game_selected(self) -> None:
         game = self._selected_game()
@@ -361,15 +382,15 @@ class ThreeDSManagerDialog(QDialog):
         if game is None:
             self.destination_edit.clear()
             self.details.setText("Select a game to see deployment options.")
-            self._update_controls()
             self.target_combo.blockSignals(False)
+            self._update_controls()
             return
 
         if isinstance(game, RomMRemoteGame):
             targets = available_targets(game.platform_slug)
             self.details.setText(
                 f"{game.name}\n{game.platform} ({game.platform_slug}) • {game.size:,} bytes\n"
-                "Artwork is sourced from the RomM metadata URL when available."
+                "RomM artwork is used directly when an artwork URL is available."
             )
             for target in targets:
                 self.target_combo.addItem(target.label, target.key)
@@ -378,40 +399,36 @@ class ThreeDSManagerDialog(QDialog):
                 preferred = "native_gba" if game.platform_slug == "gba" else "retroarch"
                 index = next((i for i in range(self.target_combo.count()) if self.target_combo.itemData(i) == preferred), 0)
                 self.target_combo.setCurrentIndex(index)
-            self._load_artwork(game.cover_url)
+            self._load_artwork(game)
             self.target_changed()
             return
 
-        self.target_combo.addItem("Copy ROM", "retroarch")
+        self.target_combo.addItem("RetroArch ROM", "retroarch")
         self.target_combo.blockSignals(False)
         self.details.setText(f"{game.name}\nLocal library file")
         self.target_changed()
-        self._update_controls()
 
     def target_changed(self) -> None:
         game = self._selected_game()
         if game is None or self.target_combo.count() == 0:
             return
         target_key = str(self.target_combo.currentData())
-        if isinstance(game, RomMRemoteGame):
-            self.destination_edit.setText(default_destination(target_key, game.platform_slug, game.filename))
-            target = next((t for t in available_targets(game.platform_slug) if t.key == target_key), None)
-            if target is not None:
-                self.details.setText(
-                    f"{game.name}\n{game.platform} ({game.platform_slug}) • {game.size:,} bytes\n\n{target.description}"
-                )
-        else:
-            self.destination_edit.setText(default_destination(target_key, game.source_platform, game.path.name))
+        platform_slug = game.platform_slug if isinstance(game, RomMRemoteGame) else str(game.source_platform).lower()
+        filename = game.filename if isinstance(game, RomMRemoteGame) else game.path.name
+        self.destination_edit.setText(default_destination(target_key, platform_slug, filename))
+        target = next((t for t in available_targets(platform_slug) if t.key == target_key), None)
+        if target is not None:
+            self.details.setText(f"{game.name}\n{game.platform} ({platform_slug})\n\n{target.description}")
         self._update_controls()
 
-    def _load_artwork(self, url: str | None) -> None:
+    def _load_artwork(self, game: RomMRemoteGame) -> None:
         if self.artwork_worker and self.artwork_worker.isRunning():
             return
         self.artwork.clear()
-        self.artwork.setText("Loading artwork…" if url else "No artwork in RomM")
-        if not url:
+        self.artwork.setText("Loading artwork…" if game.cover_url else "No artwork in RomM")
+        if not game.cover_url:
             return
-        self.artwork_worker = RomMArtworkWorker(url)
+        self.artwork_worker = RomMArtworkWorker(game.cover_url, self.library_source.api_token)
         self.artwork_worker.loaded.connect(self._artwork_loaded)
         self.artwork_worker.failed.connect(self._artwork_failed)
         self.artwork_worker.finished.connect(self._artwork_finished)
@@ -422,7 +439,9 @@ class ThreeDSManagerDialog(QDialog):
         if not pixmap.loadFromData(data):
             self._artwork_failed("RomM returned an unsupported image.")
             return
-        self.artwork.setPixmap(pixmap.scaled(180, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.artwork.setPixmap(
+            pixmap.scaled(180, 180, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        )
 
     def _artwork_failed(self, message: str) -> None:
         self.artwork.setText(f"Artwork unavailable\n{message}")
@@ -448,20 +467,27 @@ class ThreeDSManagerDialog(QDialog):
         if selected is None:
             return
         target_key = str(self.target_combo.currentData() or "retroarch")
-        if target_key in {"native_gba", "vc_cia"}:
+        if target_key == "native_gba":
             QMessageBox.information(
                 self,
-                "Packaging setup required",
-                "This deployment target requires the configured CIA packager and user-supplied donor assets. The ROM itself will not be copied as though it were already a CIA.",
+                "GBA native packaging setup",
+                "Nintendo GBA native deployment uses AGB_FIRM and therefore requires the CIA packager plus your user-supplied donor assets. The next packaging step will make this automatic.",
+            )
+            return
+        if target_key == "vc_cia":
+            QMessageBox.information(
+                self,
+                "Virtual Console packaging setup",
+                "Virtual Console CIA packaging is not yet enabled for this platform. The library browser is already prepared to hand a selected ROM and its artwork to the appropriate packager.",
             )
             return
 
-        source: Path | None = None
-        remote_game: RomMRemoteGame | None = None
         if isinstance(selected, RomMRemoteGame):
+            source = None
             remote_game = selected
         else:
             source = selected.path
+            remote_game = None
             if not source.is_file():
                 QMessageBox.warning(self, "File not found", "The selected local library file is no longer available.")
                 return
@@ -503,14 +529,15 @@ class ThreeDSManagerDialog(QDialog):
         self.progress.setValue(int(done * 100 / total) if total else 100)
 
     def worker_completed(self, result: str) -> None:
-        messages = {
-            "copied": "File uploaded and size verified.",
-            "resumed": "Partial file resumed and size verified.",
-            "skipped": "Remote file already has the same size; nothing was overwritten.",
-            "different": "A different-size remote file exists. No overwrite was performed.",
-            "cancelled": "Transfer cancelled.",
-        }
-        self.status.setText(messages.get(result, result))
+        self.status.setText(
+            {
+                "copied": "File uploaded and size verified.",
+                "resumed": "Partial file resumed and size verified.",
+                "skipped": "Remote file already has the same size; nothing was overwritten.",
+                "different": "A different-size remote file exists. No overwrite was performed.",
+                "cancelled": "Transfer cancelled.",
+            }.get(result, result)
+        )
         if result == "different":
             QMessageBox.warning(self, "3DS file already exists", self.status.text())
 
