@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QWidget
+from pathlib import Path
 
 from .app import ThreeDSSetupDialog
 from .library_sources import get_library_source
