@@ -27,7 +27,6 @@ class RomMLibraryWorker(QThread):
 
     loaded = Signal(object)
     platforms_loaded = Signal(object)
-    cursor_advanced = Signal(int)
     failed = Signal(str)
 
     PLATFORM_BATCH_SIZE = 4
@@ -39,7 +38,6 @@ class RomMLibraryWorker(QThread):
         *,
         page_size: int = 100,
         offset: int = 0,
-        platform_offset: int = 0,
         search_term: str = "",
         platform_slug: str | None = None,
     ):
@@ -48,7 +46,6 @@ class RomMLibraryWorker(QThread):
         self.token = token
         self.page_size = max(1, min(page_size, 500))
         self.offset = max(0, offset)
-        self.platform_offset = max(0, platform_offset)
         self.search_term = search_term
         self.platform_slug = platform_slug
         self.platforms_consumed = 0
@@ -118,8 +115,9 @@ class RomMLibraryWorker(QThread):
         return ordered
 
     def _fetch_all_platforms(self, wanted: list[dict]) -> list:
-        """Walk platform groups until the page is full or the compatible set is exhausted."""
-        start = min(self.platform_offset, len(wanted))
+        """Fill one UI page by walking small platform groups until full or exhausted."""
+        page_number = self.offset // self.page_size
+        start = min(page_number * self.PLATFORM_BATCH_SIZE, len(wanted))
         consumed = 0
         collected: list = []
         while start < len(wanted):
@@ -131,7 +129,6 @@ class RomMLibraryWorker(QThread):
             if len(collected) >= self.page_size:
                 break
         self.platforms_consumed = consumed
-        self.cursor_advanced.emit(consumed)
         return collected[:self.page_size]
 
     def _fetch_browse(self, wanted: list[dict]) -> list:
