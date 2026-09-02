@@ -62,6 +62,12 @@ class WorkspaceDashboardWindow(BaseMainWindow):
             widget = getattr(self, name, None)
             if widget is not None:
                 widget.setVisible(False)
+        # Installed-state comparison is only implemented for Vita today.
+        if self.workspace_key == "vita":
+            self.status_filter.setEnabled(True)
+        else:
+            self.status_filter.setCurrentIndex(0)
+            self.status_filter.setEnabled(False)
 
     def _find_library_splitter(self):
         central = self.legacy_central
@@ -92,7 +98,6 @@ class WorkspaceDashboardWindow(BaseMainWindow):
         self.setWindowTitle(f"RommHeld • {profile.name}")
         self.shell.set_profile(profile)
         self.shell.clear_sections()
-        self._prepare_legacy_library()
         self.shell.add_section("Library", self.legacy_central, persistent=True)
         self.shell.add_section("Device", self._build_device_page())
         self.shell.add_section("Setup", self._build_setup_page())
