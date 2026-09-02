@@ -34,7 +34,7 @@ def normalize_romm_url(value: str) -> str:
     return urlunparse((parsed.scheme, parsed.netloc, path, "", "", ""))
 
 
-def _create_romm_connection(address, timeout=None, source_address=None, *, all_errors=False):
+def _create_romm_connection(address, timeout=None, source_address=None):
     """Open RomM connections IPv4-first, then fall back to IPv6."""
     host, port = address
     errors: list[OSError] = []
@@ -71,7 +71,6 @@ class _RomMHTTPSHandler(request.HTTPSHandler):
             _RomMHTTPSConnection,
             req,
             context=self._context,
-            check_hostname=self._check_hostname,
         )
 
 
