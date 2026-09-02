@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .mappings import ROMM_TO_RETROFLOW
-
 
 @dataclass(frozen=True)
 class DeploymentTarget:
@@ -16,41 +14,71 @@ class DeploymentTarget:
 NATIVE_GBA = DeploymentTarget(
     "native_gba",
     "Nintendo GBA (AGB_FIRM)",
-    "Native 3DS GBA runtime. Requires the user's extracted AGB_FIRM assets.",
+    "Native 3DS GBA runtime. Requires the user's extracted AGB_FIRM donor assets.",
     "native",
 )
 
 VC_CIA = DeploymentTarget(
     "vc_cia",
     "Virtual Console-style CIA",
-    "Pack the ROM into an installable CIA with generated Home Menu metadata.",
+    "Create an installable CIA with per-title Home Menu metadata and artwork.",
+    "cia",
+)
+
+NATIVE_3DS_CIA = DeploymentTarget(
+    "native_3ds_cia",
+    "Nintendo 3DS CIA",
+    "Transfer an existing 3DS application CIA without repackaging it.",
     "cia",
 )
 
 RETROARCH = DeploymentTarget(
     "retroarch",
     "RetroArch ROM",
-    "Copy the original ROM into RommHeld's managed RetroArch ROM tree.",
+    "Copy the original ROM into the configured 3DS RetroArch ROM tree.",
     "retroarch",
 )
 
-# Platforms with a known RetroArch-oriented mapping already maintained by
-# RommHeld. Native/VC capabilities are layered on top of this set separately.
-RETROARCH_PLATFORM_SLUGS = frozenset(ROMM_TO_RETROFLOW) | {
-    "gamegear",
-    "gba",
-    "gb",
-    "gbc",
-    "nes",
-    "snes",
-}
+# Platforms for which the current Nintendo 3DS RetroArch build publishes
+# usable core CIA packages. This is intentionally an explicit 3DS list rather
+# than inheriting the Vita RetroFlow mapping.
+RETROARCH_PLATFORM_SLUGS = frozenset(
+    {
+        "3ds",
+        "gba",
+        "gb",
+        "gbc",
+        "nes",
+        "famicom",
+        "fds",
+        "snes",
+        "gamegear",
+        "sms",
+        "genesis",
+        "sega32",
+        "segacd",
+        "msx",
+        "msx2",
+        "atari5200",
+        "atari7800",
+        "lynx",
+        "vectrex",
+        "colecovision",
+        "c64",
+        "amiga",
+        "dos",
+        "scummvm",
+        "wonderswan",
+        "wonderswan-color",
+        "neogeomvs",
+        "neo-geo-pocket",
+        "neo-geo-pocket-color",
+        "zxs",
+        "turbografx-cd",
+    }
+)
 
-# Nintendo released Virtual Console-style titles for these 3DS-era classic
-# platforms. Packaging support is deliberately separate from whether an
-# official Nintendo title exists for a particular ROM.
 VC_RESEARCH_PLATFORM_SLUGS = frozenset({"gb", "gbc", "gba", "nes", "snes", "gamegear"})
-
-# Native AGB_FIRM packaging is currently implemented only for GBA.
 NATIVE_PLATFORM_SLUGS = frozenset({"gba"})
 
 
@@ -63,7 +91,9 @@ def available_targets(slug: str) -> tuple[DeploymentTarget, ...]:
     targets: list[DeploymentTarget] = []
     if key in NATIVE_PLATFORM_SLUGS:
         targets.append(NATIVE_GBA)
-    if key in RETROARCH_PLATFORM_SLUGS:
+    if key == "3ds":
+        targets.append(NATIVE_3DS_CIA)
+    elif key in RETROARCH_PLATFORM_SLUGS:
         targets.append(RETROARCH)
     if key in VC_RESEARCH_PLATFORM_SLUGS:
         targets.append(VC_CIA)
@@ -71,12 +101,10 @@ def available_targets(slug: str) -> tuple[DeploymentTarget, ...]:
 
 
 def default_destination(target_key: str, platform_slug: str, filename: str) -> str:
-    slug = platform_slug.lower()
     safe_name = filename.replace("\\", "/").rsplit("/", 1)[-1]
+    slug = platform_slug.lower()
     if target_key == "retroarch":
         return f"/RetroArch/roms/{slug}/{safe_name}"
-    if target_key == "native_gba":
-        return f"/roms/gba/{safe_name}"
-    if target_key == "vc_cia":
+    if target_key in {"native_gba", "native_3ds_cia", "vc_cia"}:
         return f"/cias/{safe_name.rsplit('.', 1)[0]}.cia"
     return safe_name
