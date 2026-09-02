@@ -1,37 +1,107 @@
 # Device backends
 
-RommHeld is a Linux desktop application for managing a local RomM library across supported handheld devices.
+RommHeld uses device backends to keep transport and device-specific filesystem behaviour separate from the shared library, transfer, and UI layers.
 
-The current device implementation is the PlayStation Vita. Nintendo 3DS support is planned as an FTP-backed device. Device-specific transport and filesystem behaviour belongs behind backend interfaces so the main library and transfer workflow remain reusable.
+## Current state
 
-## Current targets
+- **PlayStation Vita**: current supported baseline using USB / VitaShell mounted storage.
+- **Nintendo 3DS**: active development backend using FTP. The transport implementation exists on the active feature branch but is not yet part of `main`.
+- **Nintendo DS / flashcards**: target-profile and storage research exists on the active UI branch; no complete DS transport backend is currently part of `main`.
 
-- **PlayStation Vita**: USB / VitaShell mounted filesystem. Current implementation.
-- **Nintendo 3DS**: FTP filesystem. Planned backend.
+A device appearing in the new selector does not by itself mean that its complete transfer backend is implemented.
 
-## Design rules
+## Backend responsibilities
 
-- Keep RomM scanning, game metadata, transfer planning, duplicate detection, and verification device-agnostic where practical.
-- Put USB/VitaShell and FTP-specific behaviour in device backends.
-- Do not hard-code mount UUIDs, usernames, ROM roots, FTP credentials, or machine-specific paths.
-- A backend should expose discovery, connection state, filesystem operations, free-space information, and safe transfer primitives.
-- Platform destinations belong to device-specific mappings. A RomM platform ID must never be routed to an arbitrary destination simply because a similarly named emulator exists.
-- Emulator and frontend setup is device-specific. RetroAchievements capability should be represented separately from the frontend or transport.
+A backend should provide, as applicable:
 
-## Generic file transfer
+- device identity and connection state
+- transport configuration
+- filesystem root or remote root
+- directory listing
+- remote/local file metadata
+- free-space information
+- upload/copy operations
+- progress reporting
+- cancellation
+- resume where the transport supports it
+- post-transfer verification
 
-RommHeld should provide a first-class **Send File** workflow that can transfer arbitrary user-selected files to a connected device. File extensions must not determine the destination automatically. Known software layouts may provide optional explicit presets, but the user remains in control of the remote destination.
+The backend should not decide which emulator or frontend is best for a game.
 
-The generic file transfer workflow should reuse the same queue, progress, cancellation, resume, and verification mechanisms as ROM transfers.
+## Shared responsibilities
 
-## Software and emulator setup
+The following should remain device-agnostic wherever practical:
 
-RommHeld is not intended to become a package mirror for every emulator and homebrew project. Setup pages should prefer links to authoritative upstream projects/releases and concise installation guidance. User-downloaded artifacts can then be transferred with Send File.
+- RomM library scanning
+- game metadata
+- platform identification
+- transfer planning
+- duplicate detection
+- verification policy
+- transfer queue state
+- user-facing transfer semantics
 
-This keeps upstream distribution responsibility with the project authors and avoids brittle assumptions about archive layouts and release assets.
+Platform destinations belong to device-specific target mappings. A RomM platform ID must never be routed to an arbitrary destination because a similarly named emulator happens to exist.
 
-## Nintendo 3DS direction
+## PlayStation Vita
 
-The planned 3DS backend uses FTP rather than USB. The initial implementation should support connection configuration, filesystem browsing, safe arbitrary-file transfers, ROM destination mapping, resume where supported, and post-transfer verification.
+The Vita baseline uses a host-mounted VitaShell filesystem. Mount discovery is dynamic and does not rely on a hard-coded username or storage UUID.
 
-Later stages can add detection of TwilightMenu++ / nds-bootstrap, native GBA paths, RetroArch, Red Viper, and other verified 3DS software. Emulator routing and RetroAchievements support must remain separate capabilities rather than assumptions tied to the FTP transport.
+Known RetroFlow and Adrenaline mappings are handled explicitly. Unknown mappings remain unsupported.
+
+## Nintendo 3DS FTP
+
+The active 3DS transport provides:
+
+- configurable FTP host and port
+- optional credentials
+- connection timeout and passive-mode configuration
+- connection and directory browsing
+- configured remote-root enforcement
+- path traversal protection
+- same-size skipping
+- resume where the FTP server supports REST/STOR
+- cancellation
+- best-effort `SITE AVBL` free-space reporting
+- post-transfer size verification
+
+The transport deliberately does not assume a universal 3DS ROM directory. The configured root and destination must be explicit.
+
+Real-device transfer testing and verified platform mappings remain separate implementation work.
+
+## Generic Send File
+
+All device backends should eventually support the same high-level **Send File** workflow:
+
+```text
+choose local file
+      ↓
+choose device
+      ↓
+choose explicit destination
+      ↓
+plan/check space
+      ↓
+transfer with progress + cancellation
+      ↓
+skip/resume/overwrite according to policy
+      ↓
+verify result
+```
+
+File extensions must not silently select destinations. Known installation layouts can be exposed later as explicit, verified presets.
+
+## Safety rules
+
+- Never hard-code credentials, IP addresses, mount UUIDs, or personal paths.
+- Reject remote path traversal and configured-root escape.
+- Do not silently overwrite different-size files.
+- Do not perform destructive remote operations without explicit user action.
+- Treat FTP as a trusted local-network transport rather than an Internet-facing service.
+- Do not make transport availability imply emulator/runtime availability.
+
+## Testing
+
+Backend tests should be runnable without physical hardware. FTP should use mocked connections for unit tests, with a separate manual procedure for testing against a real 3DS FTP server.
+
+The common backend contract should be established before adding additional device transports.
