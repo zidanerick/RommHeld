@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QApplication
 
+from romm_vita_manager.audited_workspace import WorkspaceDashboardWindow
 from romm_vita_manager.config import load_config
 from romm_vita_manager.console_selector import PlatformSelectorDialog
-from romm_vita_manager.workspace_dashboard import WorkspaceDashboardWindow
 
 
 def main() -> None:
