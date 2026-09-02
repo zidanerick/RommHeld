@@ -74,11 +74,12 @@ class _RomMHTTPHandler(request.HTTPHandler):
 
 class _RomMHTTPSHandler(request.HTTPSHandler):
     def https_open(self, req):
+        # HTTPSHandler's check_hostname attribute is not present on all Python
+        # releases. Let HTTPSConnection retain its normal SSL hostname check.
         return self.do_open(
             _RomMHTTPSConnection,
             req,
             context=self._context,
-            check_hostname=self._check_hostname,
         )
 
 
