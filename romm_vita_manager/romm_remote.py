@@ -103,18 +103,10 @@ def _platform_slug(item: dict, by_id: dict[int, str], by_name: dict[str, str]) -
     return ""
 
 
-def _list_games_for_platform_slugs(
-    instance_url: str,
-    token: str,
-    allowed_slugs: set[str] | frozenset[str],
-    *,
-    limit: int = 1000,
-    missing_message: str,
-) -> list[RomMRemoteGame]:
+def _list_games_for_platform_slugs(instance_url: str, token: str, allowed_slugs: set[str] | frozenset[str], *, limit: int = 1000, missing_message: str) -> list[RomMRemoteGame]:
     platforms = _items(_json_request(instance_url, token, "platforms"))
     wanted = [
-        item
-        for item in platforms
+        item for item in platforms
         if isinstance(item, dict)
         and str(item.get("slug", "")).lower() in allowed_slugs
         and isinstance(item.get("id"), int)
@@ -123,10 +115,7 @@ def _list_games_for_platform_slugs(
         raise RomMApiError(missing_message)
 
     platform_ids = [item["id"] for item in wanted]
-    by_id = {
-        item["id"]: str(item.get("slug") or "").lower()
-        for item in wanted
-    }
+    by_id = {item["id"]: str(item.get("slug") or "").lower() for item in wanted}
     by_name = {
         str(item.get("name") or item.get("slug") or "").lower(): str(item.get("slug") or "").lower()
         for item in wanted
@@ -137,19 +126,12 @@ def _list_games_for_platform_slugs(
         for item in wanted
     }
 
-    rows = _items(
-        _json_request(
-            instance_url,
-            token,
-            "roms",
-            {
-                "platform_ids": platform_ids,
-                "limit": limit,
-                "offset": 0,
-                "with_total": False,
-            },
-        )
-    )
+    rows = _items(_json_request(
+        instance_url,
+        token,
+        "roms",
+        {"platform_ids": platform_ids, "limit": limit, "offset": 0, "with_total": False},
+    ))
 
     games: list[RomMRemoteGame] = []
     for item in rows:
@@ -163,17 +145,7 @@ def _list_games_for_platform_slugs(
         name = str(item.get("name") or filename)
         size = int(item.get("size_bytes") or item.get("size") or 0)
         cover = item.get("cover_path") or item.get("cover_url")
-        games.append(
-            RomMRemoteGame(
-                item["id"],
-                name,
-                filename,
-                platform,
-                size,
-                resolve_cover_url(instance_url, cover),
-                slug,
-            )
-        )
+        games.append(RomMRemoteGame(item["id"], name, filename, platform, size, resolve_cover_url(instance_url, cover), slug))
     return games
 
 
@@ -188,13 +160,18 @@ def list_compatible_games(instance_url: str, token: str, *, limit: int = 1000) -
 
 
 def list_3ds_games(instance_url: str, token: str, *, limit: int = 1000) -> list[RomMRemoteGame]:
-    return _list_games_for_platform_slugs(
+    games = _list_games_for_platform_slugs(
         instance_url,
         token,
         {"3ds"},
         limit=limit,
         missing_message="RomM has no Nintendo 3DS platform (slug: 3ds).",
     )
+    # Keep the old helper's value shape stable for existing callers/tests.
+    return [
+        RomMRemoteGame(game.rom_id, game.name, game.filename, game.platform, game.size, game.cover_url)
+        for game in games
+    ]
 
 
 def download_rom(instance_url: str, token: str, rom: RomMRemoteGame, destination: Path) -> Path:
