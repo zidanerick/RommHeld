@@ -42,7 +42,7 @@ PLATFORM_ASSETS = {
         "https://icons8.com/icon/13629/playstation",
         "Icons8 Color PlayStation icon used as a visual handheld-family identifier. Free use requires an Icons8 attribution link in the application.",
         logo_role="wordmark",
-        icons8_icon="playstation.png",
+        icons8_icon="vita.png",
         icons8_source="https://icons8.com/icon/13629/playstation",
     ),
     "3ds": PlatformAssets(
@@ -51,7 +51,7 @@ PLATFORM_ASSETS = {
         "https://icons8.com/icon/fdVLfvnTjw0H/3ds-console",
         "Icons8 Color 3DS Console icon. Free use requires an Icons8 attribution link in the application.",
         logo_simpleicons="logo_simpleicons.svg", logo_simpleicons_dark="logo_simpleicons_dark.svg", logo_role="icon",
-        icons8_icon="3ds_console.png",
+        icons8_icon="3ds.png",
         icons8_source="https://icons8.com/icon/fdVLfvnTjw0H/3ds-console",
     ),
     "ds": PlatformAssets(
@@ -60,7 +60,7 @@ PLATFORM_ASSETS = {
         "https://icons8.com/icon/19599/nintendo-ds",
         "Icons8 Color Nintendo DS icon. Free use requires an Icons8 attribution link in the application.",
         logo_simpleicons="logo.svg", logo_simpleicons_dark="logo_dark.svg", logo_role="wordmark",
-        icons8_icon="nintendo_ds.png",
+        icons8_icon="ds.png",
         icons8_source="https://icons8.com/icon/19599/nintendo-ds",
     ),
     "psp": PlatformAssets(
@@ -68,7 +68,7 @@ PLATFORM_ASSETS = {
         "#111111", "#777b84", True,
         "https://icons8.com/icon/xv4xoRkYlmXq/playstation-portable",
         "Icons8 Color PlayStation Portable icon. Free use requires an Icons8 attribution link in the application.",
-        icons8_icon="playstation_portable.png",
+        icons8_icon="psp.png",
         icons8_source="https://icons8.com/icon/xv4xoRkYlmXq/playstation-portable",
     ),
 }
