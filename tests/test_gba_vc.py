@@ -1,8 +1,11 @@
 import io
 import zipfile
 
-from romm_vita_manager.gba_boot_logo import LOGO_REGION_SIZE, bundled_boot_logo
-from romm_vita_manager.gba_vc import native_title_id_for_romm_id, prepare_gba_rom
+from romm_vita_manager.gba_vc import (
+    build_native_gba_cia,
+    native_title_id_for_romm_id,
+    prepare_gba_rom,
+)
 
 
 def test_native_title_id_is_valid_gba_vc_shape():
@@ -17,9 +20,19 @@ def test_native_title_id_is_stable():
     assert native_title_id_for_romm_id(42) != native_title_id_for_romm_id(43)
 
 
-def test_bundled_boot_logo_has_native_logo_region_size():
-    logo = bundled_boot_logo()
-    assert len(logo) == LOGO_REGION_SIZE == 0x2000
+def test_native_builder_rejects_blank_boot_logo_before_packaging():
+    try:
+        build_native_gba_cia(
+            b"GBA TEST ROM",
+            b"image",
+            boot_logo=b"",
+            title_id=native_title_id_for_romm_id(42),
+            title_name="Test Game",
+        )
+    except ValueError as exc:
+        assert "boot logo" in str(exc).lower()
+    else:
+        raise AssertionError("Expected blank AGB_FIRM boot logo to be rejected")
 
 
 def test_prepare_gba_rom_extracts_gba_from_zip():
