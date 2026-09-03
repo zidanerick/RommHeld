@@ -16,6 +16,10 @@ The application can load artwork from the configured RomM server for library pre
 
 The project targets Linux/Unix, Windows, and macOS using PySide6. Platform-specific filesystem, storage, and application-path behaviour is isolated from device and library logic.
 
+UI work follows [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md). The active migration away from the transitional Vita-first UI stack is tracked in [`docs/UX_REFACTOR_PLAN.md`](docs/UX_REFACTOR_PLAN.md). New interface work should use the shared tokens in `romm_vita_manager/design_tokens.py` rather than adding per-widget brand colours.
+
+Manufacturer-family accents are intentionally consistent across targets: Nintendo red, PlayStation blue, Xbox green and Sega blue. The rest of the interface remains neutral so the accent identifies the active platform without dominating the content.
+
 ## Artwork
 
 The launcher uses original RommHeld SVG illustrations based on public-domain hardware references. The reference sources are documented in `docs/ASSET_SOURCES.md`.
