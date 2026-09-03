@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import socket
 import tempfile
 import threading
 from pathlib import Path
@@ -119,7 +118,7 @@ class GbaCiaDeployWorker(QThread):
                     self.status_changed.emit(
                         f"FBI accepted the request. Serving CIA from {served_url}. Confirm installation on the 3DS…"
                     )
-                    self.fbi_server.wait_for_download()
+                    self.fbi_server.wait_for_download(cancel_event=self.cancel_event)
                     self.completed.emit("fbi", self.destination)
                     return
 
