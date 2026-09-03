@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import socket
 import struct
 import threading
@@ -33,6 +34,7 @@ class FBIUrlServer:
         if not self.file_path.is_file():
             raise FileNotFoundError(f"CIA file does not exist: {self.file_path}")
         self.bind_host = bind_host
+        self.requested_port = port
         self.served_event = threading.Event()
         self._fbi_socket: socket.socket | None = None
         self._ack_thread: threading.Thread | None = None
@@ -45,7 +47,15 @@ class FBIUrlServer:
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, directory=str(server.file_path.parent), **kwargs)
 
-        self.httpd = ThreadingHTTPServer((bind_host, port), FBIHandler)
+        try:
+            self.httpd = ThreadingHTTPServer((bind_host, port), FBIHandler)
+        except OSError as exc:
+            if port != 0 and exc.errno == errno.EADDRINUSE:
+                # Prefer the conventional FBI servefiles.py port, but never let a
+                # stale process or another local service prevent a deployment.
+                self.httpd = ThreadingHTTPServer((bind_host, 0), FBIHandler)
+            else:
+                raise
         self.httpd.daemon_threads = True
         self.http_thread: threading.Thread | None = None
 
