@@ -1,6 +1,6 @@
 # RommHeld UX and Repository Refactor Plan
 
-Status: active
+Status: implementation complete; hardware regression validation remains
 
 Design authority: `docs/DESIGN_SYSTEM.md`
 
@@ -8,14 +8,15 @@ Baseline: `feature/ui-redesign` at `fddc07151d3105c6fee9a0217764973ecd200c4d`.
 
 ## Goal
 
-RommHeld is moving from a Vita-first utility into a coherent multi-handheld desktop application. The refactor must preserve working behavior while making the active architecture understandable, extensible and visually consistent.
+RommHeld is moving from a Vita-first utility into a coherent multi-handheld desktop application. The refactor preserves working behavior while making the active architecture understandable, extensible and visually consistent.
+
+The branch has reached the point where broad restructuring should stop. Remaining work before merge should be driven by real-device defects, not by additional architectural churn.
 
 ## Current active architecture
 
-The launcher path is now:
-
 ```text
 launcher.py
+    -> PlatformSelectorDialog
     -> WorkspaceDashboardWindow (QMainWindow)
         -> ManagementShell
             -> LocalLibraryWidget for Vita / DS local-library presentation
@@ -27,23 +28,30 @@ launcher.py
             -> Settings page
 ```
 
-`WorkspaceDashboardWindow` no longer subclasses the original Vita `MainWindow`. The previous `audited_workspace.py` correctness layer and the obsolete `device_dashboard.py` have already been removed.
+Supporting focused modules now include:
 
-The old `ui.py` and `app.py` modules remain compatibility/service sources for behavior that has not yet been fully extracted, but they are no longer the main application shell.
+- `vita_library_support.py` for Vita destination/status/copy behavior
+- `send_file_dialog.py` for explicit Vita single-file transfers
+- `local_storage_ui.py` for removable-storage workflows
+- `three_ds_manager.py` for 3DS browsing/deployment
+- `three_ds_setup.py` for guided 3DS readiness
+- `vita_setup.py` for Vita package/runtime preparation
+
+The old `ui.py`, `app.py`, `platform_selector.py`, `audited_workspace.py` and `device_dashboard.py` surfaces have been removed. The root `romm_vita_manager.py` script now forwards to the current launcher rather than exposing a second application architecture.
 
 ## Refactor rules
 
 - Preserve feature behavior before removing compatibility code.
-- Remove dead code only after active references are gone.
 - Keep platform branding in shared design tokens.
 - Keep transport, packaging and runtime-selection logic separate even when presented on one screen.
 - Prefer standalone widgets over inheritance from console-specific windows.
 - Every cleanup step must leave the branch compilable and testable.
 - Do not add temporary files that are not actively used.
+- From this point onward, avoid structural rewrites unless hardware/runtime testing demonstrates a concrete need.
 
 ## Phase 1: design foundation
 
-Status: complete for the active branch.
+Status: complete.
 
 Implemented:
 
@@ -63,32 +71,30 @@ Platform color is an orientation/accent tool, not a full-screen background.
 
 ## Phase 2: startup selector
 
-Status: implemented, hardware validation ongoing.
+Status: implemented; desktop-scale validation remains useful.
 
 Implemented:
 
 - responsive console cards
-- real hardware artwork where available with bundled fallback assets
+- canonical handheld artwork with bundled fallback assets
 - manufacturer-colored selected state
 - RomM/local source configuration
 - asynchronous RomM verification
 - thread-safe selector shutdown
-- KDE/CachyOS-safe card implementation using clickable frames rather than nested push-button layouts
+- KDE/CachyOS-safe clickable-frame cards
 
-Remaining polish:
+Remaining validation:
 
-- validate selector sizing on additional desktop scales/themes
-- keep placeholder artwork consistent for future platforms
+- additional desktop scales/themes
+- future-platform placeholder consistency
 
 ## Phase 3: library experience
 
 ### Vita / local library
 
-Status: extracted.
+Status: complete for the refactor.
 
-`LocalLibraryWidget` now owns the local-library presentation that previously lived inside the Vita `MainWindow`.
-
-Responsibilities:
+`LocalLibraryWidget` owns:
 
 - search
 - platform filter
@@ -98,104 +104,94 @@ Responsibilities:
 - automatic Vita destination summary
 - Vita copy workflow and cancellation
 
-The same local library surface can be reused for DS presentation without pretending DS install-state detection exists.
+Vita destination/status/copy helpers are now isolated in `vita_library_support.py` rather than living in a legacy application window.
 
 ### Nintendo 3DS / RomM library
 
-Status: implemented and progressively loaded.
+Status: complete for the refactor.
 
-Current behavior:
+Implemented:
 
-- RomM-backed compatible library loading
-- artwork inspector
+- progressive RomM-backed compatible library loading
+- artwork inspector with selection-race protection
 - target selection
-- GBA native/VC handoff to the real CIA deployment workflow
+- GBA native/VC handoff to the CIA deployment workflow
 - Nintendo-red deployment accents
 - bounded worker shutdown
 
-Remaining work:
-
-- continue consolidating common library presentation patterns where useful
-- do not force target-specific deployment logic into a generic library model
+Further changes should be driven by hardware/runtime findings rather than forcing more generic abstraction into target-specific deployment logic.
 
 ## Phase 4: device and setup pages
 
-Status: active shell implemented, dialogs still need final visual cleanup.
+Status: visual refactor complete.
 
-Each device page should answer:
+Each device page answers:
 
 1. Is the target configured or connected?
 2. Which endpoint/storage root is in use?
 3. What is the next useful action?
 4. Which advanced actions are available?
 
-Current pages:
+Completed dialog/workflow passes:
 
 ### Vita
 
-- mount state
-- free storage
-- Send File
+- mount state and free storage
+- redesigned Send File workflow
 - Copy selected games
-- Vita Setup
+- redesigned Vita Setup with PlayStation-blue primary actions
+- explicit RetroArch/RetroAchievements route messaging
 
 ### Nintendo 3DS
 
-- FTP configuration state
-- endpoint
-- Setup
-- 3DS manager
-- FBI Remote Install through package deployment flows
+- FTP configuration state and endpoint
+- redesigned 3DS Manager master/detail workflow
+- redesigned guided 3DS Setup
+- FTP connectivity kept separate from FBI Remote Install readiness
+- FBI Remote Install retained through package deployment flows
 
-### Nintendo DS
+### Nintendo DS / removable storage
 
-- SD root
-- storage validation
-- setup validation
-
-Remaining visual pass:
-
-- `three_ds_manager.py`
-- `vita_setup.py`
-- `three_ds_setup.py`
-- removable-storage dialogs
-- Send File dialog
+- SD root and storage validation
+- redesigned removable-storage dialog
+- explicit destination path constrained to the selected storage root
 
 ## Phase 5: deployment dialogs
 
-Status: partly complete.
+Status: complete for the refactor.
 
 Implemented/polished:
 
 - `gba_vc_deploy.py`
 - FBI Remote Install lifecycle/firewall handling
 - 3DS deployment routing
+- 3DS transfer stages
+- Vita Send File stages
+- removable-storage transfer stages
+- transfer controls shown only when relevant
 
-Remaining:
-
-- apply the same hierarchy and card/action language to older form-heavy dialogs
-- expose meaningful transfer stages instead of generic progress text
+Any further deployment UI work should follow actual device-test findings.
 
 ## Phase 6: collapse the legacy inheritance ladder
 
-Status: major milestone complete.
+Status: complete.
 
 Completed:
 
 - `WorkspaceDashboardWindow` is a direct `QMainWindow`
-- `ManagementShell` is the actual central application shell
+- `ManagementShell` is the central application shell
 - Vita/local library UI is a standalone widget
+- reusable Vita helpers moved to `vita_library_support.py`
+- launcher points directly at the unified workspace
+- root compatibility script forwards to the launcher
 - `audited_workspace.py` removed
 - `device_dashboard.py` removed
-- launcher points directly at the unified workspace
-- architecture regression tests verify the workspace does not reintroduce legacy `MainWindow` inheritance
+- `app.py` removed
+- `ui.py` removed
+- `platform_selector.py` removed
+- architecture regression tests reject reintroduction of removed legacy-module imports
 
-Remaining compatibility cleanup:
-
-- migrate remaining reusable helpers/dialogs out of `ui.py` and `app.py`
-- retire those legacy entry-point surfaces only after their remaining callers are moved
-- remove `platform_selector.py` once all compatibility callers are gone
-- retire the root `romm_vita_manager.py` entry point only when backward compatibility is intentionally dropped
+This phase should not be reopened without a concrete functional requirement.
 
 ## Phase 7: asset cleanup
 
@@ -219,15 +215,15 @@ Keep `docs/ASSET_SOURCES.md` aligned with future asset additions/removals.
 
 ## Phase 8: documentation cleanup
 
-Status: active.
+Status: complete for the refactor.
 
 Authoritative documents:
 
 - architecture: `docs/ARCHITECTURE.md`
 - visual/interaction contract: `docs/DESIGN_SYSTEM.md`
-- active migration plan: `docs/UX_REFACTOR_PLAN.md`
+- refactor and validation status: `docs/UX_REFACTOR_PLAN.md`
 
-`docs/UI_REDESIGN.md` is a compatibility pointer only and should not become a second design authority.
+Superseded transitional UI documentation should not be retained once it has no active purpose.
 
 ## Phase 9: tests and lifecycle quality
 
@@ -242,17 +238,39 @@ Current regression areas include:
 - storage validation
 - FBI HTTP completion/cancellation semantics
 - direct `QMainWindow` workspace architecture
+- removal of legacy UI-module callers
 
-CI is headless and does not provide `libEGL.so.1`, so architecture tests must not import Qt GUI modules merely to inspect inheritance. Runtime Qt validation remains a hardware/desktop test responsibility.
+CI is headless and does not provide `libEGL.so.1`, so architecture tests must not import Qt GUI modules merely to inspect inheritance. Runtime Qt validation remains a hardware/desktop responsibility.
 
-Manual lifecycle checks:
+## Remaining pre-merge validation
+
+### Desktop lifecycle
 
 - close startup selector during RomM verification
 - close deployment dialogs during transfer/cleanup
 - switch handheld workspaces repeatedly
 - quit while artwork/library workers are active
-- Vita copy cancellation
-- 3DS FTP/FBI deployment on real hardware
+- confirm redesigned dialogs render correctly at the target desktop scale
+
+### PlayStation Vita hardware
+
+- mount detection through VitaShell USB mode
+- local-library copy and cancellation
+- same-size skip behavior
+- storage-space failure path
+- redesigned Send File transfer and overwrite path
+- Vita Setup package download/stage flow
+
+### Nintendo 3DS hardware
+
+- FTP connect/disconnect/error state
+- remote browsing and destination selection
+- local file upload
+- RomM download followed by 3DS upload
+- cancellation and close behavior
+- GBA CIA deployment
+- FBI Remote Install completion and cleanup
+- 3DS Setup SD detection/validation and FTP-manager handoff
 
 No widget should be destroyed with a live `QThread` child.
 
@@ -261,7 +279,7 @@ No widget should be destroyed with a live `QThread` child.
 Keep a file when it is:
 
 - active production code
-- an intentional compatibility surface
+- an intentional current entry point
 - test coverage
 - a documented asset
 - current documentation
@@ -277,15 +295,16 @@ Remove a file when it is:
 
 ## Definition of done
 
-The refactor is complete when:
+The structural/UI refactor is considered complete when:
 
 - one coherent sidebar shell is the only active application architecture
 - visible pages follow `DESIGN_SYSTEM.md`
-- manufacturer accents come only from shared tokens
+- manufacturer accents come from shared tokens
 - no active workspace depends on a console-specific main-window inheritance chain
-- remaining useful helpers are extracted from legacy `ui.py` / `app.py`
-- transitional shims are removed after callers migrate
-- no current feature is lost
-- worker shutdown is reliable
+- useful helpers have been extracted from removed legacy modules
+- transitional shims have been removed after callers migrated
+- no current feature is intentionally lost
+- worker shutdown is reliable under CI-covered paths
 - tests pass
-- Vita and 3DS hardware workflows pass manual validation
+
+Those implementation conditions are now substantially met. PR #21 should move to real Vita and 3DS regression testing, with only defect-driven fixes before merge.
