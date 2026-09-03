@@ -62,6 +62,10 @@ class ThreeDSFtpBackend:
     def connected(self) -> bool:
         return self.ftp is not None
 
+    def _rooted_path(self, path: str) -> str:
+        """Resolve a path under the configured remote root."""
+        return join_remote_path(self.settings.remote_root, path)
+
     def connect(self) -> str:
         if not self.settings.host.strip():
             raise ValueError("3DS FTP host is required.")
