@@ -20,8 +20,8 @@ NATIVE_GBA = DeploymentTarget(
 
 VC_CIA = DeploymentTarget(
     "vc_cia",
-    "Virtual Console-style CIA",
-    "Create an installable CIA with per-title Home Menu metadata and artwork.",
+    "GBA Virtual Console CIA",
+    "Create an installable GBA AGB_FIRM CIA with per-title Home Menu metadata and a real donor Virtual Console banner.",
     "cia",
 )
 
@@ -78,7 +78,11 @@ RETROARCH_PLATFORM_SLUGS = frozenset(
     }
 )
 
-VC_RESEARCH_PLATFORM_SLUGS = frozenset({"gb", "gbc", "gba", "nes", "snes", "gamegear"})
+# RommHeld currently has a real CIA injector only for GBA via AGB_FIRM.
+# Do not advertise generic "VC" packaging for GB/GBC/NES/SNES/Game Gear until
+# platform-specific injectors exist; routing those ROMs through the GBA builder
+# produces invalid titles on hardware.
+VC_IMPLEMENTED_PLATFORM_SLUGS = frozenset({"gba"})
 NATIVE_PLATFORM_SLUGS = frozenset({"gba"})
 
 
@@ -95,7 +99,7 @@ def available_targets(slug: str) -> tuple[DeploymentTarget, ...]:
         targets.append(NATIVE_3DS_CIA)
     elif key in RETROARCH_PLATFORM_SLUGS:
         targets.append(RETROARCH)
-    if key in VC_RESEARCH_PLATFORM_SLUGS:
+    if key in VC_IMPLEMENTED_PLATFORM_SLUGS:
         targets.append(VC_CIA)
     return tuple(targets)
 
