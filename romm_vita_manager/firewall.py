@@ -11,6 +11,7 @@ class FirewallRule:
     zone: str | None
     source_ip: str
     port: int
+    destination_ip: str | None = None
 
 
 class FirewallError(RuntimeError):
@@ -77,42 +78,59 @@ def _firewalld_rich_rule(source_ip: str, port: int) -> str:
     )
 
 
-def allow_temporary(source_ip: str, port: int) -> FirewallRule | None:
-    """Allow one 3DS address to reach one TCP port for the current firewall runtime.
+def _ufw_rule_args(source_ip: str, port: int, destination_ip: str | None) -> list[str]:
+    args = ["ufw", "allow", "from", source_ip, "to", destination_ip or "any", "port", str(port), "proto", "tcp"]
+    return args
 
-    firewalld runtime rules are intentionally used instead of permanent rules so a
-    RommHeld crash or reboot cannot create a lasting open port. UFW is detected but
-    not modified automatically because its normal allow rules are persistent.
+
+def _ufw_delete_args(source_ip: str, port: int, destination_ip: str | None) -> list[str]:
+    args = ["ufw", "delete", "allow", "from", source_ip, "to", destination_ip or "any", "port", str(port), "proto", "tcp"]
+    return args
+
+
+def allow_temporary(source_ip: str, port: int, *, destination_ip: str | None = None) -> FirewallRule | None:
+    """Allow one 3DS address to reach one TCP port for the current transfer.
+
+    firewalld uses a runtime rich rule. UFW does not expose an equivalent runtime
+    rule API, so its normal rule is added with pkexec and removed automatically when
+    the transfer completes. It is deliberately limited to the 3DS source address
+    and the temporary CIA server port.
     """
     backend = detect_backend()
     if backend is None:
         return None
 
     source_ip = source_ip.strip()
+    destination_ip = destination_ip.strip() if destination_ip else None
     if not source_ip:
         raise FirewallError("A 3DS IPv4 address is required for the temporary firewall rule.")
     if not (1 <= int(port) <= 65535):
         raise FirewallError(f"Invalid firewall port: {port}")
 
-    if backend == "ufw":
-        raise FirewallError(
-            "UFW is active, but RommHeld will not create a persistent UFW rule automatically. "
-            "Allow the selected TCP port from the 3DS address manually, then retry."
-        )
+    if backend == "firewalld":
+        zone = _firewalld_zone()
+        rule = _firewalld_rich_rule(source_ip, int(port))
+        result = _pkexec(["firewall-cmd", f"--zone={zone}", f"--add-rich-rule={rule}"])
+        _require_success(result, "Unable to temporarily allow the 3DS through firewalld")
+        return FirewallRule("firewalld", zone, source_ip, int(port), destination_ip)
 
-    zone = _firewalld_zone()
-    rule = _firewalld_rich_rule(source_ip, int(port))
-    result = _pkexec(["firewall-cmd", f"--zone={zone}", f"--add-rich-rule={rule}"])
-    _require_success(result, "Unable to temporarily allow the 3DS through firewalld")
-    return FirewallRule("firewalld", zone, source_ip, int(port))
+    result = _pkexec(_ufw_rule_args(source_ip, int(port), destination_ip))
+    _require_success(result, "Unable to temporarily allow the 3DS through UFW")
+    return FirewallRule("ufw", None, source_ip, int(port), destination_ip)
 
 
 def remove_temporary(rule: FirewallRule | None) -> None:
     if rule is None:
         return
-    if rule.backend != "firewalld" or not rule.zone:
+
+    if rule.backend == "firewalld":
+        if not rule.zone:
+            return
+        rich_rule = _firewalld_rich_rule(rule.source_ip, rule.port)
+        result = _pkexec(["firewall-cmd", f"--zone={rule.zone}", f"--remove-rich-rule={rich_rule}"])
+        _require_success(result, "Unable to remove the temporary firewalld rule")
         return
 
-    rich_rule = _firewalld_rich_rule(rule.source_ip, rule.port)
-    result = _pkexec(["firewall-cmd", f"--zone={rule.zone}", f"--remove-rich-rule={rich_rule}"])
-    _require_success(result, "Unable to remove the temporary firewalld rule")
+    if rule.backend == "ufw":
+        result = _pkexec(_ufw_delete_args(rule.source_ip, rule.port, rule.destination_ip))
+        _require_success(result, "Unable to remove the temporary UFW rule")
