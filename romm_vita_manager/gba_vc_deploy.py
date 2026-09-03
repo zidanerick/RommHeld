@@ -54,12 +54,18 @@ class GbaCiaDeployWorker(QThread):
             handle.close()
             self.temp_rom = Path(handle.name)
             self.status_changed.emit(f"Downloading {self.game.name} from RomM…")
-            download_rom(url, token, self.game, self.temp_rom)
+            try:
+                download_rom(url, token, self.game, self.temp_rom)
+            except TimeoutError as exc:
+                raise TimeoutError("Timed out downloading the ROM from RomM.") from exc
             if self.cancel_event.is_set():
                 return
 
             self.status_changed.emit("Fetching RomM artwork…")
-            artwork = download_artwork(url, token, self.game.cover_url) if self.game.cover_url else None
+            try:
+                artwork = download_artwork(url, token, self.game.cover_url) if self.game.cover_url else None
+            except TimeoutError as exc:
+                raise TimeoutError("Timed out downloading artwork from RomM.") from exc
             if not artwork:
                 raise ValueError("No usable RomM artwork is available for this title.")
             if self.cancel_event.is_set():
@@ -80,7 +86,7 @@ class GbaCiaDeployWorker(QThread):
             handle.close()
             cia_path = Path(handle.name)
             try:
-                self.status_changed.emit("Uploading CIA to the 3DS…")
+                self.status_changed.emit("Connecting to 3DS FTP…")
                 saved = self.config.get("devices", {}).get("3ds", {})
                 settings = ThreeDSFtpSettings(
                     host=str(saved.get("host", "")).strip(),
@@ -90,13 +96,21 @@ class GbaCiaDeployWorker(QThread):
                     remote_root=str(saved.get("remote_root", "/")),
                 )
                 self.backend = ThreeDSFtpBackend(settings)
-                self.backend.connect()
-                result, _ = self.backend.upload(
-                    cia_path,
-                    self.destination,
-                    cancel_event=self.cancel_event,
-                    progress=self._progress,
-                )
+                try:
+                    self.backend.connect()
+                except TimeoutError as exc:
+                    raise TimeoutError("Timed out connecting to the 3DS FTP server.") from exc
+
+                self.status_changed.emit("Uploading CIA to the 3DS…")
+                try:
+                    result, _ = self.backend.upload(
+                        cia_path,
+                        self.destination,
+                        cancel_event=self.cancel_event,
+                        progress=self._progress,
+                    )
+                except TimeoutError as exc:
+                    raise TimeoutError("Timed out uploading the CIA to the 3DS FTP server.") from exc
                 self.completed.emit(result, self.destination)
             finally:
                 cia_path.unlink(missing_ok=True)
