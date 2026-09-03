@@ -8,6 +8,7 @@ from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -22,6 +23,11 @@ from .config import save_config
 from .design_tokens import DARK, brand_for_platform
 from .fbi_remote_install import FBIUrlServer
 from .firewall import FirewallError, FirewallRule, allow_temporary, remove_temporary
+from .gba_assets import (
+    configured_boot_logo,
+    configured_donor_banner,
+    save_gba_vc_asset_paths,
+)
 from .gba_vc import build_native_gba_cia, native_title_id_for_romm_id
 from .romm_remote import RomMRemoteGame, download_artwork, download_rom
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
@@ -67,6 +73,26 @@ class GbaCiaDeployWorker(QThread):
 
     def run(self) -> None:
         try:
+            platform = (self.game.platform_slug or self.game.platform).strip().lower()
+            if platform != "gba":
+                raise ValueError(
+                    f"{self.target_key} is currently implemented only for GBA titles. "
+                    f"{self.game.name} is identified as {platform or 'an unknown platform'}."
+                )
+
+            boot_logo_path = configured_boot_logo(self.config)
+            if boot_logo_path is None:
+                raise ValueError(
+                    "A valid extracted AGB_FIRM boot-logo asset is required before building a GBA CIA. "
+                    "Choose the boot-logo file in the deployment window."
+                )
+            donor_banner_path = configured_donor_banner(self.config)
+            if self.target_key == "vc_cia" and donor_banner_path is None:
+                raise ValueError(
+                    "The GBA Virtual Console CIA target requires a real donor GBA VC banner so the title uses the expected Home Menu presentation. "
+                    "Choose an extracted donor banner in the deployment window."
+                )
+
             source = self.config.get("library_source", {})
             url = str(source.get("romm_url", "")).strip()
             token = str(source.get("api_token", "")).strip()
@@ -85,17 +111,25 @@ class GbaCiaDeployWorker(QThread):
 
             self.status_changed.emit("Fetching RomM artwork…")
             try:
-                artwork = download_artwork(url, token, self.game.cover_url) if self.game.cover_url else None
+                artwork = (
+                    download_artwork(url, token, self.game.cover_url)
+                    if self.game.cover_url
+                    else None
+                )
             except TimeoutError as exc:
                 raise TimeoutError("Timed out downloading artwork from RomM.") from exc
             if not artwork:
                 raise ValueError("No usable RomM artwork is available for this title.")
             self._check_cancelled()
 
-            self.status_changed.emit("Packaging native GBA CIA for AGB_FIRM…")
+            self.status_changed.emit("Packaging GBA CIA for AGB_FIRM…")
             cia = build_native_gba_cia(
                 self.temp_rom.read_bytes(),
                 artwork,
+                boot_logo=boot_logo_path.read_bytes(),
+                donor_banner=(
+                    donor_banner_path.read_bytes() if donor_banner_path is not None else None
+                ),
                 title_id=native_title_id_for_romm_id(self.game.rom_id),
                 title_name=self.game.name,
             )
@@ -110,7 +144,9 @@ class GbaCiaDeployWorker(QThread):
                 if self.install_method == "fbi":
                     self.status_changed.emit("Preparing FBI Remote Install…")
                     if not self.three_ds_ip:
-                        raise ValueError("Enter the 3DS IP address shown by FBI Remote Install.")
+                        raise ValueError(
+                            "Enter the 3DS IP address shown by FBI Remote Install."
+                        )
 
                     self.fbi_server = FBIUrlServer(cia_path)
                     server_ip = self.fbi_server.local_address(peer_host=self.three_ds_ip)
@@ -126,10 +162,14 @@ class GbaCiaDeployWorker(QThread):
                             f"Firewall access granted for {self.three_ds_ip} → {server_ip}:{self.fbi_server.port}."
                         )
                     else:
-                        self.status_changed.emit("No supported active firewall detected; continuing…")
+                        self.status_changed.emit(
+                            "No supported active firewall detected; continuing…"
+                        )
 
                     self.fbi_server.start()
-                    served_url = self.fbi_server.send_to_fbi(self.three_ds_ip, host=server_ip)
+                    served_url = self.fbi_server.send_to_fbi(
+                        self.three_ds_ip, host=server_ip
+                    )
                     self.status_changed.emit(
                         f"FBI accepted the request. Serving the CIA from {served_url}. Confirm installation on the 3DS…"
                     )
@@ -152,7 +192,9 @@ class GbaCiaDeployWorker(QThread):
                 try:
                     self.backend.connect()
                 except TimeoutError as exc:
-                    raise TimeoutError("Timed out connecting to the 3DS FTP server.") from exc
+                    raise TimeoutError(
+                        "Timed out connecting to the 3DS FTP server."
+                    ) from exc
                 self._check_cancelled()
 
                 self.status_changed.emit("Uploading CIA to the Nintendo 3DS…")
@@ -164,7 +206,9 @@ class GbaCiaDeployWorker(QThread):
                         progress=self._progress,
                     )
                 except TimeoutError as exc:
-                    raise TimeoutError("Timed out uploading the CIA to the 3DS FTP server.") from exc
+                    raise TimeoutError(
+                        "Timed out uploading the CIA to the 3DS FTP server."
+                    ) from exc
                 self._check_cancelled()
                 self.progress.emit(100)
                 self.completed.emit(result, self.destination)
@@ -181,7 +225,9 @@ class GbaCiaDeployWorker(QThread):
                 try:
                     remove_temporary(self.firewall_rule)
                 except FirewallError as exc:
-                    self.status_changed.emit(f"Warning: could not remove temporary firewall rule: {exc}")
+                    self.status_changed.emit(
+                        f"Warning: could not remove temporary firewall rule: {exc}"
+                    )
             if self.backend is not None:
                 self.backend.close()
             if self.temp_rom is not None:
@@ -197,27 +243,81 @@ class GbaCiaDeployWorker(QThread):
 
 
 class GbaVcDeployDialog(QDialog):
-    def __init__(self, config: dict, game: RomMRemoteGame, target_key: str, parent=None):
+    def __init__(
+        self,
+        config: dict,
+        game: RomMRemoteGame,
+        target_key: str,
+        parent=None,
+    ):
         super().__init__(parent)
         self.config = config
         self.game = game
         self.target_key = target_key
         self.worker: GbaCiaDeployWorker | None = None
         self.setWindowTitle("Deploy GBA to Nintendo 3DS")
-        self.resize(760, 590)
-        self.setMinimumWidth(680)
+        self.resize(780, 680)
+        self.setMinimumWidth(700)
 
         accent = brand_for_platform("3ds").accent
 
         header = QVBoxLayout()
         header.setSpacing(3)
         self.title_label = QLabel(game.name)
-        self.title_label.setStyleSheet(f"color:{DARK.text_primary};font-size:22px;font-weight:700;")
-        mode = "Native GBA (AGB_FIRM)" if target_key == "native_gba" else "Virtual Console-style CIA"
+        self.title_label.setStyleSheet(
+            f"color:{DARK.text_primary};font-size:22px;font-weight:700;"
+        )
+        mode = (
+            "Native GBA (AGB_FIRM)"
+            if target_key == "native_gba"
+            else "GBA Virtual Console CIA"
+        )
         self.mode_label = QLabel(mode)
-        self.mode_label.setStyleSheet(f"color:{accent};font-size:11px;font-weight:600;")
+        self.mode_label.setStyleSheet(
+            f"color:{accent};font-size:11px;font-weight:600;"
+        )
         header.addWidget(self.title_label)
         header.addWidget(self.mode_label)
+
+        assets = SurfaceCard()
+        assets_title = QLabel("Required GBA VC assets")
+        assets_title.setStyleSheet("font-size:14px;font-weight:700;")
+        assets.content.addWidget(assets_title)
+        asset_note = QLabel(
+            "Native AGB_FIRM titles need a real boot-logo region extracted from a GBA Virtual Console title you own. "
+            "The Virtual Console presentation additionally uses an extracted donor banner for the authentic rotating box scene."
+        )
+        asset_note.setWordWrap(True)
+        asset_note.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
+        assets.content.addWidget(asset_note)
+
+        boot_logo = configured_boot_logo(config)
+        self.boot_logo_edit = QLineEdit(str(boot_logo) if boot_logo else "")
+        self.boot_logo_edit.setPlaceholderText("Extracted AGB_FIRM boot logo (.bin)")
+        boot_browse = QPushButton("Browse…")
+        boot_browse.clicked.connect(self._choose_boot_logo)
+        boot_row = QHBoxLayout()
+        boot_row.addWidget(self.boot_logo_edit, 1)
+        boot_row.addWidget(boot_browse)
+
+        donor_banner = configured_donor_banner(config)
+        self.donor_banner_edit = QLineEdit(
+            str(donor_banner) if donor_banner else ""
+        )
+        self.donor_banner_edit.setPlaceholderText("Extracted GBA VC ExeFS banner")
+        donor_browse = QPushButton("Browse…")
+        donor_browse.clicked.connect(self._choose_donor_banner)
+        donor_row = QHBoxLayout()
+        donor_row.addWidget(self.donor_banner_edit, 1)
+        donor_row.addWidget(donor_browse)
+
+        asset_form = QFormLayout()
+        asset_form.setContentsMargins(0, 0, 0, 0)
+        asset_form.addRow("AGB_FIRM boot logo", boot_row)
+        asset_form.addRow("VC donor banner", donor_row)
+        assets.content.addLayout(asset_form)
+        self.donor_banner_edit.setEnabled(target_key == "vc_cia")
+        donor_browse.setEnabled(target_key == "vc_cia")
 
         configuration = SurfaceCard()
         configuration_title = QLabel("Installation")
@@ -226,21 +326,29 @@ class GbaVcDeployDialog(QDialog):
 
         self.title_id_edit = QLineEdit(native_title_id_for_romm_id(game.rom_id).hex())
         self.title_id_edit.setReadOnly(True)
-        self.title_id_edit.setToolTip("Generated deterministically inside the GBA Virtual Console title-ID range.")
+        self.title_id_edit.setToolTip(
+            "Generated deterministically inside the GBA Virtual Console title-ID range."
+        )
 
-        self.destination_edit = QLineEdit(default_destination("vc_cia", "gba", game.filename))
+        self.destination_edit = QLineEdit(
+            default_destination("vc_cia", "gba", game.filename)
+        )
         self.destination_edit.setReadOnly(True)
 
         saved = config.get("devices", {}).get("3ds", {})
         self.three_ds_ip_edit = QLineEdit(str(saved.get("ip", "")))
         self.three_ds_ip_edit.setPlaceholderText("3DS IP shown by FBI")
-        self.three_ds_ip_edit.setToolTip("The IP shown by FBI > Remote Install > Receive URLs over the network.")
+        self.three_ds_ip_edit.setToolTip(
+            "The IP shown by FBI > Remote Install > Receive URLs over the network."
+        )
         self.three_ds_ip_edit.editingFinished.connect(self._save_3ds_ip)
 
         self.install_method_combo = QComboBox()
         self.install_method_combo.addItem("FBI Remote Install", "fbi")
         self.install_method_combo.addItem("3DS FTP (copy CIA)", "ftp")
-        self.install_method_combo.currentIndexChanged.connect(self._install_method_changed)
+        self.install_method_combo.currentIndexChanged.connect(
+            self._install_method_changed
+        )
 
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
@@ -254,11 +362,15 @@ class GbaVcDeployDialog(QDialog):
 
         self.install_hint = QLabel()
         self.install_hint.setWordWrap(True)
-        self.install_hint.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
+        self.install_hint.setStyleSheet(
+            f"color:{DARK.text_secondary};font-size:10px;"
+        )
         configuration.content.addWidget(self.install_hint)
 
         self.ftp_status = QLabel("FTP uses the saved Nintendo 3DS device settings.")
-        self.ftp_status.setStyleSheet(f"color:{DARK.text_tertiary};font-size:10px;")
+        self.ftp_status.setStyleSheet(
+            f"color:{DARK.text_tertiary};font-size:10px;"
+        )
         configuration.content.addWidget(self.ftp_status)
         self._install_method_changed()
 
@@ -267,7 +379,7 @@ class GbaVcDeployDialog(QDialog):
         progress_title.setStyleSheet("font-size:14px;font-weight:700;")
         progress_card.content.addWidget(progress_title)
         self.status = QLabel(
-            "RommHeld will fetch the ROM and artwork from RomM, build the CIA locally, then hand it to the selected installation method."
+            "RommHeld will validate the required assets, fetch the ROM and artwork from RomM, build the CIA locally, then hand it to the selected installation method."
         )
         self.status.setWordWrap(True)
         self.status.setStyleSheet(f"color:{DARK.text_secondary};")
@@ -292,9 +404,46 @@ class GbaVcDeployDialog(QDialog):
         layout.setContentsMargins(22, 20, 22, 20)
         layout.setSpacing(14)
         layout.addLayout(header)
+        layout.addWidget(assets)
         layout.addWidget(configuration)
         layout.addWidget(progress_card)
         layout.addLayout(actions)
+
+    def _choose_boot_logo(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose extracted AGB_FIRM boot logo",
+            self.boot_logo_edit.text(),
+        )
+        if path:
+            self.boot_logo_edit.setText(path)
+            self._save_assets()
+
+    def _choose_donor_banner(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose extracted GBA Virtual Console donor banner",
+            self.donor_banner_edit.text(),
+        )
+        if path:
+            self.donor_banner_edit.setText(path)
+            self._save_assets()
+
+    def _save_assets(self) -> bool:
+        boot = Path(self.boot_logo_edit.text()).expanduser()
+        if not boot.is_file():
+            return False
+        donor: Path | None = None
+        if self.donor_banner_edit.text().strip():
+            donor = Path(self.donor_banner_edit.text()).expanduser()
+            if not donor.is_file():
+                return False
+        self.config = save_gba_vc_asset_paths(
+            self.config,
+            boot_logo=boot,
+            donor_banner=donor,
+        )
+        return True
 
     def _install_method_changed(self) -> None:
         method = str(self.install_method_combo.currentData())
@@ -318,10 +467,46 @@ class GbaVcDeployDialog(QDialog):
         save_config(self.config)
 
     def start(self) -> None:
+        platform = (self.game.platform_slug or self.game.platform).strip().lower()
+        if platform != "gba":
+            QMessageBox.warning(
+                self,
+                "Unsupported Virtual Console target",
+                "RommHeld currently has a real CIA injector only for GBA. Use RetroArch for this title until a platform-specific injector is implemented.",
+            )
+            return
+
+        boot = Path(self.boot_logo_edit.text()).expanduser()
+        if not boot.is_file():
+            QMessageBox.warning(
+                self,
+                "AGB_FIRM boot logo required",
+                "Choose a valid boot-logo region extracted from a GBA Virtual Console title you own. RommHeld will not generate a blank substitute because that can produce a CIA that crashes on real hardware.",
+            )
+            return
+        if self.target_key == "vc_cia":
+            donor = Path(self.donor_banner_edit.text()).expanduser()
+            if not donor.is_file():
+                QMessageBox.warning(
+                    self,
+                    "GBA VC donor banner required",
+                    "Choose an extracted banner from a real GBA Virtual Console title. This is what provides the expected rotating Virtual Console box presentation on HOME Menu.",
+                )
+                return
+        if not self._save_assets():
+            QMessageBox.warning(
+                self, "Invalid GBA VC assets", "One of the selected asset paths is invalid."
+            )
+            return
+
         method = str(self.install_method_combo.currentData())
         saved = self.config.get("devices", {}).get("3ds", {})
         if method == "ftp" and not str(saved.get("host", "")).strip():
-            QMessageBox.warning(self, "3DS FTP not configured", "Configure the Nintendo 3DS FTP host first.")
+            QMessageBox.warning(
+                self,
+                "3DS FTP not configured",
+                "Configure the Nintendo 3DS FTP host first.",
+            )
             return
         if method == "fbi" and not self.three_ds_ip_edit.text().strip():
             QMessageBox.warning(
@@ -363,7 +548,9 @@ class GbaVcDeployDialog(QDialog):
         self.progress.setValue(100)
         self.status.setText(messages.get(result, result))
         if result == "different":
-            QMessageBox.warning(self, "Existing CIA protected", self.status.text())
+            QMessageBox.warning(
+                self, "Existing CIA protected", self.status.text()
+            )
 
     def _failed(self, message: str) -> None:
         self.status.setText(f"Deployment failed: {message}")
@@ -384,8 +571,5 @@ class GbaVcDeployDialog(QDialog):
     def closeEvent(self, event) -> None:
         if self.worker is not None and self.worker.isRunning():
             self.worker.cancel()
-            # Cancellation is observed by FTP and FBI wait loops. RomM network
-            # requests are bounded, so wait for cleanup instead of destroying a
-            # live thread after an arbitrary timeout.
             self.worker.wait()
         super().closeEvent(event)
