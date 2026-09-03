@@ -1,38 +1,25 @@
 from __future__ import annotations
 
 from pathlib import Path
-from urllib.request import Request, urlopen
 
-from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPixmap
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from .platform_assets import get_platform_assets
 
 
-class _PhotoLoader(QThread):
-    loaded = Signal(bytes)
-
-    def __init__(self, url: str, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.url = url
-
-    def run(self) -> None:
-        try:
-            request = Request(
-                self.url,
-                headers={"User-Agent": "RommHeld/1.0 hardware-artwork"},
-            )
-            with urlopen(request, timeout=10) as response:
-                data = response.read(16 * 1024 * 1024)
-            if data:
-                self.loaded.emit(data)
-        except Exception:
-            return
+MAX_HARDWARE_IMAGE_BYTES = 16 * 1024 * 1024
 
 
 class ConsoleIdentity(QWidget):
-    """Render real hardware photos when available, with bundled vectors as an offline fallback."""
+    """Render optional hardware photos with bundled vectors as the offline fallback.
+
+    Remote enhancement uses Qt's asynchronous network stack rather than a
+    QThread. Deleting the selector therefore cannot destroy a live worker
+    thread, and oversized responses are aborted before they can be cached.
+    """
 
     DISPLAY_SIZE = {
         "vita": (198, 96),
@@ -46,7 +33,9 @@ class ConsoleIdentity(QWidget):
         self.console_key = console_key
         self.name = name
         self.assets = get_platform_assets(console_key)
-        self._photo_loader: _PhotoLoader | None = None
+        self._network = QNetworkAccessManager(self)
+        self._reply: QNetworkReply | None = None
+        self._download = bytearray()
         width, height = self.DISPLAY_SIZE.get(console_key, (170, 132))
 
         root = QVBoxLayout(self)
@@ -61,11 +50,11 @@ class ConsoleIdentity(QWidget):
         self.device.setStyleSheet("background:transparent;border:none;")
         root.addWidget(self.device, 0, Qt.AlignmentFlag.AlignCenter)
 
-        self.name_label = QLabel(self.name.upper())
+        self.name_label = QLabel(self.name)
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.name_label.setWordWrap(False)
         self.name_label.setStyleSheet(
-            "background:transparent;border:none;color:#f2f4f8;font-size:13px;font-weight:700;"
+            "background:transparent;border:none;color:#F5F5F7;font-size:13px;font-weight:700;"
         )
         root.addWidget(self.name_label, 0, Qt.AlignmentFlag.AlignCenter)
 
@@ -75,7 +64,10 @@ class ConsoleIdentity(QWidget):
     def _load_fallback_artwork(self) -> None:
         if not self.assets:
             return
-        artwork_path: Path = self.assets.path("device_large")
+        try:
+            artwork_path: Path = self.assets.path("device_large")
+        except ValueError:
+            return
         if not artwork_path.is_file():
             return
         pixmap = QPixmap(str(artwork_path))
@@ -99,25 +91,53 @@ class ConsoleIdentity(QWidget):
                 self.device.setPixmap(self._fit_photo(pixmap))
                 return
 
-        self._photo_loader = _PhotoLoader(self.assets.photo_url, self)
-        self._photo_loader.loaded.connect(self._photo_loaded)
-        self._photo_loader.finished.connect(self._photo_thread_finished)
-        self._photo_loader.start()
+        request = QNetworkRequest(QUrl(self.assets.photo_url))
+        request.setRawHeader(b"User-Agent", b"RommHeld/1.0 hardware-artwork")
+        self._download.clear()
+        self._reply = self._network.get(request)
+        self._reply.readyRead.connect(self._photo_ready_read)
+        self._reply.finished.connect(self._photo_finished)
 
-    def _photo_loaded(self, data: bytes) -> None:
+    def _photo_ready_read(self) -> None:
+        reply = self._reply
+        if reply is None:
+            return
+        self._download.extend(bytes(reply.readAll()))
+        if len(self._download) > MAX_HARDWARE_IMAGE_BYTES:
+            self._download.clear()
+            reply.abort()
+
+    def _photo_finished(self) -> None:
+        reply = self._reply
+        if reply is None:
+            return
+
+        # Drain any bytes emitted immediately before finished().
+        if reply.bytesAvailable() and len(self._download) <= MAX_HARDWARE_IMAGE_BYTES:
+            self._download.extend(bytes(reply.readAll()))
+
+        data = bytes(self._download) if len(self._download) <= MAX_HARDWARE_IMAGE_BYTES else b""
+        succeeded = reply.error() == QNetworkReply.NetworkError.NoError and bool(data)
+        reply.deleteLater()
+        self._reply = None
+        self._download.clear()
+
+        if not succeeded:
+            return
         pixmap = QPixmap()
         if not pixmap.loadFromData(data):
             return
         try:
             pixmap.save(str(self._cache_path()), "PNG")
-        except Exception:
+        except OSError:
             pass
         self.device.setPixmap(self._fit_photo(pixmap))
 
-    def _photo_thread_finished(self) -> None:
-        if self._photo_loader is not None:
-            self._photo_loader.deleteLater()
-            self._photo_loader = None
+    def stop_loading(self) -> None:
+        """Abort optional network enhancement without affecting fallback art."""
+        reply = self._reply
+        if reply is not None and reply.isRunning():
+            reply.abort()
 
     def _fit_pixmap(self, pixmap: QPixmap) -> QPixmap:
         target = self.device.size()
@@ -169,3 +189,7 @@ class ConsoleIdentity(QWidget):
             image = image.copy(left, top, right - left + 1, bottom - top + 1)
 
         return QPixmap.fromImage(image)
+
+    def closeEvent(self, event) -> None:
+        self.stop_loading()
+        super().closeEvent(event)
