@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from .config import save_config
 from .fbi_remote_install import FBIUrlServer
+from .firewall import FirewallError, FirewallRule, allow_temporary, remove_temporary
 from .gba_vc import build_native_gba_cia, native_title_id_for_romm_id
 from .romm_remote import RomMRemoteGame, download_artwork, download_rom
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
@@ -43,6 +44,7 @@ class GbaCiaDeployWorker(QThread):
         self.cancel_event = threading.Event()
         self.backend: ThreeDSFtpBackend | None = None
         self.fbi_server: FBIUrlServer | None = None
+        self.firewall_rule: FirewallRule | None = None
         self.temp_rom: Path | None = None
 
     def cancel(self) -> None:
@@ -96,7 +98,16 @@ class GbaCiaDeployWorker(QThread):
                     self.status_changed.emit("Preparing FBI Remote Install…")
                     if not self.three_ds_ip:
                         raise ValueError("Enter the 3DS IP address shown by FBI Remote Install.")
+
                     self.fbi_server = FBIUrlServer(cia_path)
+                    self.firewall_rule = allow_temporary(self.three_ds_ip, self.fbi_server.port)
+                    if self.firewall_rule is not None:
+                        self.status_changed.emit(
+                            f"Temporarily allowing {self.three_ds_ip} to reach the CIA server…"
+                        )
+                    else:
+                        self.status_changed.emit("No supported active firewall detected; continuing…")
+
                     self.fbi_server.start()
                     served_url = self.fbi_server.send_to_fbi(self.three_ds_ip)
                     self.status_changed.emit(
@@ -141,6 +152,11 @@ class GbaCiaDeployWorker(QThread):
         finally:
             if self.fbi_server is not None:
                 self.fbi_server.close()
+            if self.firewall_rule is not None:
+                try:
+                    remove_temporary(self.firewall_rule)
+                except FirewallError as exc:
+                    self.status_changed.emit(f"Warning: could not remove temporary firewall rule: {exc}")
             if self.backend is not None:
                 self.backend.close()
             if self.temp_rom is not None:
@@ -234,7 +250,8 @@ class GbaVcDeployDialog(QDialog):
         if is_fbi:
             self.install_hint.setText(
                 "On the 3DS: FBI → Remote Install → Receive URLs over the network. "
-                "RommHeld will send the generated CIA directly to FBI for installation."
+                "RommHeld will send the generated CIA directly to FBI for installation. "
+                "The app will temporarily allow the 3DS through firewalld when needed."
             )
         else:
             self.install_hint.setText(
