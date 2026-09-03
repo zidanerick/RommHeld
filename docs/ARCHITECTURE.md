@@ -2,7 +2,7 @@
 
 RommHeld is a single-process PySide6 desktop application that presents game libraries across multiple handheld targets. Library access, target/runtime selection, package preparation, transport and UI presentation are separate concerns.
 
-Visual and interaction rules live in `DESIGN_SYSTEM.md`. Active migration work lives in `UX_REFACTOR_PLAN.md`.
+Visual and interaction rules live in `DESIGN_SYSTEM.md`. Current refactor and validation status lives in `UX_REFACTOR_PLAN.md`.
 
 ## Runtime entry path
 
@@ -27,14 +27,15 @@ ManagementShell
     +--> Settings
 ```
 
-The active workspace no longer inherits the original Vita-specific `MainWindow` from `ui.py` / `app.py`.
+`run.sh` executes `launcher.py`. The root `romm_vita_manager.py` script is only a compatibility entry point and forwards to the same launcher.
+
+The former Vita-specific application modules `ui.py` and `app.py` have been removed. The active workspace has no legacy `MainWindow` inheritance or compatibility dependency.
 
 For library presentation:
 
 - `LocalLibraryWidget` handles the current Vita/DS local-library surface.
 - `ThreeDSLibraryWidget` handles the current progressive RomM-backed 3DS surface.
-
-Legacy `ui.py` / `app.py` code remains only where individual helpers/dialogs have not yet been migrated. It is not the application shell.
+- `vita_library_support.py` owns reusable Vita destination, install-state and copy-worker behavior that was previously embedded in the old window module.
 
 ## Library providers
 
@@ -53,6 +54,8 @@ Legacy `ui.py` / `app.py` code remains only where individual helpers/dialogs hav
 - Vita copy/cancel workflow
 
 DS can reuse the same presentation without claiming Vita-style install-state knowledge.
+
+`vita_library_support.py` contains the reusable Vita copy worker, destination resolution, status checks and size formatting. These helpers have no application-shell responsibility.
 
 ### RomM server
 
@@ -93,8 +96,10 @@ Runtime preference is advisory. The selected route must still be supported by th
 
 - `vita.py`: mount detection and storage information
 - `transfers.py` / `file_transfer.py`: cancellable local copying
-- `vita_setup.py`: Vita setup/runtime preparation
+- `vita_library_support.py`: Vita destination/status/copy helpers
 - `local_library.py`: active library/deployment presentation
+- `send_file_dialog.py`: explicit single-file transfer workflow
+- `vita_setup.py`: Vita setup/runtime preparation
 
 PSP and PS1 retain their Adrenaline paths. Other supported systems can map to RetroFlow/runtime-specific destinations.
 
@@ -102,11 +107,11 @@ PSP and PS1 retain their Adrenaline paths. Other supported systems can map to Re
 
 - `three_ds_ftp.py`: FTP transport, remote-root enforcement, creation, skip/resume/cancellation and size verification
 - `three_ds_manager.py`: direct 3DS transfer/management UI
-- `three_ds_setup.py`: setup workflow
+- `three_ds_setup.py`: guided storage/transport/FBI-readiness setup workflow
 - `three_ds_paths.py`: path helpers
 - `storage_validation.py`: mounted-storage validation
 
-FTP transport does not choose runtime or package format.
+FTP transport does not choose runtime or package format. Setup keeps FTP connectivity and FBI Remote Install readiness explicit rather than treating them as one state.
 
 ### FBI Remote Install
 
@@ -138,7 +143,8 @@ RommHeld does not automatically download proprietary Nintendo donor assets or co
 
 - `storage_detection.py`: candidate mounted storage discovery
 - `storage_validation.py`: conservative selected-root validation
-- `local_storage.py` / `local_storage_ui.py`: local/removable-storage workflows
+- `local_storage.py`: removable-storage path and capacity helpers
+- `local_storage_ui.py`: card-based removable-storage selection and transfer workflow
 
 Machine-specific paths, removable-media roots, IP addresses and credentials stay outside Git.
 
@@ -189,6 +195,8 @@ It does not own transport, storage or package logic.
 
 `workspace_dashboard.py` is the composition root for the active desktop window. It constructs target pages and delegates library behavior to standalone widgets rather than inheriting a console-specific application window.
 
+The obsolete `platform_selector.py` compatibility shim has been removed. All current callers use `console_selector.py` directly.
+
 ## Worker and thread rules
 
 Network, artwork, library and transfer work must not block the UI thread.
@@ -217,11 +225,15 @@ A clean shutdown is preferred over arbitrary short waits that can leave live Qt 
 11. Package preparation does not silently install proprietary executable content from untrusted mirrors.
 12. UI refactors preserve overwrite, verification, cancellation and credential semantics.
 
-## Remaining architecture cleanup
+## Architecture status
 
-The large Vita-window inheritance dependency has been removed from the active shell. Remaining cleanup is narrower:
+The structural refactor is complete enough that further broad restructuring should stop before merge:
 
-- move reusable helpers/dialogs still sourced from legacy `ui.py` / `app.py` into focused modules;
-- remove compatibility shims only after all callers migrate;
-- finish styling remaining setup/transfer dialogs;
-- keep `DESIGN_SYSTEM.md` and this document authoritative as the project evolves.
+- the unified workspace is a direct `QMainWindow`;
+- Vita/local library behavior is standalone;
+- the useful Vita copy/status helpers are in a focused module;
+- legacy `ui.py`, `app.py` and `platform_selector.py` surfaces are removed;
+- Send File, removable-storage, Vita Setup, 3DS Setup and 3DS Manager use the shared design language;
+- AST regression tests prevent the removed legacy module dependencies from returning.
+
+The remaining pre-merge work is primarily runtime regression testing on real Vita and Nintendo 3DS hardware, plus fixes for defects found by those tests. New architecture work should require a concrete functional reason rather than continuing the refactor for its own sake.
