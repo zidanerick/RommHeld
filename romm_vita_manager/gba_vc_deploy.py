@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from .config import save_config
 from .fbi_remote_install import FBIUrlServer
 from .gba_vc import build_native_gba_cia, native_title_id_for_romm_id
 from .romm_remote import RomMRemoteGame, download_artwork, download_rom
@@ -240,13 +241,10 @@ class GbaVcDeployDialog(QDialog):
 
     def _save_3ds_ip(self) -> None:
         ip = self.three_ds_ip_edit.text().strip()
-        cfg = dict(self.config)
-        devices = dict(cfg.get("devices", {}))
-        device = dict(devices.get("3ds", {}))
+        devices = self.config.setdefault("devices", {})
+        device = devices.setdefault("3ds", {})
         device["ip"] = ip
-        devices["3ds"] = device
-        cfg["devices"] = devices
-        self.config = cfg
+        save_config(self.config)
 
     def start(self) -> None:
         method = str(self.install_method_combo.currentData())
