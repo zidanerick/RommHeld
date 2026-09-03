@@ -15,7 +15,7 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args) -> None:
         return
 
-    def _serve_file(self) -> None:
+    def _serve_file(self, *, mark_download_complete: bool) -> None:
         source = self.server.owner.file_path
         try:
             size = source.stat().st_size
@@ -23,12 +23,12 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(404, str(exc))
             return
 
-        self.server.owner.request_started()
+        if mark_download_complete:
+            self.server.owner.request_started()
         try:
             self.send_response(200)
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Length", str(size))
-            self.send_header("Content-Disposition", f'attachment; filename="{source.name}"')
             self.end_headers()
             if self.command == "HEAD":
                 return
@@ -39,22 +39,24 @@ class _Handler(BaseHTTPRequestHandler):
                         break
                     self.wfile.write(chunk)
         finally:
-            self.server.owner.request_finished()
+            if mark_download_complete:
+                self.server.owner.request_finished()
+
+    def _requested_name(self) -> str:
+        return self.path.split("?", 1)[0].lstrip("/")
 
     def do_GET(self) -> None:
-        requested = self.path.split("?", 1)[0].lstrip("/")
-        if requested == self.server.owner.file_path.name:
+        if self._requested_name() == self.server.owner.file_path.name:
             try:
-                self._serve_file()
+                self._serve_file(mark_download_complete=True)
             except (BrokenPipeError, ConnectionResetError):
                 self.server.owner.request_finished()
             return
         self.send_error(404, "File not found")
 
     def do_HEAD(self) -> None:
-        requested = self.path.split("?", 1)[0].lstrip("/")
-        if requested == self.server.owner.file_path.name:
-            self._serve_file()
+        if self._requested_name() == self.server.owner.file_path.name:
+            self._serve_file(mark_download_complete=False)
             return
         self.send_error(404, "File not found")
 
@@ -70,6 +72,11 @@ class _HttpServer(ThreadingHTTPServer):
 class FBIUrlServer:
     """Temporary HTTP server plus FBI Remote Install URL sender."""
 
+    # Match the conventional FBI helper first. Prefer other predictable LAN ports
+    # over an arbitrary ephemeral port because local firewalls commonly whitelist
+    # application ports while blocking random inbound ports.
+    FALLBACK_PORTS = (8000, 8888, 8081)
+
     def __init__(self, file_path: Path, *, bind_host: str = "0.0.0.0", port: int = 8080):
         self.file_path = file_path.expanduser().resolve()
         if not self.file_path.is_file():
@@ -83,13 +90,28 @@ class FBIUrlServer:
         self._fbi_socket: socket.socket | None = None
         self._ack_thread: threading.Thread | None = None
 
-        try:
-            self.httpd = _HttpServer(self, bind_host, port)
-        except OSError as exc:
-            if port != 0 and exc.errno == errno.EADDRINUSE:
+        ports = []
+        if port:
+            ports.append(port)
+        ports.extend(p for p in self.FALLBACK_PORTS if p not in ports)
+        last_error: OSError | None = None
+        for candidate in ports:
+            try:
+                self.httpd = _HttpServer(self, bind_host, candidate)
+                break
+            except OSError as exc:
+                if exc.errno != errno.EADDRINUSE:
+                    raise
+                last_error = exc
+        else:
+            # Final fallback if every predictable port is occupied.
+            try:
                 self.httpd = _HttpServer(self, bind_host, 0)
-            else:
+            except OSError:
+                if last_error is not None:
+                    raise last_error
                 raise
+
         self.httpd.daemon_threads = True
         self.http_thread: threading.Thread | None = None
 
@@ -173,7 +195,7 @@ class FBIUrlServer:
         if not self.request_started_event.wait(timeout):
             raise TimeoutError(
                 f"FBI accepted the URL, but the 3DS never connected to the CIA server at "
-                f"{self.port}. Check the PC address in the generated URL and the PC firewall."
+                f"http://<PC>:{self.port}. Check the PC address in the generated URL and the PC firewall."
             )
         if not self.served_event.wait(timeout):
             raise TimeoutError("The 3DS connected to the CIA server but did not finish downloading the CIA.")
