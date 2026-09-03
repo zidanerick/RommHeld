@@ -10,6 +10,10 @@ from urllib.parse import quote
 
 class _Handler(SimpleHTTPRequestHandler):
     served_event: threading.Event
+    directory_path: str
+
+    def __init__(self, *args, directory: str, **kwargs):
+        super().__init__(*args, directory=directory, **kwargs)
 
     def log_message(self, format: str, *args) -> None:
         return
@@ -30,8 +34,16 @@ class FBIUrlServer:
             raise FileNotFoundError(f"CIA file does not exist: {self.file_path}")
         self.bind_host = bind_host
         self.served_event = threading.Event()
-        handler = type("FBIHandler", (_Handler,), {"served_event": self.served_event})
-        self.httpd = ThreadingHTTPServer((bind_host, port), handler)
+
+        server = self
+
+        class FBIHandler(_Handler):
+            served_event = server.served_event
+
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, directory=str(server.file_path.parent), **kwargs)
+
+        self.httpd = ThreadingHTTPServer((bind_host, port), FBIHandler)
         self.httpd.daemon_threads = True
         self.http_thread: threading.Thread | None = None
 
@@ -40,8 +52,6 @@ class FBIUrlServer:
         return int(self.httpd.server_address[1])
 
     def start(self) -> None:
-        directory = str(self.file_path.parent)
-        self.httpd.RequestHandlerClass.directory = directory
         self.http_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.http_thread.start()
 
