@@ -8,31 +8,106 @@ from pathlib import Path
 class VirtualConsoleProfile:
     key: str
     label: str
+    platform_slugs: tuple[str, ...]
     source_extensions: tuple[str, ...]
     output_extension: str
     runtime: str
     requires_boot_logo: bool = False
     requires_boot9: bool = False
+    requires_new_3ds: bool = False
     title_id_pattern: str | None = None
+    implemented: bool = False
 
+
+GB_PROFILE = VirtualConsoleProfile(
+    key="gb",
+    label="Game Boy Virtual Console",
+    platform_slugs=("gb",),
+    source_extensions=(".gb",),
+    output_extension=".cia",
+    runtime="nintendo-gb-vc",
+    requires_boot9=True,
+)
+
+GBC_PROFILE = VirtualConsoleProfile(
+    key="gbc",
+    label="Game Boy Color Virtual Console",
+    platform_slugs=("gbc",),
+    source_extensions=(".gbc", ".gb"),
+    output_extension=".cia",
+    runtime="nintendo-gbc-vc",
+    requires_boot9=True,
+)
 
 GBA_NATIVE_PROFILE = VirtualConsoleProfile(
-    key="gba-native",
-    label="GBA Virtual Console-style (AGB_FIRM)",
+    key="gba",
+    label="Game Boy Advance Virtual Console (AGB_FIRM)",
+    platform_slugs=("gba",),
     source_extensions=(".gba", ".agb"),
     output_extension=".cia",
     runtime="nintendo-agb-firm",
     requires_boot_logo=True,
     requires_boot9=True,
     title_id_pattern="0004000000F???00",
+    implemented=True,
+)
+
+NES_PROFILE = VirtualConsoleProfile(
+    key="nes",
+    label="NES Virtual Console",
+    platform_slugs=("nes", "famicom", "fds"),
+    source_extensions=(".nes", ".fds"),
+    output_extension=".cia",
+    runtime="nintendo-nes-vc",
+    requires_boot9=True,
+)
+
+SNES_PROFILE = VirtualConsoleProfile(
+    key="snes",
+    label="Super Nintendo Virtual Console",
+    platform_slugs=("snes",),
+    source_extensions=(".sfc", ".smc"),
+    output_extension=".cia",
+    runtime="nintendo-snes-vc",
+    requires_boot9=True,
+    requires_new_3ds=True,
+)
+
+GAME_GEAR_PROFILE = VirtualConsoleProfile(
+    key="gamegear",
+    label="Game Gear Virtual Console",
+    platform_slugs=("gamegear",),
+    source_extensions=(".gg",),
+    output_extension=".cia",
+    runtime="nintendo-gamegear-vc",
+    requires_boot9=True,
 )
 
 
-PROFILES = (GBA_NATIVE_PROFILE,)
+PROFILES = (
+    GB_PROFILE,
+    GBC_PROFILE,
+    GBA_NATIVE_PROFILE,
+    NES_PROFILE,
+    SNES_PROFILE,
+    GAME_GEAR_PROFILE,
+)
+
+_PROFILE_BY_PLATFORM = {
+    slug: profile
+    for profile in PROFILES
+    for slug in profile.platform_slugs
+}
+
+
+def profile_for_platform(platform_slug: str) -> VirtualConsoleProfile | None:
+    return _PROFILE_BY_PLATFORM.get(platform_slug.lower())
 
 
 def profile_for_rom(path: str | Path) -> VirtualConsoleProfile | None:
     suffix = Path(path).suffix.lower()
+    # Some extensions overlap between families (notably .gb). Extension-only
+    # detection is therefore advisory; platform metadata should be preferred.
     return next((profile for profile in PROFILES if suffix in profile.source_extensions), None)
 
 
