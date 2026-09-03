@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QDialog,
@@ -146,9 +146,7 @@ class SendFileDialog(QDialog):
             else "Connect the Vita in VitaShell USB mode before starting a transfer."
         )
         self.status.setWordWrap(True)
-        self.status.setTextInteractionFlags(
-            self.status.textInteractionFlags() | self.status.textInteractionFlags().TextSelectableByMouse
-        )
+        self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         activity_card.content.addWidget(self.status)
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
