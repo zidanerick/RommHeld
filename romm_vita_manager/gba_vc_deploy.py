@@ -19,12 +19,14 @@ from PySide6.QtWidgets import (
 )
 
 from .config import save_config
+from .design_tokens import DARK, brand_for_platform
 from .fbi_remote_install import FBIUrlServer
 from .firewall import FirewallError, FirewallRule, allow_temporary, remove_temporary
 from .gba_vc import build_native_gba_cia, native_title_id_for_romm_id
 from .romm_remote import RomMRemoteGame, download_artwork, download_rom
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
 from .three_ds_targets import default_destination
+from .ui_components import AccentButton, SurfaceCard
 
 
 class GbaCiaDeployWorker(QThread):
@@ -33,7 +35,15 @@ class GbaCiaDeployWorker(QThread):
     completed = Signal(str, str)
     failed = Signal(str)
 
-    def __init__(self, config: dict, game: RomMRemoteGame, target_key: str, destination: str, install_method: str, three_ds_ip: str):
+    def __init__(
+        self,
+        config: dict,
+        game: RomMRemoteGame,
+        target_key: str,
+        destination: str,
+        install_method: str,
+        three_ds_ip: str,
+    ):
         super().__init__()
         self.config = config
         self.game = game
@@ -46,9 +56,14 @@ class GbaCiaDeployWorker(QThread):
         self.fbi_server: FBIUrlServer | None = None
         self.firewall_rule: FirewallRule | None = None
         self.temp_rom: Path | None = None
+        self._transfer_total = 0
 
     def cancel(self) -> None:
         self.cancel_event.set()
+
+    def _check_cancelled(self) -> None:
+        if self.cancel_event.is_set():
+            raise InterruptedError
 
     def run(self) -> None:
         try:
@@ -66,8 +81,7 @@ class GbaCiaDeployWorker(QThread):
                 download_rom(url, token, self.game, self.temp_rom)
             except TimeoutError as exc:
                 raise TimeoutError("Timed out downloading the ROM from RomM.") from exc
-            if self.cancel_event.is_set():
-                return
+            self._check_cancelled()
 
             self.status_changed.emit("Fetching RomM artwork…")
             try:
@@ -76,24 +90,23 @@ class GbaCiaDeployWorker(QThread):
                 raise TimeoutError("Timed out downloading artwork from RomM.") from exc
             if not artwork:
                 raise ValueError("No usable RomM artwork is available for this title.")
-            if self.cancel_event.is_set():
-                return
+            self._check_cancelled()
 
-            self.status_changed.emit("Packaging GBA title through AGB_FIRM…")
+            self.status_changed.emit("Packaging native GBA CIA for AGB_FIRM…")
             cia = build_native_gba_cia(
                 self.temp_rom.read_bytes(),
                 artwork,
                 title_id=native_title_id_for_romm_id(self.game.rom_id),
                 title_name=self.game.name,
             )
-            if self.cancel_event.is_set():
-                return
+            self._check_cancelled()
 
             handle = tempfile.NamedTemporaryFile(prefix="rommheld-gba-", suffix=".cia", delete=False)
             handle.write(cia)
             handle.close()
             cia_path = Path(handle.name)
             try:
+                self._transfer_total = cia_path.stat().st_size
                 if self.install_method == "fbi":
                     self.status_changed.emit("Preparing FBI Remote Install…")
                     if not self.three_ds_ip:
@@ -107,6 +120,7 @@ class GbaCiaDeployWorker(QThread):
                         self.fbi_server.port,
                         destination_ip=server_ip,
                     )
+                    self._check_cancelled()
                     if self.firewall_rule is not None:
                         self.status_changed.emit(
                             f"Firewall access granted for {self.three_ds_ip} → {server_ip}:{self.fbi_server.port}."
@@ -117,13 +131,15 @@ class GbaCiaDeployWorker(QThread):
                     self.fbi_server.start()
                     served_url = self.fbi_server.send_to_fbi(self.three_ds_ip, host=server_ip)
                     self.status_changed.emit(
-                        f"FBI accepted the request. Serving CIA from {served_url}. Confirm installation on the 3DS…"
+                        f"FBI accepted the request. Serving the CIA from {served_url}. Confirm installation on the 3DS…"
                     )
-                    self.fbi_server.wait_for_download()
+                    self.fbi_server.wait_for_download(cancel_event=self.cancel_event)
+                    self._check_cancelled()
+                    self.progress.emit(100)
                     self.completed.emit("fbi", self.destination)
                     return
 
-                self.status_changed.emit("Connecting to 3DS FTP…")
+                self.status_changed.emit("Connecting to Nintendo 3DS FTP…")
                 saved = self.config.get("devices", {}).get("3ds", {})
                 settings = ThreeDSFtpSettings(
                     host=str(saved.get("host", "")).strip(),
@@ -137,8 +153,9 @@ class GbaCiaDeployWorker(QThread):
                     self.backend.connect()
                 except TimeoutError as exc:
                     raise TimeoutError("Timed out connecting to the 3DS FTP server.") from exc
+                self._check_cancelled()
 
-                self.status_changed.emit("Uploading CIA to the 3DS…")
+                self.status_changed.emit("Uploading CIA to the Nintendo 3DS…")
                 try:
                     result, _ = self.backend.upload(
                         cia_path,
@@ -148,6 +165,8 @@ class GbaCiaDeployWorker(QThread):
                     )
                 except TimeoutError as exc:
                     raise TimeoutError("Timed out uploading the CIA to the 3DS FTP server.") from exc
+                self._check_cancelled()
+                self.progress.emit(100)
                 self.completed.emit(result, self.destination)
             finally:
                 cia_path.unlink(missing_ok=True)
@@ -169,8 +188,10 @@ class GbaCiaDeployWorker(QThread):
                 self.temp_rom.unlink(missing_ok=True)
 
     def _progress(self, done: int) -> None:
+        total = self._transfer_total
+        percent = int(done * 100 / total) if total else 0
         try:
-            self.progress.emit(done)
+            self.progress.emit(max(0, min(99, percent)))
         except RuntimeError:
             pass
 
@@ -183,13 +204,25 @@ class GbaVcDeployDialog(QDialog):
         self.target_key = target_key
         self.worker: GbaCiaDeployWorker | None = None
         self.setWindowTitle("Deploy GBA to Nintendo 3DS")
-        self.resize(800, 560)
+        self.resize(760, 590)
+        self.setMinimumWidth(680)
 
+        accent = brand_for_platform("3ds").accent
+
+        header = QVBoxLayout()
+        header.setSpacing(3)
         self.title_label = QLabel(game.name)
-        self.title_label.setStyleSheet("font-size:18px;font-weight:800;")
-        mode = "Native AGB_FIRM" if target_key == "native_gba" else "Virtual Console-style CIA"
-        self.mode_label = QLabel(f"Mode: {mode}")
-        self.mode_label.setStyleSheet("color:#8d96a4;")
+        self.title_label.setStyleSheet(f"color:{DARK.text_primary};font-size:22px;font-weight:700;")
+        mode = "Native GBA (AGB_FIRM)" if target_key == "native_gba" else "Virtual Console-style CIA"
+        self.mode_label = QLabel(mode)
+        self.mode_label.setStyleSheet(f"color:{accent};font-size:11px;font-weight:600;")
+        header.addWidget(self.title_label)
+        header.addWidget(self.mode_label)
+
+        configuration = SurfaceCard()
+        configuration_title = QLabel("Installation")
+        configuration_title.setStyleSheet("font-size:14px;font-weight:700;")
+        configuration.content.addWidget(configuration_title)
 
         self.title_id_edit = QLineEdit(native_title_id_for_romm_id(game.rom_id).hex())
         self.title_id_edit.setReadOnly(True)
@@ -200,53 +233,67 @@ class GbaVcDeployDialog(QDialog):
 
         saved = config.get("devices", {}).get("3ds", {})
         self.three_ds_ip_edit = QLineEdit(str(saved.get("ip", "")))
-        self.three_ds_ip_edit.setPlaceholderText("e.g. 192.168.1.123")
+        self.three_ds_ip_edit.setPlaceholderText("3DS IP shown by FBI")
         self.three_ds_ip_edit.setToolTip("The IP shown by FBI > Remote Install > Receive URLs over the network.")
         self.three_ds_ip_edit.editingFinished.connect(self._save_3ds_ip)
 
         self.install_method_combo = QComboBox()
-        self.install_method_combo.addItem("FBI Remote Install (recommended)", "fbi")
+        self.install_method_combo.addItem("FBI Remote Install", "fbi")
         self.install_method_combo.addItem("3DS FTP (copy CIA)", "ftp")
         self.install_method_combo.currentIndexChanged.connect(self._install_method_changed)
 
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(9)
+        form.addRow("Install with", self.install_method_combo)
+        form.addRow("3DS IP", self.three_ds_ip_edit)
+        form.addRow("Title ID", self.title_id_edit)
+        form.addRow("CIA destination", self.destination_edit)
+        configuration.content.addLayout(form)
+
         self.install_hint = QLabel()
         self.install_hint.setWordWrap(True)
+        self.install_hint.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
+        configuration.content.addWidget(self.install_hint)
+
+        self.ftp_status = QLabel("FTP uses the saved Nintendo 3DS device settings.")
+        self.ftp_status.setStyleSheet(f"color:{DARK.text_tertiary};font-size:10px;")
+        configuration.content.addWidget(self.ftp_status)
         self._install_method_changed()
 
-        self.ftp_status = QLabel("3DS FTP settings are taken from the configured 3DS device.")
+        progress_card = SurfaceCard()
+        progress_title = QLabel("Deployment status")
+        progress_title.setStyleSheet("font-size:14px;font-weight:700;")
+        progress_card.content.addWidget(progress_title)
         self.status = QLabel(
-            "The GBA ROM and RomM artwork are fetched automatically. "
-            "RommHeld uses its bundled original boot-logo fallback, so no donor CIA, boot9 dump, or manual asset is required."
+            "RommHeld will fetch the ROM and artwork from RomM, build the CIA locally, then hand it to the selected installation method."
         )
         self.status.setWordWrap(True)
-
+        self.status.setStyleSheet(f"color:{DARK.text_secondary};")
+        progress_card.content.addWidget(self.status)
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
-        self.deploy = QPushButton("Package and Deploy")
+        self.progress.setValue(0)
+        progress_card.content.addWidget(self.progress)
+
+        self.deploy = AccentButton("Package and Deploy", accent)
         self.cancel = QPushButton("Cancel")
         self.cancel.setEnabled(False)
         self.deploy.clicked.connect(self.start)
         self.cancel.clicked.connect(self.cancel_deploy)
 
         actions = QHBoxLayout()
-        actions.addWidget(self.deploy)
-        actions.addWidget(self.cancel)
         actions.addStretch()
-
-        form = QFormLayout()
-        form.addRow("Game:", self.title_label)
-        form.addRow("Deployment:", self.mode_label)
-        form.addRow("Title ID:", self.title_id_edit)
-        form.addRow("CIA name:", self.destination_edit)
-        form.addRow("Install via:", self.install_method_combo)
-        form.addRow("3DS IP:", self.three_ds_ip_edit)
-        form.addRow("", self.install_hint)
-        form.addRow("FTP:", self.ftp_status)
+        actions.addWidget(self.cancel)
+        actions.addWidget(self.deploy)
 
         layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(self.status)
-        layout.addWidget(self.progress)
+        layout.setContentsMargins(22, 20, 22, 20)
+        layout.setSpacing(14)
+        layout.addLayout(header)
+        layout.addWidget(configuration)
+        layout.addWidget(progress_card)
         layout.addLayout(actions)
 
     def _install_method_changed(self) -> None:
@@ -255,13 +302,12 @@ class GbaVcDeployDialog(QDialog):
         self.three_ds_ip_edit.setEnabled(is_fbi)
         if is_fbi:
             self.install_hint.setText(
-                "On the 3DS: FBI → Remote Install → Receive URLs over the network. "
-                "RommHeld will send the generated CIA directly to FBI for installation. "
-                "The app will temporarily allow the 3DS through the active Linux firewall when needed."
+                "On the 3DS open FBI → Remote Install → Receive URLs over the network. "
+                "RommHeld serves the generated CIA directly and temporarily opens a narrowly scoped firewall rule when supported."
             )
         else:
             self.install_hint.setText(
-                "FTP copies the CIA to the configured 3DS path. Open the CIA in FBI to install it."
+                "FTP copies the generated CIA to the configured 3DS destination. Open the CIA in FBI afterward to install it."
             )
 
     def _save_3ds_ip(self) -> None:
@@ -288,6 +334,8 @@ class GbaVcDeployDialog(QDialog):
         self.progress.setValue(0)
         self.status.setText("Preparing deployment…")
         self.deploy.setEnabled(False)
+        self.install_method_combo.setEnabled(False)
+        self.three_ds_ip_edit.setEnabled(False)
         self.cancel.setEnabled(True)
         self.worker = GbaCiaDeployWorker(
             self.config,
@@ -297,15 +345,12 @@ class GbaVcDeployDialog(QDialog):
             method,
             self.three_ds_ip_edit.text(),
         )
-        self.worker.progress.connect(self._progress)
+        self.worker.progress.connect(self.progress.setValue)
         self.worker.status_changed.connect(self.status.setText)
         self.worker.completed.connect(self._completed)
         self.worker.failed.connect(self._failed)
         self.worker.finished.connect(self._finished)
         self.worker.start()
-
-    def _progress(self, done: int) -> None:
-        self.progress.setValue(min(99, max(0, done // 1024 // 1024)))
 
     def _completed(self, result: str, destination: str) -> None:
         messages = {
@@ -313,7 +358,7 @@ class GbaVcDeployDialog(QDialog):
             "resumed": f"CIA resumed and verified at {destination}.",
             "skipped": f"CIA already exists at {destination} with the same size.",
             "different": f"A different-size CIA exists at {destination}; nothing was overwritten.",
-            "fbi": "CIA delivered to FBI. Confirm the installation on the 3DS.",
+            "fbi": "CIA was delivered to FBI. Complete or confirm the installation on the Nintendo 3DS.",
         }
         self.progress.setValue(100)
         self.status.setText(messages.get(result, result))
@@ -326,15 +371,21 @@ class GbaVcDeployDialog(QDialog):
     def _finished(self) -> None:
         self.worker = None
         self.deploy.setEnabled(True)
+        self.install_method_combo.setEnabled(True)
         self.cancel.setEnabled(False)
+        self._install_method_changed()
 
     def cancel_deploy(self) -> None:
         if self.worker is not None and self.worker.isRunning():
             self.worker.cancel()
-            self.status.setText("Cancelling…")
+            self.cancel.setEnabled(False)
+            self.status.setText("Cancelling and cleaning up…")
 
     def closeEvent(self, event) -> None:
         if self.worker is not None and self.worker.isRunning():
             self.worker.cancel()
-            self.worker.wait(1500)
+            # Cancellation is observed by FTP and FBI wait loops. RomM network
+            # requests are bounded, so wait for cleanup instead of destroying a
+            # live thread after an arbitrary timeout.
+            self.worker.wait()
         super().closeEvent(event)
