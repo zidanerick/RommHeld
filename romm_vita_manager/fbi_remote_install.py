@@ -28,7 +28,7 @@ class _Handler(SimpleHTTPRequestHandler):
 class FBIUrlServer:
     """Temporary HTTP server plus FBI Remote Install URL sender."""
 
-    def __init__(self, file_path: Path, *, bind_host: str = "0.0.0.0", port: int = 0):
+    def __init__(self, file_path: Path, *, bind_host: str = "0.0.0.0", port: int = 8080):
         self.file_path = file_path.expanduser().resolve()
         if not self.file_path.is_file():
             raise FileNotFoundError(f"CIA file does not exist: {self.file_path}")
@@ -57,9 +57,22 @@ class FBIUrlServer:
         self.http_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.http_thread.start()
 
-    def local_address(self, preferred_host: str | None = None) -> str:
+    def local_address(self, preferred_host: str | None = None, peer_host: str | None = None) -> str:
         if preferred_host:
-            return preferred_host
+            return preferred_host.strip()
+
+        if peer_host:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                # UDP connect does not send a packet. It asks the OS which local
+                # interface/address it would use to reach the 3DS specifically.
+                probe.connect((peer_host.strip(), 5000))
+                return str(probe.getsockname()[0])
+            except OSError:
+                pass
+            finally:
+                probe.close()
+
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             probe.connect(("8.8.8.8", 53))
@@ -86,7 +99,7 @@ class FBIUrlServer:
         if self._fbi_socket is not None:
             raise RuntimeError("An FBI Remote Install request is already active.")
 
-        url = self.url_for(self.local_address(host))
+        url = self.url_for(self.local_address(host, three_ds_ip))
         payload = url.encode("ascii")
         packet = struct.pack("!L", len(payload)) + payload
         sock = socket.create_connection((three_ds_ip, 5000), timeout=timeout)
@@ -113,7 +126,10 @@ class FBIUrlServer:
 
     def wait_for_download(self, timeout: float = 120.0) -> None:
         if not self.served_event.wait(timeout):
-            raise TimeoutError("FBI received the CIA URL but did not download the CIA within the timeout.")
+            raise TimeoutError(
+                "FBI accepted the URL but the 3DS could not download the CIA from this PC. "
+                "Check the PC firewall and that the detected PC address is on the same LAN."
+            )
 
     def close(self) -> None:
         self.httpd.shutdown()
