@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
@@ -16,16 +16,12 @@ MAX_HARDWARE_IMAGE_BYTES = 16 * 1024 * 1024
 class ConsoleIdentity(QWidget):
     """Render optional hardware photos with bundled vectors as the offline fallback."""
 
-    # These are deliberately card-sized rather than source-art-sized. The
-    # selector reserves space below the hardware for title, capability summary,
-    # and support state, so oversized images must not force those labels out of
-    # the card on Linux Qt styles.
     DISPLAY_SIZE = {
-        "vita": (176, 78),
-        "3ds": (104, 96),
-        "ds": (104, 96),
-        "psp": (174, 84),
-        "mobile": (104, 78),
+        "vita": (166, 64),
+        "3ds": (94, 78),
+        "ds": (94, 78),
+        "psp": (164, 68),
+        "mobile": (78, 72),
     }
 
     def __init__(self, console_key: str, name: str, parent: QWidget | None = None):
@@ -36,11 +32,11 @@ class ConsoleIdentity(QWidget):
         self._network = QNetworkAccessManager(self)
         self._reply: QNetworkReply | None = None
         self._download = bytearray()
-        width, height = self.DISPLAY_SIZE.get(console_key, (150, 82))
+        width, height = self.DISPLAY_SIZE.get(console_key, (150, 72))
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(4)
+        root.setSpacing(3)
         root.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.device = QLabel()
@@ -63,17 +59,59 @@ class ConsoleIdentity(QWidget):
 
     def _load_fallback_artwork(self) -> None:
         if not self.assets:
+            self._load_generic_artwork()
             return
         try:
             artwork_path: Path = self.assets.path("device_large")
         except ValueError:
+            self._load_generic_artwork()
             return
         if not artwork_path.is_file():
+            self._load_generic_artwork()
             return
         pixmap = QPixmap(str(artwork_path))
         if pixmap.isNull():
+            self._load_generic_artwork()
             return
         self.device.setPixmap(self._fit_pixmap(pixmap))
+
+    def _load_generic_artwork(self) -> None:
+        """Draw a neutral device silhouette when a platform has no bundled art."""
+        if self.console_key != "mobile":
+            return
+
+        size = self.device.size()
+        pixmap = QPixmap(size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        width = min(40, max(28, size.width() - 24))
+        height = min(66, max(50, size.height() - 6))
+        left = (size.width() - width) // 2
+        top = (size.height() - height) // 2
+
+        painter.setPen(QPen(QColor("#77777D"), 2))
+        painter.setBrush(QColor("#242428"))
+        painter.drawRoundedRect(left, top, width, height, 8, 8)
+
+        screen_margin = 5
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#111114"))
+        painter.drawRoundedRect(
+            left + screen_margin,
+            top + 8,
+            width - screen_margin * 2,
+            height - 18,
+            4,
+            4,
+        )
+
+        painter.setPen(QPen(QColor("#77777D"), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        center = left + width // 2
+        painter.drawLine(center - 5, top + height - 5, center + 5, top + height - 5)
+        painter.end()
+        self.device.setPixmap(pixmap)
 
     def _cache_path(self) -> Path:
         cache_root = Path.home() / ".cache" / "rommheld" / "handhelds"
