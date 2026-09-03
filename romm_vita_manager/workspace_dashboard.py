@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .app import SendFileDialog
+from .send_file_dialog import SendFileDialog
 from .config import load_config, save_config
 from .console_selector import PlatformSelectorDialog
 from .design_tokens import DARK
