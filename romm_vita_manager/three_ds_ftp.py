@@ -16,7 +16,7 @@ class ThreeDSFtpSettings:
     port: int = 5000
     username: str = "anonymous"
     password: str = ""
-    timeout: float = 8.0
+    timeout: float = 30.0
     passive: bool = True
     remote_root: str = "/"
 
@@ -61,10 +61,6 @@ class ThreeDSFtpBackend:
     @property
     def connected(self) -> bool:
         return self.ftp is not None
-
-    def _rooted_path(self, path: str) -> str:
-        """Resolve a path under the configured remote root."""
-        return join_remote_path(self.settings.remote_root, path)
 
     def connect(self) -> str:
         if not self.settings.host.strip():
