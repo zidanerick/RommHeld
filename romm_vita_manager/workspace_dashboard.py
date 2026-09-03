@@ -10,22 +10,22 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMainWindow,
     QPushButton,
     QRadioButton,
     QVBoxLayout,
     QWidget,
 )
 
-from .app import MainWindow as BaseMainWindow, SendFileDialog
+from .app import SendFileDialog
 from .config import load_config, save_config
 from .console_selector import PlatformSelectorDialog
 from .design_tokens import DARK
 from .gba_vc_deploy import GbaVcDeployDialog
 from .library_sources import LibrarySource, get_library_source, save_library_source
+from .local_library import LocalLibraryWidget
 from .management_shell import ManagementShell, WORKSPACE_PROFILES
-from .mappings import platform_label
 from .preferences import get_device_preference, preference_options, set_device_preference
-from .romm import scan_games
 from .romm_api import normalize_romm_url
 from .romm_remote import RomMRemoteGame
 from .storage_validation import validate_storage
@@ -38,71 +38,36 @@ from .vita import find_vita_mounts, free_space, total_space
 from .vita_setup import VitaSetupDialog
 
 
-class WorkspaceDashboardWindow(BaseMainWindow):
+class WorkspaceDashboardWindow(QMainWindow):
     """Single-window RommHeld workspace with console-aware sections.
 
-    This class now owns the correctness behavior that previously lived in the
-    temporary audited_workspace subclass. It still inherits the original Vita
-    window while that library is being extracted, but there is only one active
-    workspace implementation in the launcher path.
+    The active application shell is now independent of the original Vita
+    MainWindow. Vita/local library behavior lives in LocalLibraryWidget, while
+    target-specific device, setup and deployment pages are composed here.
     """
 
     def __init__(self, config: dict):
+        super().__init__()
+        self.config = dict(config)
         self.workspace_key = str(config.get("active_console", "vita"))
         if self.workspace_key not in WORKSPACE_PROFILES:
             self.workspace_key = "vita"
-        self.legacy_central: QWidget | None = None
-        self.three_ds_library: ThreeDSLibraryWidget | None = None
-        super().__init__(config)
 
-        self.legacy_central = self.takeCentralWidget()
+        self.vita: Path | None = None
+        self.three_ds_library: ThreeDSLibraryWidget | None = None
+        self.local_library = LocalLibraryWidget(
+            self.config,
+            self.workspace_key if self.workspace_key != "3ds" else "vita",
+            None,
+            self,
+        )
+
+        self.resize(1250, 760)
         self.shell = ManagementShell(WORKSPACE_PROFILES[self.workspace_key], self)
         self.setCentralWidget(self.shell)
         self.shell.change_handheld_requested.connect(self.change_workspace)
         self.shell.navigation_requested.connect(self._section_changed)
-        self._prepare_legacy_library()
         self._rebuild_workspace_sections()
-
-    def _prepare_legacy_library(self) -> None:
-        if self.legacy_central is None:
-            return
-        splitter = self._find_library_splitter()
-        if splitter is not None and splitter.count() > 1:
-            splitter.widget(1).setVisible(False)
-            splitter.setSizes([1, 0])
-
-        # These controls belong to the old all-in-one toolbar. Their current
-        # equivalents live in the sidebar Device/Setup/Tools/Settings pages.
-        for name in (
-            "send_file_button",
-            "three_ds_button",
-            "vita_setup_button",
-            "settings_button",
-        ):
-            widget = getattr(self, name, None)
-            if widget is not None:
-                widget.setVisible(False)
-
-        if self.workspace_key == "vita":
-            self.status_filter.setEnabled(True)
-        else:
-            self.status_filter.setCurrentIndex(0)
-            self.status_filter.setEnabled(False)
-
-    def _find_library_splitter(self):
-        central = self.legacy_central
-        if central is None or central.layout() is None:
-            return None
-        for index in range(central.layout().count()):
-            item = central.layout().itemAt(index)
-            widget = item.widget() if item else None
-            if widget is not None and hasattr(widget, "count"):
-                try:
-                    if widget.count() >= 2:
-                        return widget
-                except TypeError:
-                    continue
-        return None
 
     def _section_changed(self, section: str) -> None:
         if section == "library":
@@ -114,8 +79,6 @@ class WorkspaceDashboardWindow(BaseMainWindow):
 
     def _rebuild_workspace_sections(self) -> None:
         if self.three_ds_library is not None:
-            # Trigger the library's explicit worker shutdown before removing it
-            # from the stack during a handheld switch.
             self.three_ds_library.close()
             self.three_ds_library = None
 
@@ -129,7 +92,9 @@ class WorkspaceDashboardWindow(BaseMainWindow):
             self.three_ds_library = ThreeDSLibraryWidget(self.config, self.open_3ds, self)
             self.shell.add_section("Library", self.three_ds_library)
         else:
-            self.shell.add_section("Library", self.legacy_central, persistent=True)
+            self.local_library.set_config(self.config)
+            self.local_library.set_target(self.workspace_key, self.vita if self.workspace_key == "vita" else None)
+            self.shell.add_section("Library", self.local_library, persistent=True)
 
         self.shell.add_section("Device", self._build_device_page())
         self.shell.add_section("Setup", self._build_setup_page())
@@ -138,15 +103,12 @@ class WorkspaceDashboardWindow(BaseMainWindow):
         self.shell.add_section("Settings", self._build_settings_page())
         self.shell.select_section("Library")
 
-        # The 3DS library starts its own initial progressive load. Do not
-        # immediately invalidate that generation by calling refresh_games().
         if self.workspace_key == "3ds":
             self.refresh_device_page()
             self.refresh_setup_page()
         else:
             self.refresh_workspace()
 
-    # Backwards-compatible internal name while callers migrate.
     def _rebuild_workspace_tabs(self) -> None:
         self._rebuild_workspace_sections()
 
@@ -203,7 +165,9 @@ class WorkspaceDashboardWindow(BaseMainWindow):
             host = str(saved.get("host", "")).strip()
             port = saved.get("port", 5000)
             self.workspace_3ds_status = QLabel("Configured" if host else "Not configured")
-            self.workspace_3ds_endpoint = QLabel(f"ftp://{host}:{port}" if host else "Not configured")
+            self.workspace_3ds_endpoint = QLabel(
+                f"ftp://{host}:{port}" if host else "Not configured"
+            )
             form = QFormLayout()
             form.setContentsMargins(0, 0, 0, 0)
             form.addRow("FTP", self.workspace_3ds_status)
@@ -349,15 +313,21 @@ class WorkspaceDashboardWindow(BaseMainWindow):
         card.content.addWidget(self._card_title("Tools"))
 
         if self.workspace_key == "vita":
-            card.content.addWidget(self._secondary("Send a file outside the normal library deployment workflow."))
+            card.content.addWidget(
+                self._secondary("Send a file outside the normal library deployment workflow.")
+            )
             button = AccentButton("Send file to Vita", WORKSPACE_PROFILES["vita"].accent)
             button.clicked.connect(self.open_vita_send_file)
             card.content.addWidget(button)
         elif self.workspace_key == "3ds":
             card.content.addWidget(
-                self._secondary("Browse and transfer files directly through the configured Nintendo 3DS FTP connection.")
+                self._secondary(
+                    "Browse and transfer files directly through the configured Nintendo 3DS FTP connection."
+                )
             )
-            button = AccentButton("Open 3DS file manager", WORKSPACE_PROFILES["3ds"].accent)
+            button = AccentButton(
+                "Open 3DS file manager", WORKSPACE_PROFILES["3ds"].accent
+            )
             button.clicked.connect(self.open_3ds)
             card.content.addWidget(button)
         else:
@@ -381,7 +351,9 @@ class WorkspaceDashboardWindow(BaseMainWindow):
         source_card = SurfaceCard()
         source_card.content.addWidget(self._card_title("Library source"))
         source_card.content.addWidget(
-            self._secondary("Choose where RommHeld reads library metadata and ROM content for this desktop installation.")
+            self._secondary(
+                "Choose where RommHeld reads library metadata and ROM content for this desktop installation."
+            )
         )
 
         self.settings_local_radio = QRadioButton("Local ROM directory")
@@ -418,7 +390,9 @@ class WorkspaceDashboardWindow(BaseMainWindow):
         form.addRow("Client API Token", self.settings_token_edit)
         source_card.content.addLayout(form)
 
-        save = AccentButton("Save library settings", WORKSPACE_PROFILES[self.workspace_key].accent)
+        save = AccentButton(
+            "Save library settings", WORKSPACE_PROFILES[self.workspace_key].accent
+        )
         save.clicked.connect(self._save_settings_source)
         save_row = QHBoxLayout()
         save_row.addStretch()
@@ -427,10 +401,11 @@ class WorkspaceDashboardWindow(BaseMainWindow):
 
         layout.addWidget(source_card)
         layout.addWidget(self._runtime_preference_box())
-        note = self._secondary(
-            "RomM connection testing is available from the handheld selector. Credentials are currently stored in local application configuration until secure credential-store migration is implemented."
+        layout.addWidget(
+            self._secondary(
+                "RomM connection testing is available from the handheld selector. Credentials are currently stored in local application configuration until secure credential-store migration is implemented."
+            )
         )
-        layout.addWidget(note)
         layout.addStretch(1)
 
         self._settings_source_visibility()
@@ -468,9 +443,12 @@ class WorkspaceDashboardWindow(BaseMainWindow):
                 self.statusBar().showMessage("Enter a RomM Client API Token.", 5000)
                 return
             source = LibrarySource(mode="romm_api", romm_url=url, api_token=token)
+
         self.config = save_library_source(load_config(), source)
         save_config(self.config)
-        self.romm_root = Path(self.config.get("romm_root", self.romm_root)).expanduser()
+        self.local_library.set_config(self.config)
+        if self.three_ds_library is not None:
+            self.three_ds_library.config = self.config
         self.statusBar().showMessage("Library settings saved.", 5000)
         self.refresh_games()
 
@@ -482,7 +460,9 @@ class WorkspaceDashboardWindow(BaseMainWindow):
             return
         try:
             updated = set_device_preference(
-                load_config(), self.workspace_key, str(radio.property("preference_key"))
+                load_config(),
+                self.workspace_key,
+                str(radio.property("preference_key")),
             )
             save_config(updated)
             self.config = updated
@@ -490,90 +470,28 @@ class WorkspaceDashboardWindow(BaseMainWindow):
             return
 
     def refresh_games(self) -> None:
+        self.config = self._reload_config()
         if self.workspace_key == "3ds" and self.three_ds_library is not None:
-            if self.three_ds_library.library_worker and self.three_ds_library.library_worker.isRunning():
+            if (
+                self.three_ds_library.library_worker
+                and self.three_ds_library.library_worker.isRunning()
+            ):
                 return
-            self.three_ds_library.config = self._reload_config()
+            self.three_ds_library.config = self.config
             self.three_ds_library.refresh_library()
             return
 
-        source = get_library_source(load_config())
-        if source.mode == "romm_api":
-            self.games = []
-            self.filtered_games = []
-            self.game_list.clear()
-            self.source_label.setText(
-                "RomM server selected • this workspace still uses the legacy local-library view. "
-                "No local library is substituted."
-            )
-            self.selection_label.setText("0 selected")
+        self.local_library.set_config(self.config)
+        self.local_library.set_target(
+            self.workspace_key,
+            self.vita if self.workspace_key == "vita" else None,
+        )
+        self.local_library.refresh_library()
+
+    def copy_selected(self) -> None:
+        if self.workspace_key != "vita":
             return
-
-        self.romm_root = Path(source.local_root or self.config.get("romm_root", "")).expanduser()
-        self.games = scan_games(self.romm_root)
-        current = self.platforms.currentText() if self.platforms.count() else "All platforms"
-        self.platforms.blockSignals(True)
-        self.platforms.clear()
-        self.platforms.addItem("All platforms")
-        self.platforms.addItems(
-            sorted({g.source_platform for g in self.games}, key=lambda s: platform_label(s).lower())
-        )
-        idx = self.platforms.findText(current)
-        self.platforms.setCurrentIndex(idx if idx >= 0 else 0)
-        self.platforms.blockSignals(False)
-
-        query = self.search.text().strip().lower()
-        platform = self.platforms.currentText()
-        wanted = self.status_filter.currentText()
-        self.filtered_games = []
-        for game in self.games:
-            if query and query not in game.name.lower():
-                continue
-            if platform != "All platforms" and game.source_platform != platform:
-                continue
-            state = "NEW"
-            if self.workspace_key == "vita":
-                try:
-                    state, _ = self.game_status(game)
-                except Exception:
-                    state = "UNKNOWN"
-            if wanted == "Not installed" and state != "NEW":
-                continue
-            if wanted == "Installed" and state != "INSTALLED":
-                continue
-            if wanted == "Different" and state != "DIFFERENT":
-                continue
-            if wanted == "Unknown" and state != "UNKNOWN":
-                continue
-            self.filtered_games.append(game)
-
-        self.game_list.clear()
-        symbols = {"INSTALLED": "✓", "NEW": "↓", "DIFFERENT": "↻", "UNKNOWN": "?"}
-        QListWidgetItem = __import__("PySide6.QtWidgets", fromlist=["QListWidgetItem"]).QListWidgetItem
-        for game in self.filtered_games:
-            if self.workspace_key == "vita":
-                state, detail = self.game_status(game)
-            else:
-                state, detail = "UNKNOWN", "Target status managed in Device"
-            item = QListWidgetItem(
-                f"{symbols[state]} {game.name}\n"
-                f"{platform_label(game.source_platform)} • {human_size(game.size)} • {detail}"
-            )
-            item.setData(Qt.ItemDataRole.UserRole, game)
-            self.game_list.addItem(item)
-        self.apply_view_mode()
-        self.source_label.setText(
-            f"{self.romm_root} • {len(self.filtered_games)} games shown • "
-            f"{WORKSPACE_PROFILES[self.workspace_key].name} target"
-        )
-        self.update_summary()
-
-    def game_status(self, game):
-        from .ui import game_status
-
-        if self.vita is None:
-            return "UNKNOWN", "Vita not connected"
-        return game_status(self.vita, game, self.mappings)
+        self.local_library.copy_selected()
 
     def refresh_workspace(self) -> None:
         self.refresh_device_page()
@@ -581,9 +499,11 @@ class WorkspaceDashboardWindow(BaseMainWindow):
         self.refresh_games()
 
     def refresh_device_page(self) -> None:
+        self.config = self._reload_config()
         if self.workspace_key == "vita":
-            mounts = find_vita_mounts()
+            mounts = self._safe_vita_mounts()
             self.vita = mounts[0] if mounts else None
+            self.local_library.set_vita(self.vita)
             if self.vita:
                 self.workspace_vita_status.setText("Connected")
                 self.workspace_vita_status.setToolTip(str(self.vita))
@@ -601,13 +521,13 @@ class WorkspaceDashboardWindow(BaseMainWindow):
             host = str(saved.get("host", "")).strip()
             port = saved.get("port", 5000)
             self.workspace_3ds_status.setText("Configured" if host else "Not configured")
-            self.workspace_3ds_endpoint.setText(f"ftp://{host}:{port}" if host else "Not configured")
+            self.workspace_3ds_endpoint.setText(
+                f"ftp://{host}:{port}" if host else "Not configured"
+            )
         else:
-            root = str(self._reload_config().get("ds_sd_root", "")).strip()
+            root = str(self.config.get("ds_sd_root", "")).strip()
             self.ds_root.setText(root if root else "No SD root selected")
 
-        if not hasattr(self, "shell"):
-            return
         if self.workspace_key == "vita":
             vita_text = "Connected" if self.vita is not None else "Not detected"
         else:
@@ -620,7 +540,7 @@ class WorkspaceDashboardWindow(BaseMainWindow):
         self.shell.set_device_statuses(vita_text, three_ds_text, ds_text)
 
     @staticmethod
-    def _safe_vita_mounts():
+    def _safe_vita_mounts() -> list[Path]:
         try:
             return find_vita_mounts()
         except OSError:
@@ -638,11 +558,12 @@ class WorkspaceDashboardWindow(BaseMainWindow):
         if key not in WORKSPACE_PROFILES:
             return
         self.workspace_key = key
-        self._prepare_legacy_library()
         self._rebuild_workspace_sections()
 
     def choose_ds_root(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Select mounted DS flashcard SD root")
+        path = QFileDialog.getExistingDirectory(
+            self, "Select mounted DS flashcard SD root"
+        )
         if path:
             self.config["ds_sd_root"] = path
             save_config(self.config)
@@ -659,19 +580,36 @@ class WorkspaceDashboardWindow(BaseMainWindow):
         except (OSError, ValueError) as exc:
             self.ds_validation.setText(str(exc))
             return
-        self.ds_validation.setText(f"{result.kind} • confidence: {result.confidence}")
+        self.ds_validation.setText(
+            f"{result.kind} • confidence: {result.confidence}"
+        )
 
     def open_vita_send_file(self) -> None:
+        if self.vita is None:
+            self.refresh_device_page()
+        if self.vita is None:
+            self.statusBar().showMessage(
+                "Connect the Vita in VitaShell USB mode first.", 5000
+            )
+            return
         SendFileDialog(self.vita, self).exec()
 
-    def open_3ds(self, game: RomMRemoteGame | None = None, target_key: str | None = None) -> None:
+    def open_3ds(
+        self,
+        game: RomMRemoteGame | None = None,
+        target_key: str | None = None,
+    ) -> None:
         config = self._reload_config()
         if game is not None and target_key in {"native_gba", "vc_cia"}:
             GbaVcDeployDialog(config, game, target_key, self).exec()
             return
 
         source = get_library_source(config)
-        library_root = Path(source.local_root).expanduser() if source.mode == "local" and source.local_root else None
+        library_root = (
+            Path(source.local_root).expanduser()
+            if source.mode == "local" and source.local_root
+            else None
+        )
         dialog = ThreeDSManagerDialog(config, library_root, self)
         dialog.exec()
         self.config = self._reload_config()
@@ -683,6 +621,7 @@ class WorkspaceDashboardWindow(BaseMainWindow):
     def open_vita_setup(self) -> None:
         VitaSetupDialog(self.vita, self).exec()
         self.refresh_device_page()
+        self.refresh_games()
 
     def open_3ds_setup(self) -> None:
         dialog = ThreeDSSetupDialog(self.config, self)
@@ -700,6 +639,7 @@ class WorkspaceDashboardWindow(BaseMainWindow):
     def closeEvent(self, event) -> None:
         if self.three_ds_library is not None:
             self.three_ds_library.close()
+        self.local_library.close()
         super().closeEvent(event)
 
 
