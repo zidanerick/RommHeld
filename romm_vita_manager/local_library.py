@@ -22,8 +22,8 @@ from .library_sources import get_library_source
 from .mappings import platform_label
 from .models import Game
 from .romm import scan_games
-from .ui import CopyWorker, destination_for_game, game_status, human_size
 from .ui_components import AccentButton, SurfaceCard
+from .vita_library_support import CopyWorker, destination_for_game, game_status, human_size
 
 
 STATUS_SYMBOLS = {"INSTALLED": "✓", "NEW": "↓", "DIFFERENT": "↻", "UNKNOWN": "?"}
