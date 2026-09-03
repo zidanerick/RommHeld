@@ -72,9 +72,6 @@ class _HttpServer(ThreadingHTTPServer):
 class FBIUrlServer:
     """Temporary HTTP server plus FBI Remote Install URL sender."""
 
-    # Match the conventional FBI helper first. Prefer other predictable LAN ports
-    # over an arbitrary ephemeral port because local firewalls commonly whitelist
-    # application ports while blocking random inbound ports.
     FALLBACK_PORTS = (8000, 8888, 8081)
 
     def __init__(self, file_path: Path, *, bind_host: str = "0.0.0.0", port: int = 8080):
@@ -104,7 +101,6 @@ class FBIUrlServer:
                     raise
                 last_error = exc
         else:
-            # Final fallback if every predictable port is occupied.
             try:
                 self.httpd = _HttpServer(self, bind_host, 0)
             except OSError:
@@ -189,16 +185,30 @@ class FBIUrlServer:
         except OSError:
             pass
 
-    def wait_for_download(self, timeout: float = 180.0) -> None:
-        if self.served_event.wait(0.1):
-            return
-        if not self.request_started_event.wait(timeout):
-            raise TimeoutError(
-                f"FBI accepted the URL, but the 3DS never connected to the CIA server at "
-                f"http://<PC>:{self.port}. Check the PC address in the generated URL and the PC firewall."
-            )
-        if not self.served_event.wait(timeout):
-            raise TimeoutError("The 3DS connected to the CIA server but did not finish downloading the CIA.")
+    def wait_for_download(self, timeout: float = 180.0, cancel_event: threading.Event | None = None) -> None:
+        deadline = 0.0
+        started = threading.Event()
+        while not self.request_started_event.is_set():
+            if self.served_event.is_set():
+                return
+            if cancel_event is not None and cancel_event.is_set():
+                raise InterruptedError
+            if deadline >= timeout:
+                raise TimeoutError(
+                    f"FBI accepted the URL, but the 3DS never connected to the CIA server at "
+                    f"http://<PC>:{self.port}. Check the PC address in the generated URL and the PC firewall."
+                )
+            started.wait(0.25)
+            deadline += 0.25
+
+        deadline = 0.0
+        while not self.served_event.is_set():
+            if cancel_event is not None and cancel_event.is_set():
+                raise InterruptedError
+            if deadline >= timeout:
+                raise TimeoutError("The 3DS connected to the CIA server but did not finish downloading the CIA.")
+            started.wait(0.25)
+            deadline += 0.25
 
     def close(self) -> None:
         self.httpd.shutdown()
