@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import io
+import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -8,6 +10,8 @@ from .gba_boot_logo import bundled_boot_logo
 
 if TYPE_CHECKING:
     from agbcia.banner.image import ImageSource
+
+_MAX_GBA_ROM_SIZE = 0x2000000
 
 
 def _require_agbcia():
@@ -44,6 +48,35 @@ def extract_native_boot_logo(donor_cia: Path, boot9: Path) -> bytes:
     return extract_logo(read_asset(donor_cia), read_asset(boot9))
 
 
+def prepare_gba_rom(rom: bytes) -> bytes:
+    """Return a raw GBA ROM, transparently extracting a .gba from ZIP input."""
+    if len(rom) > _MAX_GBA_ROM_SIZE:
+        try:
+            is_zip = zipfile.is_zipfile(io.BytesIO(rom))
+        except OSError:
+            is_zip = False
+        if not is_zip:
+            raise ValueError("GBA ROM is larger than the 32 MiB maximum supported size.")
+
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(rom))
+    except (OSError, zipfile.BadZipFile):
+        return rom
+
+    with archive:
+        candidates = [
+            info for info in archive.infolist()
+            if not info.is_dir() and info.filename.lower().endswith(".gba")
+        ]
+        if not candidates:
+            raise ValueError("ZIP archive does not contain a .gba ROM.")
+        candidates.sort(key=lambda info: (info.filename.count("/"), info.filename.lower()))
+        selected = candidates[0]
+        if selected.file_size > _MAX_GBA_ROM_SIZE:
+            raise ValueError("The GBA ROM inside the ZIP is larger than the 32 MiB maximum supported size.")
+        return archive.read(selected)
+
+
 def build_native_gba_cia(
     rom: bytes,
     artwork: "ImageSource",
@@ -60,8 +93,10 @@ def build_native_gba_cia(
 
     When no boot logo is supplied, use RommHeld's bundled original fallback
     so normal packaging never requires a donor CIA or boot9 dump.
+    ZIP archives containing a .gba are accepted transparently.
     """
     _, InjectionRequest, inject = _require_agbcia()
+    rom = prepare_gba_rom(rom)
     request = InjectionRequest(
         mode="native",
         rom=rom,
