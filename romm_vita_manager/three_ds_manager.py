@@ -4,7 +4,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Qt, Signal
+from PySide6.QtCore import QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
@@ -146,6 +146,7 @@ class ThreeDSManagerDialog(QDialog):
         self.worker: ThreeDSTransferWorker | None = None
         self._connected = False
         self._games: list[object] = []
+        self._closing_requested = False
 
         self.setWindowTitle("Nintendo 3DS Manager")
         self.resize(1040, 760)
@@ -294,6 +295,7 @@ class ThreeDSManagerDialog(QDialog):
     def _connection_finished(self) -> None:
         self.connection_worker = None
         self._update_controls()
+        self._maybe_finish_close()
 
     def refresh_library(self) -> None:
         if self.library_worker and self.library_worker.isRunning():
@@ -340,14 +342,15 @@ class ThreeDSManagerDialog(QDialog):
         self._update_controls()
 
     def _romm_library_loaded(self, games) -> None:
-        self._games = list(games)
+        batch = list(games)
+        self._games.extend(batch)
         self.source_label.setText(f"RomM Server • {len(self._games)} compatible library files")
         self.status.setText(f"RomM library loaded: {len(self._games)} compatible files.")
-        for game in self._games:
+        for game in batch:
             item = QListWidgetItem(f"{game.name} • {game.platform} • {game.size:,} bytes")
             item.setData(Qt.ItemDataRole.UserRole, game)
             self.game_list.addItem(item)
-        if self._games:
+        if self._games and self.game_list.currentRow() < 0:
             self.game_list.setCurrentRow(0)
         self._update_controls()
 
@@ -359,6 +362,7 @@ class ThreeDSManagerDialog(QDialog):
     def _library_worker_finished(self) -> None:
         self.library_worker = None
         self._update_controls()
+        self._maybe_finish_close()
 
     def _selected_game(self):
         item = self.game_list.currentItem()
@@ -402,12 +406,14 @@ class ThreeDSManagerDialog(QDialog):
         if game is None or self.target_combo.count() == 0:
             return
         target_key = str(self.target_combo.currentData())
-        platform_slug = game.platform_slug if isinstance(game, RomMRemoteGame) else str(game.source_platform).lower()
-        filename = game.filename if isinstance(game, RomMRemoteGame) else game.path.name
+        is_remote = isinstance(game, RomMRemoteGame)
+        platform_slug = game.platform_slug if is_remote else str(game.source_platform).lower()
+        platform_name = game.platform if is_remote else str(game.source_platform)
+        filename = game.filename if is_remote else game.path.name
         self.destination_edit.setText(default_destination(target_key, platform_slug, filename))
         target = next((t for t in available_targets(platform_slug) if t.key == target_key), None)
         if target is not None:
-            self.details.setText(f"{game.name}\n{game.platform} ({platform_slug})\n\n{target.description}")
+            self.details.setText(f"{game.name}\n{platform_name} ({platform_slug})\n\n{target.description}")
         self._update_controls()
 
     def _load_artwork(self, game: RomMRemoteGame) -> None:
@@ -441,14 +447,22 @@ class ThreeDSManagerDialog(QDialog):
 
     def _artwork_finished(self) -> None:
         self.artwork_worker = None
+        self._maybe_finish_close()
 
     def _update_controls(self) -> None:
         ftp_busy = bool((self.connection_worker and self.connection_worker.isRunning()) or (self.worker and self.worker.isRunning()))
         library_busy = bool(self.library_worker and self.library_worker.isRunning())
         selected = self._selected_game() is not None
+        target_key = str(self.target_combo.currentData() or "")
+        target_uses_package_dialog = target_key in {"native_gba", "vc_cia"}
         self.connect_button.setEnabled(not ftp_busy)
         self.refresh_button.setEnabled(not library_busy and not ftp_busy)
-        self.send_button.setEnabled(self._connected and selected and not ftp_busy and not library_busy)
+        self.send_button.setEnabled(
+            selected
+            and not ftp_busy
+            and not library_busy
+            and (self._connected or target_uses_package_dialog)
+        )
         self.cancel_button.setEnabled(bool(self.worker and self.worker.isRunning()))
         for widget in (self.host_edit, self.port_edit, self.user_edit, self.password_edit, self.root_edit):
             widget.setEnabled(not ftp_busy)
@@ -460,18 +474,17 @@ class ThreeDSManagerDialog(QDialog):
         if selected is None:
             return
         target_key = str(self.target_combo.currentData() or "retroarch")
-        if target_key == "native_gba":
+        if target_key in {"native_gba", "vc_cia"}:
+            if isinstance(selected, RomMRemoteGame) and selected.platform_slug == "gba":
+                from .gba_vc_deploy import GbaVcDeployDialog
+
+                GbaVcDeployDialog(self.config, selected, target_key, self).exec()
+                return
             QMessageBox.information(
                 self,
-                "GBA native packaging setup",
-                "Nintendo GBA native deployment uses AGB_FIRM and therefore requires the CIA packager plus your user-supplied donor assets. The next packaging step will make this automatic.",
-            )
-            return
-        if target_key == "vc_cia":
-            QMessageBox.information(
-                self,
-                "Virtual Console packaging setup",
-                "Virtual Console CIA packaging is not yet enabled for this platform. The library browser is already prepared to hand a selected ROM and its artwork to the appropriate packager.",
+                "CIA packaging unavailable",
+                "This CIA packaging route is currently available for RomM-backed GBA titles. "
+                "Local-file and other-platform CIA packaging remains explicit until a matching packager is implemented.",
             )
             return
 
@@ -540,6 +553,7 @@ class ThreeDSManagerDialog(QDialog):
     def _worker_finished(self) -> None:
         self.worker = None
         self._update_controls()
+        self._maybe_finish_close()
 
     def cancel_transfer(self) -> None:
         if self.worker and self.worker.isRunning():
@@ -547,15 +561,34 @@ class ThreeDSManagerDialog(QDialog):
             self.status.setText("Cancelling…")
             self.cancel_button.setEnabled(False)
 
+    def _running_workers(self) -> tuple[QThread, ...]:
+        return tuple(
+            worker
+            for worker in (self.library_worker, self.artwork_worker, self.connection_worker, self.worker)
+            if worker is not None and worker.isRunning()
+        )
+
+    def _maybe_finish_close(self) -> None:
+        if self._closing_requested and not self._running_workers():
+            QTimer.singleShot(0, self.close)
+
     def closeEvent(self, event) -> None:
+        running = self._running_workers()
+        if not running:
+            super().closeEvent(event)
+            return
+
+        self._closing_requested = True
         if self.library_worker and self.library_worker.isRunning():
             self.library_worker.requestInterruption()
-            self.library_worker.wait(1500)
         if self.artwork_worker and self.artwork_worker.isRunning():
             self.artwork_worker.requestInterruption()
-            self.artwork_worker.wait(1500)
-        if self.connection_worker and self.connection_worker.isRunning():
-            self.connection_worker.wait(1500)
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
-        super().closeEvent(event)
+
+        # Network operations are bounded but cannot all be interrupted while a
+        # socket call is active. Keep the dialog alive until every QThread exits
+        # instead of destroying a still-running thread after an arbitrary wait.
+        self.status.setText("Finishing background operation before closing…")
+        self.setEnabled(False)
+        event.ignore()
