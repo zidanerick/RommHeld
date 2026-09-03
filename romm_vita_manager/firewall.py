@@ -19,13 +19,6 @@ class FirewallError(RuntimeError):
     pass
 
 
-def _command_path(name: str) -> str:
-    path = shutil.which(name)
-    if path is None:
-        raise FirewallError(f"Required command is not installed: {name}")
-    return path
-
-
 def _run(command: list[str], *, timeout: float = 15.0) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
@@ -34,7 +27,6 @@ def _run(command: list[str], *, timeout: float = 15.0) -> subprocess.CompletedPr
             capture_output=True,
             text=True,
             timeout=timeout,
-            env=os.environ.copy(),
         )
     except FileNotFoundError as exc:
         raise FirewallError(f"Required command is not installed: {command[0]}") from exc
@@ -42,17 +34,21 @@ def _run(command: list[str], *, timeout: float = 15.0) -> subprocess.CompletedPr
         raise FirewallError(f"Firewall command timed out: {' '.join(command)}") from exc
 
 
+def _command_path(name: str, fallbacks: tuple[str, ...] = ()) -> str | None:
+    path = shutil.which(name)
+    if path:
+        return path
+    for candidate in fallbacks:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def _pkexec(command: list[str], *, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
-    pkexec = _command_path("pkexec")
-    result = _run([pkexec, *command], timeout=timeout)
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout).strip()
-        if not detail and result.returncode == 126:
-            detail = "Authentication was cancelled or no polkit authentication agent is available."
-        if not detail:
-            detail = f"pkexec exited with status {result.returncode}"
-        raise FirewallError(detail)
-    return result
+    pkexec = _command_path("pkexec", ("/usr/bin/pkexec", "/usr/bin/pkexec"))
+    if pkexec is None:
+        raise FirewallError("pkexec is not installed, so RommHeld cannot request firewall permission automatically.")
+    return _run([pkexec, *command], timeout=timeout)
 
 
 def _require_success(result: subprocess.CompletedProcess[str], action: str) -> None:
@@ -66,13 +62,13 @@ def _require_success(result: subprocess.CompletedProcess[str], action: str) -> N
 
 def detect_backend() -> str | None:
     """Return the active supported firewall backend, if any."""
-    firewall_cmd = shutil.which("firewall-cmd")
-    if firewall_cmd:
-        result = _run([firewall_cmd, "--state"])
+    firewalld = _command_path("firewall-cmd", ("/usr/bin/firewall-cmd", "/usr/sbin/firewall-cmd"))
+    if firewalld:
+        result = _run([firewalld, "--state"])
         if result.returncode == 0 and result.stdout.strip().lower() == "running":
             return "firewalld"
 
-    ufw = shutil.which("ufw")
+    ufw = _command_path("ufw", ("/usr/sbin/ufw", "/usr/bin/ufw"))
     if ufw:
         result = _run([ufw, "status"])
         output = (result.stdout + "\n" + result.stderr).lower()
@@ -81,9 +77,22 @@ def detect_backend() -> str | None:
     return None
 
 
+def _firewalld_command() -> str:
+    command = _command_path("firewall-cmd", ("/usr/bin/firewall-cmd", "/usr/sbin/firewall-cmd"))
+    if command is None:
+        raise FirewallError("firewall-cmd is not installed.")
+    return command
+
+
+def _ufw_command() -> str:
+    command = _command_path("ufw", ("/usr/sbin/ufw", "/usr/bin/ufw"))
+    if command is None:
+        raise FirewallError("ufw is not installed.")
+    return command
+
+
 def _firewalld_zone() -> str:
-    firewall_cmd = _command_path("firewall-cmd")
-    result = _run([firewall_cmd, "--get-default-zone"])
+    result = _run([_firewalld_command(), "--get-default-zone"])
     _require_success(result, "Unable to determine the firewalld default zone")
     zone = result.stdout.strip()
     if not zone:
@@ -99,9 +108,8 @@ def _firewalld_rich_rule(source_ip: str, port: int) -> str:
 
 
 def _ufw_rule_args(source_ip: str, port: int, destination_ip: str | None) -> list[str]:
-    ufw = _command_path("ufw")
     return [
-        ufw,
+        _ufw_command(),
         "allow",
         "from",
         source_ip,
@@ -115,9 +123,8 @@ def _ufw_rule_args(source_ip: str, port: int, destination_ip: str | None) -> lis
 
 
 def _ufw_delete_args(source_ip: str, port: int, destination_ip: str | None) -> list[str]:
-    ufw = _command_path("ufw")
     return [
-        ufw,
+        _ufw_command(),
         "delete",
         "allow",
         "from",
@@ -147,8 +154,7 @@ def allow_temporary(source_ip: str, port: int, *, destination_ip: str | None = N
     if backend == "firewalld":
         zone = _firewalld_zone()
         rule = _firewalld_rich_rule(source_ip, int(port))
-        firewall_cmd = _command_path("firewall-cmd")
-        result = _pkexec([firewall_cmd, f"--zone={zone}", f"--add-rich-rule={rule}"])
+        result = _pkexec([_firewalld_command(), f"--zone={zone}", f"--add-rich-rule={rule}"])
         _require_success(result, "Unable to temporarily allow the 3DS through firewalld")
         return FirewallRule("firewalld", zone, source_ip, int(port), destination_ip)
 
@@ -160,16 +166,13 @@ def allow_temporary(source_ip: str, port: int, *, destination_ip: str | None = N
 def remove_temporary(rule: FirewallRule | None) -> None:
     if rule is None:
         return
-
     if rule.backend == "firewalld":
         if not rule.zone:
             return
-        firewall_cmd = _command_path("firewall-cmd")
         rich_rule = _firewalld_rich_rule(rule.source_ip, rule.port)
-        result = _pkexec([firewall_cmd, f"--zone={rule.zone}", f"--remove-rich-rule={rich_rule}"])
+        result = _pkexec([_firewalld_command(), f"--zone={rule.zone}", f"--remove-rich-rule={rich_rule}"])
         _require_success(result, "Unable to remove the temporary firewalld rule")
         return
-
     if rule.backend == "ufw":
         result = _pkexec(_ufw_delete_args(rule.source_ip, rule.port, rule.destination_ip))
         _require_success(result, "Unable to remove the temporary UFW rule")
