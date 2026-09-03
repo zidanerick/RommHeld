@@ -72,6 +72,8 @@ class RomMLibraryWorker(QThread):
         )
 
     def _fetch_platform(self, platform: dict, *, limit: int | None = None):
+        if self.isInterruptionRequested():
+            return []
         slug = str(platform.get("slug") or "").lower()
         if not slug:
             return []
@@ -88,6 +90,8 @@ class RomMLibraryWorker(QThread):
         )
 
     def _emit_platform_results(self, platform: dict, consumed: int, results: list) -> int:
+        if self.isInterruptionRequested():
+            return 0
         self.platforms_consumed = consumed
         if not results:
             return 0
@@ -100,8 +104,12 @@ class RomMLibraryWorker(QThread):
 
     def run(self) -> None:
         try:
+            if self.isInterruptionRequested():
+                return
             self.progress.emit("Connecting to RomM…")
             platforms = _items(_json_request(self.instance_url, self.token, "platforms"))
+            if self.isInterruptionRequested():
+                return
             compatible = [
                 item
                 for item in platforms
@@ -116,9 +124,13 @@ class RomMLibraryWorker(QThread):
                 raise RuntimeError("RomM has no platforms currently recognised as compatible with the 3DS targets.")
 
             if self.platform_slug:
+                if self.isInterruptionRequested():
+                    return
                 platform = wanted[0]
                 self.progress.emit(f"RomM: loading {platform.get('name') or self.platform_slug}…")
                 results = self._fetch_platform(platform)
+                if self.isInterruptionRequested():
+                    return
                 self.platforms_consumed = 1
                 self.loaded.emit(results)
                 return
@@ -126,6 +138,8 @@ class RomMLibraryWorker(QThread):
             start = min(self.offset, len(wanted))
             collected = 0
             for index in range(start, len(wanted)):
+                if self.isInterruptionRequested():
+                    return
                 platform = wanted[index]
                 slug = str(platform.get("slug") or "").lower()
                 self.progress.emit(f"RomM: checking {platform.get('name') or slug}…")
@@ -134,6 +148,8 @@ class RomMLibraryWorker(QThread):
                         # Keep the first validation request tiny. This confirms
                         # authentication and ROM access before requesting a page.
                         probe = self._fetch_platform(platform, limit=1)
+                        if self.isInterruptionRequested():
+                            return
                         if probe:
                             self.progress.emit(
                                 f"RomM: API probe succeeded with {platform.get('name') or slug}; loading its library page…"
@@ -141,7 +157,11 @@ class RomMLibraryWorker(QThread):
                         else:
                             self.progress.emit(f"RomM: {platform.get('name') or slug} has no matching ROMs on this query.")
                     results = self._fetch_platform(platform)
+                    if self.isInterruptionRequested():
+                        return
                 except Exception as exc:
+                    if self.isInterruptionRequested():
+                        return
                     self.progress.emit(f"RomM: {platform.get('name') or slug} failed: {exc}")
                     continue
 
@@ -154,7 +174,8 @@ class RomMLibraryWorker(QThread):
                     break
 
         except Exception as exc:
-            self.failed.emit(str(exc))
+            if not self.isInterruptionRequested():
+                self.failed.emit(str(exc))
 
 
 class RomM3DSLibraryWorker(RomMLibraryWorker):
@@ -162,7 +183,11 @@ class RomM3DSLibraryWorker(RomMLibraryWorker):
 
     def run(self) -> None:
         try:
+            if self.isInterruptionRequested():
+                return
             platforms = _items(_json_request(self.instance_url, self.token, "platforms"))
+            if self.isInterruptionRequested():
+                return
             wanted = [
                 item
                 for item in platforms
@@ -186,6 +211,8 @@ class RomM3DSLibraryWorker(RomMLibraryWorker):
                 search_term=self.search_term,
                 platform_slug="3ds",
             )
-            self.loaded.emit(batch)
+            if not self.isInterruptionRequested():
+                self.loaded.emit(batch)
         except Exception as exc:
-            self.failed.emit(str(exc))
+            if not self.isInterruptionRequested():
+                self.failed.emit(str(exc))
