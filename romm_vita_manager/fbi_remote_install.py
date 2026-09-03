@@ -4,26 +4,67 @@ import errno
 import socket
 import struct
 import threading
-from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote
 
 
-class _Handler(SimpleHTTPRequestHandler):
-    served_event: threading.Event
-    directory_path: str
-
-    def __init__(self, *args, directory: str, **kwargs):
-        super().__init__(*args, directory=directory, **kwargs)
+class _Handler(BaseHTTPRequestHandler):
+    server: "_HttpServer"
 
     def log_message(self, format: str, *args) -> None:
         return
 
-    def do_GET(self) -> None:
+    def _serve_file(self) -> None:
+        source = self.server.owner.file_path
         try:
-            return super().do_GET()
+            size = source.stat().st_size
+        except OSError as exc:
+            self.send_error(404, str(exc))
+            return
+
+        self.server.owner.request_started()
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", f'attachment; filename="{source.name}"')
+            self.end_headers()
+            if self.command == "HEAD":
+                return
+            with source.open("rb") as handle:
+                while True:
+                    chunk = handle.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
         finally:
-            self.served_event.set()
+            self.server.owner.request_finished()
+
+    def do_GET(self) -> None:
+        requested = self.path.split("?", 1)[0].lstrip("/")
+        if requested == self.server.owner.file_path.name:
+            try:
+                self._serve_file()
+            except (BrokenPipeError, ConnectionResetError):
+                self.server.owner.request_finished()
+            return
+        self.send_error(404, "File not found")
+
+    def do_HEAD(self) -> None:
+        requested = self.path.split("?", 1)[0].lstrip("/")
+        if requested == self.server.owner.file_path.name:
+            self._serve_file()
+            return
+        self.send_error(404, "File not found")
+
+
+class _HttpServer(ThreadingHTTPServer):
+    allow_reuse_address = True
+
+    def __init__(self, owner: "FBIUrlServer", bind_host: str, port: int):
+        self.owner = owner
+        super().__init__((bind_host, port), _Handler)
 
 
 class FBIUrlServer:
@@ -35,25 +76,18 @@ class FBIUrlServer:
             raise FileNotFoundError(f"CIA file does not exist: {self.file_path}")
         self.bind_host = bind_host
         self.requested_port = port
+        self.request_started_event = threading.Event()
         self.served_event = threading.Event()
+        self.request_path: str | None = None
+        self._request_lock = threading.Lock()
         self._fbi_socket: socket.socket | None = None
         self._ack_thread: threading.Thread | None = None
 
-        server = self
-
-        class FBIHandler(_Handler):
-            served_event = server.served_event
-
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, directory=str(server.file_path.parent), **kwargs)
-
         try:
-            self.httpd = ThreadingHTTPServer((bind_host, port), FBIHandler)
+            self.httpd = _HttpServer(self, bind_host, port)
         except OSError as exc:
             if port != 0 and exc.errno == errno.EADDRINUSE:
-                # Prefer the conventional FBI servefiles.py port, but never let a
-                # stale process or another local service prevent a deployment.
-                self.httpd = ThreadingHTTPServer((bind_host, 0), FBIHandler)
+                self.httpd = _HttpServer(self, bind_host, 0)
             else:
                 raise
         self.httpd.daemon_threads = True
@@ -67,22 +101,26 @@ class FBIUrlServer:
         self.http_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.http_thread.start()
 
+    def request_started(self) -> None:
+        with self._request_lock:
+            self.request_path = str(self.file_path.name)
+        self.request_started_event.set()
+
+    def request_finished(self) -> None:
+        self.served_event.set()
+
     def local_address(self, preferred_host: str | None = None, peer_host: str | None = None) -> str:
         if preferred_host:
             return preferred_host.strip()
-
         if peer_host:
             probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             try:
-                # UDP connect does not send a packet. It asks the OS which local
-                # interface/address it would use to reach the 3DS specifically.
                 probe.connect((peer_host.strip(), 5000))
                 return str(probe.getsockname()[0])
             except OSError:
                 pass
             finally:
                 probe.close()
-
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             probe.connect(("8.8.8.8", 53))
@@ -96,24 +134,19 @@ class FBIUrlServer:
         return f"http://{host}:{self.port}/{quote(self.file_path.name)}"
 
     def send_to_fbi(self, three_ds_ip: str, host: str | None = None, timeout: float = 8.0) -> str:
-        """Send the FBI URL and return once FBI has accepted the URL payload.
-
-        FBI sends its one-byte acknowledgement only after the install action closes
-        the connection, which can be much later than the initial URL hand-off.
-        Waiting for that ACK here makes the UI falsely report a timeout while FBI is
-        already displaying the installation prompt.
-        """
+        """Send the FBI URL and return once FBI has accepted the URL payload."""
         three_ds_ip = three_ds_ip.strip()
         if not three_ds_ip:
             raise ValueError("3DS IP address is required for FBI Remote Install.")
         if self._fbi_socket is not None:
             raise RuntimeError("An FBI Remote Install request is already active.")
 
-        url = self.url_for(self.local_address(host, three_ds_ip))
-        payload = url.encode("ascii")
-        packet = struct.pack("!L", len(payload)) + payload
         sock = socket.create_connection((three_ds_ip, 5000), timeout=timeout)
         try:
+            actual_host = host.strip() if host and host.strip() else str(sock.getsockname()[0])
+            url = self.url_for(actual_host)
+            payload = url.encode("ascii")
+            packet = struct.pack("!L", len(payload)) + payload
             sock.sendall(packet)
         except Exception:
             sock.close()
@@ -134,12 +167,16 @@ class FBIUrlServer:
         except OSError:
             pass
 
-    def wait_for_download(self, timeout: float = 120.0) -> None:
-        if not self.served_event.wait(timeout):
+    def wait_for_download(self, timeout: float = 180.0) -> None:
+        if self.served_event.wait(0.1):
+            return
+        if not self.request_started_event.wait(timeout):
             raise TimeoutError(
-                "FBI accepted the URL but the 3DS could not download the CIA from this PC. "
-                "Check the PC firewall and that the detected PC address is on the same LAN."
+                f"FBI accepted the URL, but the 3DS never connected to the CIA server at "
+                f"{self.port}. Check the PC address in the generated URL and the PC firewall."
             )
+        if not self.served_event.wait(timeout):
+            raise TimeoutError("The 3DS connected to the CIA server but did not finish downloading the CIA.")
 
     def close(self) -> None:
         self.httpd.shutdown()
