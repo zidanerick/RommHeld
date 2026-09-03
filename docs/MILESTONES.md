@@ -2,7 +2,7 @@
 
 RommHeld is a cross-platform PySide6 desktop application for managing a local or RomM-backed game library across handheld targets. GitHub is the source of truth for product behavior and design decisions. Device paths, IP addresses, credentials, ROMs and removable-media contents remain local state.
 
-Visual work must follow `DESIGN_SYSTEM.md`. The active cleanup/migration sequence is tracked in `UX_REFACTOR_PLAN.md`.
+Visual work must follow `DESIGN_SYSTEM.md`. Completed refactor work and remaining hardware validation are tracked in `UX_REFACTOR_PLAN.md`.
 
 ## 0. Foundation
 
@@ -22,7 +22,7 @@ Visual work must follow `DESIGN_SYSTEM.md`. The active cleanup/migration sequenc
 - [x] Scan a configured local ROM root.
 - [x] Identify source platform from the library layout.
 - [x] Persist platform mappings.
-- [x] Search/filter local library in the legacy Vita workflow.
+- [x] Search/filter local library in the active standalone local-library workflow.
 
 ### RomM
 
@@ -60,7 +60,9 @@ Visual work must follow `DESIGN_SYSTEM.md`. The active cleanup/migration sequenc
 - [x] Adrenaline PS1 destination handling.
 - [x] Vita setup/package workflow.
 - [x] Runtime preference model available to Vita workspace.
-- [ ] Extract the Vita library from the legacy `MainWindow` into a standalone shared library widget.
+- [x] Extract the Vita library from the legacy `MainWindow` into a standalone shared library widget.
+- [x] Extract Vita destination/status/copy helpers into a focused support module.
+- [x] Redesign the standalone Vita Send File workflow.
 - [ ] Improve emulator/frontend capability detection.
 - [ ] Model device capability independently from transport.
 
@@ -105,7 +107,9 @@ Visual work must follow `DESIGN_SYSTEM.md`. The active cleanup/migration sequenc
 - [x] Mounted-storage validation framework.
 - [x] Record observed 3DS/DS storage signatures conservatively.
 - [x] Runtime preference model: native, RetroAchievements, compatibility.
-- [ ] Automatic removable-media detection with confidence reporting.
+- [x] Redesign the 3DS Manager around connection, library and deployment cards.
+- [x] Redesign 3DS Setup as a guided readiness workflow.
+- [ ] Automatic removable-media detection with confidence reporting across supported desktop platforms.
 - [ ] Complete target mappings from observed real layouts.
 - [ ] Device-specific installed-state comparison for all 3DS targets.
 - [ ] Apply runtime preferences automatically when recommending a target route.
@@ -137,6 +141,7 @@ RommHeld must not automatically download copyrighted Nintendo CIAs or proprietar
 - [x] DS/flashcard storage validation support.
 - [x] TWiLight Menu++ / nds-bootstrap / flashcard concepts represented in target research and UI.
 - [x] DS runtime preference presentation.
+- [x] Redesign the generic removable-storage transfer dialog.
 - [ ] Automatic DS removable-media discovery.
 - [ ] Complete DS target profiles and destination mappings.
 - [ ] Standalone DS library/deployment workflow.
@@ -159,10 +164,10 @@ RommHeld must not automatically download copyrighted Nintendo CIAs or proprietar
 - [x] Remove abandoned transitional `device_dashboard.py`.
 - [x] Remove its duplicate legacy `assets/icons` console asset set.
 - [x] Replace selector hardware-photo `QThread` workers with asynchronous Qt networking.
-- [ ] Extract legacy Vita library/device UI into standalone widgets.
-- [ ] Fold `audited_workspace.py` correctness behavior into the final workspace implementation.
-- [ ] Retire compatibility UI modules only after all callers migrate.
-- [ ] Apply shared components/primary-action styling to all setup and deployment dialogs.
+- [x] Extract legacy Vita library/device UI into standalone widgets/modules.
+- [x] Fold `audited_workspace.py` correctness behavior into the final workspace implementation and remove it.
+- [x] Retire legacy `ui.py`, `app.py`, and `platform_selector.py` after callers migrated.
+- [x] Apply shared components/primary-action styling to the remaining setup and deployment dialogs.
 - [ ] Complete responsive/accessibility review across supported desktop sizes.
 
 ## 9. Worker and lifecycle reliability
@@ -171,9 +176,9 @@ RommHeld must not automatically download copyrighted Nintendo CIAs or proprietar
 - [x] Artwork/network enhancement is asynchronous.
 - [x] Startup verifier no longer uses a fixed one-second shutdown wait that can destroy a live thread.
 - [x] Selector hardware imagery no longer creates per-card `QThread` workers.
-- [ ] Audit every transfer/deployment dialog for close-during-worker behavior.
-- [ ] Ensure every active `QThread` has an explicit shutdown ownership rule.
-- [ ] Add appropriate GUI lifecycle regression coverage where CI can support it.
+- [x] Harden the active 3DS/Vita/setup/transfer dialogs against unsafe close-during-worker destruction.
+- [x] Add headless AST lifecycle/architecture regression coverage where Qt GUI instantiation is unavailable.
+- [ ] Continue real-device close/cancel regression testing for every transport path.
 
 ## 10. Cross-platform desktop support
 
@@ -202,15 +207,16 @@ RetroAchievements is a runtime/core capability, not a property of a frontend or 
 ## 12. Repository cleanup and architecture migration
 
 - [x] Establish `ARCHITECTURE.md` as the current multi-handheld architecture description.
-- [x] Establish `UX_REFACTOR_PLAN.md` as the active migration checklist.
-- [x] Replace overlapping `UI_REDESIGN.md` content with pointers to canonical docs.
-- [x] Remove an abandoned dashboard implementation rather than maintaining two shells.
-- [x] Remove duplicate legacy console icon files tied to that abandoned dashboard.
-- [ ] Extract standalone library/device widgets from `ui.py` and `app.py`.
-- [ ] Collapse the active inheritance ladder into one final `WorkspaceDashboardWindow`.
-- [ ] Remove `audited_workspace.py` after its behavior is merged.
-- [ ] Remove `platform_selector.py` only after compatibility imports are no longer required.
-- [ ] Retire root `romm_vita_manager.py` only through an intentional compatibility decision.
+- [x] Establish `UX_REFACTOR_PLAN.md` as the refactor/validation status document.
+- [x] Remove superseded `UI_REDESIGN.md` after folding its useful direction into canonical docs.
+- [x] Remove abandoned dashboard implementations rather than maintaining parallel shells.
+- [x] Remove duplicate legacy console icon files tied to abandoned UI paths.
+- [x] Extract standalone library/device/transfer behavior from `ui.py` and `app.py`.
+- [x] Collapse the active inheritance ladder into one final `WorkspaceDashboardWindow`.
+- [x] Remove `audited_workspace.py` after its behavior was merged.
+- [x] Remove `platform_selector.py` after compatibility imports were no longer required.
+- [x] Convert root `romm_vita_manager.py` into a compatibility forwarder to `launcher.py`.
+- [x] Add regression tests rejecting callers of removed legacy UI modules.
 - [ ] Complete package namespace rename without breaking user configuration migration.
 
 ## Development rules
@@ -224,3 +230,4 @@ RetroAchievements is a runtime/core capability, not a property of a frontend or 
 7. Do not trade transfer verification/cancellation safety for visual cleanup.
 8. New interface work follows `DESIGN_SYSTEM.md` and uses centralized tokens rather than ad hoc colours.
 9. When a worker owns external resources such as FTP, HTTP servers or firewall rules, cleanup must complete before its owning thread/widget is destroyed.
+10. After the current UI/refactor branch, prefer defect-driven changes from desktop/hardware regression testing over further structural churn.
