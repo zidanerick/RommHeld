@@ -4,6 +4,8 @@ import hashlib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .gba_boot_logo import bundled_boot_logo
+
 if TYPE_CHECKING:
     from agbcia.banner.image import ImageSource
 
@@ -46,7 +48,7 @@ def build_native_gba_cia(
     rom: bytes,
     artwork: "ImageSource",
     *,
-    boot_logo: bytes,
+    boot_logo: bytes | None = None,
     title_id: bytes,
     title_name: str,
     long_title: str | None = None,
@@ -54,7 +56,11 @@ def build_native_gba_cia(
     donor_banner: bytes | None = None,
     title_version: int = 0,
 ) -> bytes:
-    """Build an installable GBA CIA that boots through AGB_FIRM."""
+    """Build an installable GBA CIA that boots through AGB_FIRM.
+
+    When no boot logo is supplied, use RommHeld's bundled original fallback
+    so normal packaging never requires a donor CIA or boot9 dump.
+    """
     _, InjectionRequest, inject = _require_agbcia()
     request = InjectionRequest(
         mode="native",
@@ -65,7 +71,7 @@ def build_native_gba_cia(
         banner_image=artwork,
         long_title=(long_title or title_name)[:128],
         publisher=publisher[:128],
-        boot_logo=boot_logo,
+        boot_logo=boot_logo if boot_logo is not None else bundled_boot_logo(),
         donor_banner=donor_banner,
         title_version=title_version,
     )
