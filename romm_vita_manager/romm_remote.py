@@ -6,7 +6,7 @@ import socket
 from dataclasses import dataclass
 from pathlib import Path
 from urllib import error, request
-from urllib.parse import quote, urlencode, urlparse
+from urllib.parse import quote, urlencode, urlparse, urlunparse, parse_qsl
 
 from .mappings import platform_label
 from .romm_api import RomMApiError, normalize_romm_url
@@ -135,6 +135,12 @@ def download_artwork(
 
     romm_host = urlparse(normalize_romm_url(instance_url)).hostname or ""
     same_host = bool(parsed.hostname) and parsed.hostname.lower() == romm_host.lower()
+    # RomM cover metadata can contain timestamps with spaces (for example,
+    # "?ts=2026-08-10 12:36:56"). urllib rejects those raw control/space
+    # characters, so rebuild the URL with a properly encoded query string.
+    query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
+    safe_query = urlencode(query_pairs, doseq=True)
+    target = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, safe_query, parsed.fragment))
     req = request.Request(
         target,
         headers=_auth_headers(
@@ -151,7 +157,7 @@ def download_artwork(
     except (error.URLError, TimeoutError) as exc:
         raise RomMApiError(f"Unable to download artwork: {getattr(exc, 'reason', exc)}") from exc
     if len(data) > max_bytes:
-        raise ValueError(f"Artwork is larger than the {max_bytes // (1024 * 1024)} MiB safety limit.")
+        raise ValueError(f"Artwork is larger than {max_bytes // (1024 * 1024)} MiB.")
     return data
 
 
