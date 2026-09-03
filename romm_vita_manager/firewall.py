@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -45,7 +46,7 @@ def _command_path(name: str, fallbacks: tuple[str, ...] = ()) -> str | None:
 
 
 def _pkexec(command: list[str], *, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
-    pkexec = _command_path("pkexec", ("/usr/bin/pkexec", "/usr/bin/pkexec"))
+    pkexec = _command_path("pkexec", ("/usr/bin/pkexec",))
     if pkexec is None:
         raise FirewallError("pkexec is not installed, so RommHeld cannot request firewall permission automatically.")
     return _run([pkexec, *command], timeout=timeout)
@@ -60,8 +61,24 @@ def _require_success(result: subprocess.CompletedProcess[str], action: str) -> N
     raise FirewallError(f"{action}: {detail}")
 
 
+def _ufw_enabled_from_config() -> bool:
+    """Detect UFW's enabled state without invoking a root-only UFW command."""
+    config_path = Path("/etc/ufw/ufw.conf")
+    try:
+        for line in config_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, value = stripped.split("=", 1)
+            if key.strip().upper() == "ENABLED":
+                return value.strip().lower() == "yes"
+    except OSError:
+        return False
+    return False
+
+
 def detect_backend() -> str | None:
-    """Return the active supported firewall backend, if any."""
+    """Return the active supported firewall backend without requiring root."""
     firewalld = _command_path("firewall-cmd", ("/usr/bin/firewall-cmd", "/usr/sbin/firewall-cmd"))
     if firewalld:
         result = _run([firewalld, "--state"])
@@ -69,11 +86,8 @@ def detect_backend() -> str | None:
             return "firewalld"
 
     ufw = _command_path("ufw", ("/usr/sbin/ufw", "/usr/bin/ufw"))
-    if ufw:
-        result = _run([ufw, "status"])
-        output = (result.stdout + "\n" + result.stderr).lower()
-        if "status: active" in output:
-            return "ufw"
+    if ufw and _ufw_enabled_from_config():
+        return "ufw"
     return None
 
 
