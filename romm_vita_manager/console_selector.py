@@ -5,7 +5,6 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, QSize, Qt, Signal, Slot
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QDialog,
     QFileDialog,
     QFrame,
@@ -103,70 +102,124 @@ class RomMConnectionWorker(QObject):
             self.finished.emit()
 
 
-class ConsoleTile(QPushButton):
+class ConsoleTile(QFrame):
+    """Clickable handheld card that is not constrained by QPushButton styling.
+
+    A QPushButton is appropriate for a single line of text, not as a container
+    for a hardware illustration plus several labels. Using a plain frame keeps
+    the card geometry stable across Qt styles and Linux desktop themes.
+    """
+
+    clicked = Signal()
     TILE_WIDTH = 250
     TILE_HEIGHT = 190
 
     def __init__(self, profile: ConsoleProfile, parent=None):
         super().__init__(parent)
         self.profile = profile
-        selectable = profile.state in {"supported", "research"}
-        self.setCheckable(selectable)
-        self.setEnabled(selectable)
+        self.selectable = profile.state in {"supported", "research"}
+        self._selected = False
+
+        self.setObjectName("consoleTile")
         self.setFixedSize(QSize(self.TILE_WIDTH, self.TILE_HEIGHT))
-        self.setCursor(Qt.CursorShape.PointingHandCursor if selectable else Qt.CursorShape.ArrowCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setFocusPolicy(
+            Qt.FocusPolicy.StrongFocus if self.selectable else Qt.FocusPolicy.NoFocus
+        )
+        self.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if self.selectable
+            else Qt.CursorShape.ArrowCursor
+        )
+        self.setProperty("selected", False)
         self.setStyleSheet(self._style())
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(13, 12, 13, 11)
-        layout.setSpacing(5)
+        layout.setContentsMargins(13, 11, 13, 10)
+        layout.setSpacing(4)
 
         identity = ConsoleIdentity(profile.key, profile.name, self)
+        identity.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(identity, 1)
 
         sub = QLabel(profile.subtitle)
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub.setWordWrap(True)
+        sub.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         sub.setStyleSheet(
             f"background:transparent;border:none;color:{DARK.text_secondary};font-size:9px;padding:0;"
         )
         layout.addWidget(sub)
 
-        labels = {"supported": "Ready", "research": "In development", "coming": "Coming soon"}
+        labels = {
+            "supported": "Ready",
+            "research": "In development",
+            "coming": "Coming soon",
+        }
         state = QLabel(labels.get(profile.state, profile.state.title()))
         state.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        state.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         state.setStyleSheet(
             f"background:transparent;border:none;color:{profile.accent};font-size:9px;font-weight:700;padding:0;"
         )
         layout.addWidget(state)
 
     def _style(self) -> str:
-        if self.profile.state == "coming":
+        if not self.selectable:
             return f"""
-                QPushButton {{
-                    background:{DARK.surface};
-                    border:1px solid #2A2A2D;
+                QFrame#consoleTile {{
+                    background:#171719;
+                    border:1px solid #29292C;
                     border-radius:15px;
                 }}
-                QPushButton:disabled {{ color:{DARK.text_tertiary}; }}
             """
+
         accent = self.profile.accent
         soft = brand_for_platform(self.profile.key).accent_soft
         return f"""
-            QPushButton {{
+            QFrame#consoleTile {{
                 background:{DARK.surface};
                 border:1px solid {DARK.separator};
                 border-radius:15px;
             }}
-            QPushButton:hover {{
-                border-color:{accent};
+            QFrame#consoleTile:hover {{
+                border:1px solid {accent};
                 background:{DARK.surface_raised};
             }}
-            QPushButton:checked {{
+            QFrame#consoleTile[selected="true"] {{
                 border:2px solid {accent};
                 background:{soft};
             }}
         """
+
+    def set_selected(self, selected: bool) -> None:
+        selected = bool(selected and self.selectable)
+        if self._selected == selected:
+            return
+        self._selected = selected
+        self.setProperty("selected", selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def mousePressEvent(self, event) -> None:
+        if self.selectable and event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        if self.selectable and event.key() in {
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Space,
+        }:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class ConsoleGrid(QWidget):
@@ -190,7 +243,10 @@ class ConsoleGrid(QWidget):
 
     def _column_count(self) -> int:
         usable = max(0, self.width())
-        return max(1, min(3, int((usable + 12) // (ConsoleTile.TILE_WIDTH + 12))))
+        return max(
+            1,
+            min(3, int((usable + 12) // (ConsoleTile.TILE_WIDTH + 12))),
+        )
 
     def _relayout(self) -> None:
         columns = self._column_count()
@@ -209,6 +265,7 @@ class ConsoleGrid(QWidget):
         rows = (len(self.tiles) + columns - 1) // columns
         height = rows * ConsoleTile.TILE_HEIGHT + max(0, rows - 1) * 12
         self.setMinimumHeight(height)
+        self.setMaximumHeight(height)
 
 
 class PlatformSelectorDialog(QDialog):
@@ -252,14 +309,11 @@ class PlatformSelectorDialog(QDialog):
         handheld_heading.setObjectName("selectorHeading")
         root.addWidget(handheld_heading)
 
-        self.console_group = QButtonGroup(self)
-        self.console_group.setExclusive(True)
         tiles: list[ConsoleTile] = []
         for profile in CONSOLES:
             tile = ConsoleTile(profile)
             tiles.append(tile)
-            self.console_group.addButton(tile)
-            tile.clicked.connect(lambda _=False, key=profile.key: self.select_console(key))
+            tile.clicked.connect(lambda key=profile.key: self.select_console(key))
 
         self.console_grid = ConsoleGrid(tiles)
         scroll = QScrollArea()
@@ -332,7 +386,9 @@ class PlatformSelectorDialog(QDialog):
         root.addLayout(actions)
 
         valid_keys = {p.key for p in CONSOLES}
-        self.select_console(self.selected_console if self.selected_console in valid_keys else "vita")
+        self.select_console(
+            self.selected_console if self.selected_console in valid_keys else "vita"
+        )
         self.update_source_visibility()
         self.refresh_source_status()
 
@@ -357,6 +413,7 @@ class PlatformSelectorDialog(QDialog):
             font-size:10px;
         }}
         QScrollArea#consoleScroll {{ border:none; background:transparent; }}
+        QScrollArea#consoleScroll > QWidget > QWidget {{ background:transparent; }}
         QGroupBox {{
             background:{DARK.surface};
             border:1px solid {DARK.separator};
@@ -370,6 +427,12 @@ class PlatformSelectorDialog(QDialog):
             padding:0 6px;
             color:{DARK.text_secondary};
             font-weight:600;
+        }}
+        QRadioButton {{
+            spacing:7px;
+            padding:4px 6px;
+            color:{DARK.text_primary};
+            background:transparent;
         }}
         QLabel#sourceStatus {{ color:{DARK.text_secondary}; font-size:10px; }}
         QLabel#sourceStatus[state="success"] {{ color:{DARK.success}; }}
@@ -391,12 +454,16 @@ class PlatformSelectorDialog(QDialog):
         self.selected_console = key
         self.selected_profile = profile
         for tile in self.console_grid.tiles:
-            tile.setChecked(tile.profile.key == key)
+            tile.set_selected(tile.profile.key == key)
         self.continue_button.set_accent(profile.accent)
         self.selection_context.setText(profile.name)
 
     def choose_local_root(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Select local ROM directory", self.local_edit.text())
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Select local ROM directory",
+            self.local_edit.text(),
+        )
         if path:
             self.local_edit.setText(path)
             self.local_radio.setChecked(True)
@@ -423,7 +490,10 @@ class PlatformSelectorDialog(QDialog):
         elif self._romm_thread and self._romm_thread.isRunning():
             self._set_source_state("busy", "Testing RomM connection…")
         else:
-            self._set_source_state("neutral", "RomM uses the saved server URL and Client API Token")
+            self._set_source_state(
+                "neutral",
+                "RomM uses the saved server URL and Client API Token",
+            )
 
     def test_romm_server(self) -> None:
         if self._romm_thread and self._romm_thread.isRunning():
@@ -431,7 +501,10 @@ class PlatformSelectorDialog(QDialog):
         url = self.url_edit.text().strip()
         token = self.token_edit.text().strip()
         if not url or not token:
-            self._set_source_state("error", "Enter the RomM server URL and Client API Token first")
+            self._set_source_state(
+                "error",
+                "Enter the RomM server URL and Client API Token first",
+            )
             return
         try:
             normalize_romm_url(url)
@@ -482,7 +555,11 @@ class PlatformSelectorDialog(QDialog):
         if self.local_radio.isChecked():
             root = Path(self.local_edit.text()).expanduser()
             if not root.is_dir():
-                QMessageBox.warning(self, "Library not found", "Choose an existing local ROM directory.")
+                QMessageBox.warning(
+                    self,
+                    "Library not found",
+                    "Choose an existing local ROM directory.",
+                )
                 return
             source = LibrarySource(mode="local", local_root=str(root))
         else:
@@ -493,9 +570,17 @@ class PlatformSelectorDialog(QDialog):
                 return
             token = self.token_edit.text().strip()
             if not token:
-                QMessageBox.warning(self, "RomM configuration", "Enter the RomM Client API Token.")
+                QMessageBox.warning(
+                    self,
+                    "RomM configuration",
+                    "Enter the RomM Client API Token.",
+                )
                 return
-            source = LibrarySource(mode="romm_api", romm_url=url, api_token=token)
+            source = LibrarySource(
+                mode="romm_api",
+                romm_url=url,
+                api_token=token,
+            )
         updated = save_library_source(self.config, source)
         updated["active_console"] = self.selected_console
         updated["setup_complete"] = True
@@ -506,10 +591,12 @@ class PlatformSelectorDialog(QDialog):
     def closeEvent(self, event) -> None:
         thread = self._romm_thread
         if thread is not None and thread.isRunning():
-            # test_connection is bounded by its network timeout. Waiting here
-            # is safer than destroying a live QThread child during shutdown.
             thread.quit()
             thread.wait()
+        for tile in self.console_grid.tiles:
+            identity = tile.findChild(ConsoleIdentity)
+            if identity is not None:
+                identity.stop_loading()
         super().closeEvent(event)
 
 
