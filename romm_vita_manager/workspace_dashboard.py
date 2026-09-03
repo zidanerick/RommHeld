@@ -32,9 +32,9 @@ from .storage_validation import validate_storage
 from .three_ds_library import ThreeDSLibraryWidget
 from .three_ds_manager import ThreeDSManagerDialog
 from .three_ds_setup import ThreeDSSetupDialog
-from .ui import human_size
 from .ui_components import AccentButton, SurfaceCard
 from .vita import find_vita_mounts, free_space, total_space
+from .vita_library_support import human_size
 from .vita_setup import VitaSetupDialog
 
 
