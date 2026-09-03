@@ -98,8 +98,10 @@ class GbaCiaDeployWorker(QThread):
                         raise ValueError("Enter the 3DS IP address shown by FBI Remote Install.")
                     self.fbi_server = FBIUrlServer(cia_path)
                     self.fbi_server.start()
-                    self.fbi_server.send_to_fbi(self.three_ds_ip)
-                    self.status_changed.emit("CIA sent to FBI. Confirm installation on the 3DS…")
+                    served_url = self.fbi_server.send_to_fbi(self.three_ds_ip)
+                    self.status_changed.emit(
+                        f"FBI accepted the request. Serving CIA from {served_url}. Confirm installation on the 3DS…"
+                    )
                     self.fbi_server.wait_for_download()
                     self.completed.emit("fbi", self.destination)
                     return
