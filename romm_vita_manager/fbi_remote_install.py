@@ -8,9 +8,17 @@ from pathlib import Path
 from urllib.parse import quote
 
 
-class _QuietHandler(SimpleHTTPRequestHandler):
+class _Handler(SimpleHTTPRequestHandler):
+    served_event: threading.Event
+
     def log_message(self, format: str, *args) -> None:
         return
+
+    def do_GET(self) -> None:
+        try:
+            return super().do_GET()
+        finally:
+            self.served_event.set()
 
 
 class FBIUrlServer:
@@ -21,7 +29,9 @@ class FBIUrlServer:
         if not self.file_path.is_file():
             raise FileNotFoundError(f"CIA file does not exist: {self.file_path}")
         self.bind_host = bind_host
-        self.httpd = ThreadingHTTPServer((bind_host, port), _QuietHandler)
+        self.served_event = threading.Event()
+        handler = type("FBIHandler", (_Handler,), {"served_event": self.served_event})
+        self.httpd = ThreadingHTTPServer((bind_host, port), handler)
         self.httpd.daemon_threads = True
         self.http_thread: threading.Thread | None = None
 
@@ -31,9 +41,7 @@ class FBIUrlServer:
 
     def start(self) -> None:
         directory = str(self.file_path.parent)
-        self.httpd.RequestHandlerClass = lambda *args, **kwargs: _QuietHandler(
-            *args, directory=directory, **kwargs
-        )
+        self.httpd.RequestHandlerClass.directory = directory
         self.http_thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.http_thread.start()
 
@@ -52,7 +60,7 @@ class FBIUrlServer:
     def url_for(self, host: str) -> str:
         return f"http://{host}:{self.port}/{quote(self.file_path.name)}"
 
-    def send_to_fbi(self, three_ds_ip: str, host: str | None = None, timeout: float = 8.0) -> None:
+    def send_to_fbi(self, three_ds_ip: str, host: str | None = None, timeout: float = 8.0) -> str:
         three_ds_ip = three_ds_ip.strip()
         if not three_ds_ip:
             raise ValueError("3DS IP address is required for FBI Remote Install.")
@@ -65,6 +73,11 @@ class FBIUrlServer:
             ack = sock.recv(1)
             if not ack:
                 raise TimeoutError("FBI did not acknowledge the remote-install request.")
+        return url
+
+    def wait_for_download(self, timeout: float = 120.0) -> None:
+        if not self.served_event.wait(timeout):
+            raise TimeoutError("FBI received the CIA URL but did not download the CIA within the timeout.")
 
     def close(self) -> None:
         self.httpd.shutdown()
