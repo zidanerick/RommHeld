@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 import threading
 
@@ -8,6 +9,7 @@ from romm_vita_manager.fbi_remote_install import FBIUrlServer
 
 def _server_state() -> FBIUrlServer:
     server = object.__new__(FBIUrlServer)
+    server.file_path = Path("test.cia")
     server.request_started_event = threading.Event()
     server.served_event = threading.Event()
     server.request_failed_event = threading.Event()
