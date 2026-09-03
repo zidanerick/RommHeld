@@ -103,16 +103,11 @@ class RomMConnectionWorker(QObject):
 
 
 class ConsoleTile(QFrame):
-    """Clickable handheld card that is not constrained by QPushButton styling.
-
-    A QPushButton is appropriate for a single line of text, not as a container
-    for a hardware illustration plus several labels. Using a plain frame keeps
-    the card geometry stable across Qt styles and Linux desktop themes.
-    """
+    """Clickable handheld card that stays stable across Linux Qt styles."""
 
     clicked = Signal()
     TILE_WIDTH = 250
-    TILE_HEIGHT = 190
+    TILE_HEIGHT = 170
 
     def __init__(self, profile: ConsoleProfile, parent=None):
         super().__init__(parent)
@@ -136,8 +131,8 @@ class ConsoleTile(QFrame):
         self.setStyleSheet(self._style())
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(13, 11, 13, 10)
-        layout.setSpacing(4)
+        layout.setContentsMargins(12, 9, 12, 8)
+        layout.setSpacing(3)
 
         identity = ConsoleIdentity(profile.key, profile.name, self)
         identity.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -286,8 +281,8 @@ class PlatformSelectorDialog(QDialog):
         self.setStyleSheet(self._stylesheet())
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(26, 24, 26, 22)
-        root.setSpacing(14)
+        root.setContentsMargins(26, 20, 26, 18)
+        root.setSpacing(12)
 
         header = QHBoxLayout()
         title_group = QVBoxLayout()
@@ -321,6 +316,7 @@ class PlatformSelectorDialog(QDialog):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setMinimumHeight(ConsoleTile.TILE_HEIGHT * 2 + 12)
         scroll.setWidget(self.console_grid)
         root.addWidget(scroll, 1)
 
