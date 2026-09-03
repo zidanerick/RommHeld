@@ -1,175 +1,226 @@
 # RommHeld Development Milestones
 
-RommHeld is a cross-platform desktop application for managing a local or RomM-backed game library across multiple handheld targets. GitHub is the source of truth. Device-specific paths, IP addresses, credentials, ROMs, and removable-media contents belong only in local configuration or test environments.
+RommHeld is a cross-platform PySide6 desktop application for managing a local or RomM-backed game library across handheld targets. GitHub is the source of truth for product behavior and design decisions. Device paths, IP addresses, credentials, ROMs and removable-media contents remain local state.
+
+Visual work must follow `DESIGN_SYSTEM.md`. The active cleanup/migration sequence is tracked in `UX_REFACTOR_PLAN.md`.
 
 ## 0. Foundation
 
 - [x] Rename the product to RommHeld.
-- [x] Protect `main` from deletion and force-pushes.
-- [x] Establish a device/backend architecture.
-- [x] Keep the existing Vita implementation working while adding new device targets.
-- [x] Move application configuration outside the repository.
-- [x] Add platform-aware config/cache/temp path services.
-- [x] Preserve migration from the old Linux config path.
-- [ ] Complete the internal Python package namespace migration from `romm_vita_manager` to a neutral RommHeld namespace.
+- [x] Protect `main` from force-push/deletion.
+- [x] Keep the Vita implementation working while introducing new handheld targets.
+- [x] Move user configuration outside the repository.
+- [x] Add platform-aware config/cache/temp services.
+- [x] Preserve migration from the original Linux config location.
+- [x] Establish separate library, target, transport and runtime concepts.
+- [ ] Complete the internal namespace migration from `romm_vita_manager` to a neutral RommHeld package name.
 
-## 1. Core transfer system
+## 1. Library providers
 
-- [x] RomM library scanning by top-level platform directory.
-- [x] Persistent platform mappings.
-- [x] Vita mount detection.
-- [x] Safe file transfer with progress and cancellation.
-- [x] Same-size transfer skipping.
-- [x] Post-transfer size verification.
-- [x] Free-space preflight where supported.
-- [x] Generic Send File workflow for arbitrary files.
-- [ ] Generalise all transfer operations behind a common device transport interface.
-- [ ] Build a persistent transfer queue.
-- [ ] Add retries and per-item error state.
-- [ ] Add optional hashing for stronger duplicate detection.
+### Local
 
-## 2. Nintendo 3DS transport
+- [x] Scan a configured local ROM root.
+- [x] Identify source platform from the library layout.
+- [x] Persist platform mappings.
+- [x] Search/filter local library in the legacy Vita workflow.
+
+### RomM
+
+- [x] Save a RomM server URL and Client API Token locally.
+- [x] Verify RomM connectivity asynchronously at startup.
+- [x] Map RomM API responses into RommHeld game records.
+- [x] Page remote results instead of requiring one giant library request.
+- [x] Support remote search/platform filtering in the 3DS library.
+- [x] Cache a bounded first page for responsive reopening.
+- [x] Download authenticated ROM content for supported deployment workflows.
+- [x] Load RomM-hosted artwork on demand.
+- [x] Avoid forwarding RomM bearer credentials to unrelated artwork hosts.
+- [ ] Generalise the progressive RomM browser so Vita/DS/future targets share the same library presentation layer.
+- [ ] Move stored credentials to an OS credential/keyring service.
+
+## 2. Transfer integrity
+
+- [x] Cancellable chunked local transfers.
+- [x] Same-size file skipping.
+- [x] Different-size overwrite protection.
+- [x] Post-transfer size verification where supported.
+- [x] Free-space preflight where reliable space information exists.
+- [x] Generic Send File workflow.
+- [ ] Persistent transfer queue.
+- [ ] Retry policy and per-item error history.
+- [ ] Optional hashing for stronger duplicate detection.
+- [ ] Common transport interface used by every target workflow.
+
+## 3. PlayStation Vita
+
+- [x] Dynamic Vita mount detection.
+- [x] USB/VitaShell-oriented transfer workflow.
+- [x] RetroFlow destination mappings.
+- [x] Adrenaline PSP destination handling.
+- [x] Adrenaline PS1 destination handling.
+- [x] Vita setup/package workflow.
+- [x] Runtime preference model available to Vita workspace.
+- [ ] Extract the Vita library from the legacy `MainWindow` into a standalone shared library widget.
+- [ ] Improve emulator/frontend capability detection.
+- [ ] Model device capability independently from transport.
+
+## 4. Nintendo 3DS transport
+
+### FTP
 
 - [x] FTP connection and directory browsing.
-- [x] Configurable FTP endpoint stored locally.
-- [x] Safe remote-root enforcement.
-- [x] Same-size skip, resume, cancellation and size verification.
-- [x] Manual physical FTP connection test.
-- [x] Manual physical file-upload test.
-- [x] Removable-storage transport design.
-- [x] Gather real 3DS SD-card signatures from a mounted test card.
-- [ ] Implement automatic 3DS SD-card signature validation.
-- [ ] Automatic 3DS SD-card detection.
-- [ ] Automatic platform directory discovery.
-- [ ] Confirm ROM targets and build mappings from observed layouts.
-- [ ] Test real ROM transfers.
+- [x] Configurable endpoint and remote root.
+- [x] Safe remote-root/path handling.
+- [x] Remote directory creation.
+- [x] Same-size skip.
+- [x] Different-size overwrite protection.
+- [x] Resume when the server supports REST.
+- [x] Cancellation.
+- [x] Final remote-size verification.
+- [x] Best-effort remote free-space reporting.
+- [x] Physical hardware upload test.
 
-## 3. 3DS target profiles
+### FBI Remote Install
 
-The 3DS should support multiple target profiles rather than treating every file as the same kind of installation.
+- [x] Implement FBI Receive URLs over network protocol.
+- [x] Serve a selected/generated CIA from a temporary local HTTP server.
+- [x] Distinguish FBI acceptance from the subsequent HTTP download.
+- [x] Choose a reachable local interface for the selected 3DS address.
+- [x] Fall back across usable local HTTP ports.
+- [x] Integrate temporary Linux firewall access.
+- [x] Detect active UFW without requiring an unprivileged `ufw status` command.
+- [x] Request narrowly scoped UFW changes through Polkit.
+- [x] Restrict temporary access to the selected 3DS source address and TCP port.
+- [x] Remove temporary firewall access during cleanup.
+- [x] Validate the complete FBI workflow on physical hardware.
 
-- [ ] 3DS SD Card profile.
-- [ ] RetroArch profile.
-- [ ] TWiLight Menu++ / nds-bootstrap profile.
-- [ ] DS / R4 flashcart SD profile.
-- [ ] Native GBA route/profile.
-- [ ] Virtual Boy / Red Viper profile.
-- [ ] Official Virtual Console match/link workflow where an official title exists.
-- [ ] Explicit user-configurable target overrides.
-- [ ] Read-only storage validation with confidence levels.
-- [x] Record observed R4/flashcart signatures without claiming a specific hardware model.
-- [x] Research 3DS/DS runtime and RetroAchievements capabilities.
-- [x] Add user runtime preference model: prefer native, prefer RetroAchievements, or prefer compatibility.
-- [ ] Apply runtime preferences per platform/target when making route recommendations.
+## 5. Nintendo 3DS library and targets
 
-## 4. Vita target profiles
+- [x] Dedicated progressive RomM library widget.
+- [x] Search and platform filtering.
+- [x] Artwork/details presentation.
+- [x] Per-game compatible target selection.
+- [x] Destination preview.
+- [x] Local/remote deployment hand-off to 3DS manager.
+- [x] Mounted-storage validation framework.
+- [x] Record observed 3DS/DS storage signatures conservatively.
+- [x] Runtime preference model: native, RetroAchievements, compatibility.
+- [ ] Automatic removable-media detection with confidence reporting.
+- [ ] Complete target mappings from observed real layouts.
+- [ ] Device-specific installed-state comparison for all 3DS targets.
+- [ ] Apply runtime preferences automatically when recommending a target route.
 
-- [x] USB/VitaShell device handling.
-- [x] RetroFlow mappings.
-- [x] Adrenaline PSP target handling.
-- [x] Adrenaline PS1 target handling.
-- [ ] Removable-storage profile where the host can safely mount the user's Vita storage.
-- [ ] Better Vita emulator/frontend detection.
-- [ ] Device capability model independent of transport.
+## 6. Native GBA / Virtual Console preparation
 
-## 5. UI and device management
+- [x] Accept raw `.gba` input.
+- [x] Extract `.gba` content from ZIP input.
+- [x] Enforce supported raw ROM size limits.
+- [x] Build native GBA CIA requests targeting AGB_FIRM.
+- [x] Deterministic title-ID generation in the configured GBA VC range.
+- [x] Provide a neutral non-Nintendo boot-logo fallback.
+- [x] Use RomM artwork as package artwork input where available.
+- [x] Offer FTP deployment for generated CIAs.
+- [x] Offer FBI Remote Install for generated CIAs.
+- [x] Validate generated CIA installation on physical hardware.
+- [ ] Improve generated Home Menu icon/banner presentation while retaining original/non-proprietary assets.
+- [ ] Official Virtual Console catalogue/matching workflow.
+- [ ] Prefer a user-supplied/lawfully obtained official CIA when an official release is matched.
 
-- [x] Persistent Devices area.
-- [x] Separate Vita and 3DS management sections.
-- [x] Independent 3DS FTP window.
-- [x] Persistent device status bar design and implementation.
-- [x] Device-specific iconography.
-- [x] Console-inspired but original device card styling.
-- [x] Non-modal 3DS management so Vita controls remain available.
+### Asset/legal boundary
+
+RommHeld must not automatically download copyrighted Nintendo CIAs or proprietary donor/package assets. Official-release knowledge can inform a match, but acquisition remains user-controlled and lawful.
+
+## 7. Nintendo DS / flashcard workspace
+
+- [x] DS workspace exists in the shared shell.
+- [x] User-selectable mounted SD root.
+- [x] DS/flashcard storage validation support.
+- [x] TWiLight Menu++ / nds-bootstrap / flashcard concepts represented in target research and UI.
+- [x] DS runtime preference presentation.
+- [ ] Automatic DS removable-media discovery.
+- [ ] Complete DS target profiles and destination mappings.
+- [ ] Standalone DS library/deployment workflow.
+- [ ] Real-device transfer validation across representative flashcard layouts.
+
+## 8. UI and design system
+
 - [x] Handheld selection launch screen.
-- [x] Library source selection shell.
+- [x] Library source selection.
 - [x] Active handheld workspace context.
-- [x] Data-driven platform artwork registry.
-- [x] Local bundled handheld illustrations and logo variants.
-- [x] RommHeld application branding asset.
-- [x] Single-window console-aware workspace with real sections.
-- [x] Remove device-specific controls from unrelated console workspaces.
-- [x] Console-specific runtime preference presentation.
-- [x] Global settings page separated from Vita-only setup UI.
-- [ ] Embed Vita / 3DS / DS setup and transfer panels directly into tabs.
-- [ ] Device selection for transfer destinations.
-- [ ] Storage/target profile selector.
-- [ ] Polish responsive layout and accessibility across desktop sizes.
+- [x] Data-driven handheld artwork registry.
+- [x] Bundled offline device/logo assets.
+- [x] Single-window management shell.
+- [x] Canonical `DESIGN_SYSTEM.md` checked into the repository.
+- [x] Central palette/spacing/brand tokens.
+- [x] Manufacturer-family accents: Nintendo red, PlayStation blue, Xbox green, Sega blue.
+- [x] Shared application stylesheet.
+- [x] Persistent left-sidebar navigation replacing tab-first shell navigation.
+- [x] Modernised handheld selector using shared tokens.
+- [x] Remove abandoned transitional `device_dashboard.py`.
+- [x] Remove its duplicate legacy `assets/icons` console asset set.
+- [x] Replace selector hardware-photo `QThread` workers with asynchronous Qt networking.
+- [ ] Extract legacy Vita library/device UI into standalone widgets.
+- [ ] Fold `audited_workspace.py` correctness behavior into the final workspace implementation.
+- [ ] Retire compatibility UI modules only after all callers migrate.
+- [ ] Apply shared components/primary-action styling to all setup and deployment dialogs.
+- [ ] Complete responsive/accessibility review across supported desktop sizes.
 
-## 6. Cross-platform desktop support
+## 9. Worker and lifecycle reliability
 
-- [x] Keep UI based on PySide6/Qt.
-- [x] Abstract application config/cache/temp locations.
-- [x] Remove Linux-specific Vita mount discovery from the core detector.
-- [x] Add cross-platform volume enumeration through Qt storage services.
-- [ ] Add Windows packaging/build definition.
-- [ ] Add macOS packaging/build definition.
-- [ ] Add Linux packaging/build definition.
-- [ ] Verify removable-volume detection on Windows and macOS.
-- [ ] Verify file open/browser behaviour on Windows and macOS.
-- [ ] Avoid platform-specific shell commands in application code.
-- [ ] Add a common application-services abstraction for future Unix-like platforms.
+- [x] RomM library work occurs off the UI thread.
+- [x] Artwork/network enhancement is asynchronous.
+- [x] Startup verifier no longer uses a fixed one-second shutdown wait that can destroy a live thread.
+- [x] Selector hardware imagery no longer creates per-card `QThread` workers.
+- [ ] Audit every transfer/deployment dialog for close-during-worker behavior.
+- [ ] Ensure every active `QThread` has an explicit shutdown ownership rule.
+- [ ] Add appropriate GUI lifecycle regression coverage where CI can support it.
 
-## 7. Emulator and frontend awareness
+## 10. Cross-platform desktop support
 
-- [ ] Detect installed frontends and emulators.
-- [ ] Show missing components without automatically downloading them.
-- [ ] Link to official upstream release/project pages.
-- [ ] Generic file staging for user-downloaded packages.
-- [ ] Installation guidance where final Vita/3DS installation still requires VitaShell or equivalent manual action.
-- [ ] Separate frontend, emulator, core, and transport concepts.
+- [x] PySide6/Qt desktop UI.
+- [x] Platform-aware config/cache/temp locations.
+- [x] Qt-oriented removable-volume discovery groundwork.
+- [ ] Windows packaging/build definition.
+- [ ] macOS packaging/build definition.
+- [ ] Linux distributable packaging/build definition.
+- [ ] Validate removable-volume detection on Windows and macOS.
+- [ ] Validate file/browser integration on Windows and macOS.
+- [ ] Eliminate remaining Linux-specific shell assumptions from cross-platform paths.
 
-## 8. RetroAchievements
+## 11. Runtime and RetroAchievements awareness
 
-RetroAchievements must remain a capability rather than an assumption about a frontend.
+RetroAchievements is a runtime/core capability, not a property of a frontend or transport.
 
-- [ ] Represent RA support separately from emulator/frontend support.
-- [ ] Identify RetroArch/core routes where appropriate.
-- [x] Verify current 3DS libretro/Citra achievement status before exposing an achievement-first route.
-- [x] Verify current DS melonDS/melonDS DS achievement-capable routes.
-- [ ] Research native 3DS DS/GBA achievement integrations.
-- [ ] Evaluate existing native DS + `rcheevos` work.
-- [ ] Preserve native runtimes where they provide materially better compatibility/performance.
-- [ ] Model Hardcore compatibility explicitly.
-- [ ] Provide route recommendations without silently replacing the user's preferred runtime.
+- [x] Separate user runtime preference from transport selection.
+- [x] Represent native/compatibility/achievement priority choices.
+- [x] Keep 3DS native and achievement-capable routes conceptually separate.
+- [x] Record DS achievement-capable emulator/core research separately from TWiLight/flashcard transport.
+- [ ] Detect actual installed runtime/frontend capabilities.
+- [ ] Intersect preference with detected capabilities when recommending routes.
+- [ ] Model Hardcore compatibility explicitly where relevant.
 
-## 9. Library intelligence
+## 12. Repository cleanup and architecture migration
 
-- [ ] Automatic platform-directory discovery.
-- [ ] Remote RomM library provider.
-- [ ] Authenticated ROM download pipeline from RomM.
-- [ ] Better duplicate detection.
-- [ ] Optional hashes.
-- [ ] Artwork and metadata.
-- [ ] Per-game destination preview.
-- [ ] Device-specific installed-state detection.
-- [ ] Transfer planning against available storage.
-- [ ] Multi-device comparison and recommended target.
+- [x] Establish `ARCHITECTURE.md` as the current multi-handheld architecture description.
+- [x] Establish `UX_REFACTOR_PLAN.md` as the active migration checklist.
+- [x] Replace overlapping `UI_REDESIGN.md` content with pointers to canonical docs.
+- [x] Remove an abandoned dashboard implementation rather than maintaining two shells.
+- [x] Remove duplicate legacy console icon files tied to that abandoned dashboard.
+- [ ] Extract standalone library/device widgets from `ui.py` and `app.py`.
+- [ ] Collapse the active inheritance ladder into one final `WorkspaceDashboardWindow`.
+- [ ] Remove `audited_workspace.py` after its behavior is merged.
+- [ ] Remove `platform_selector.py` only after compatibility imports are no longer required.
+- [ ] Retire root `romm_vita_manager.py` only through an intentional compatibility decision.
+- [ ] Complete package namespace rename without breaking user configuration migration.
 
-## 10. Future devices
+## Development rules
 
-New consoles should be added as device/transport/target-profile implementations rather than separate applications.
-
-Potential future targets currently shown in the selector include PSP and Mobile. Additional platforms can be added later without changing the core library/transport architecture.
-
-## Current development rules
-
-Do not make a milestone depend on assumptions about a user's filesystem. Discover the device or let the user select its root, validate it using safe signatures, and keep all machine-specific state outside Git.
-
-Do not assume one emulator is best for a platform. Runtime selection should be based on detected capabilities and explicit user preference.
-
-Do not make transport logic responsible for emulator, frontend, or format-conversion decisions.
-
-Keep platform artwork data-driven and independent from backend logic. Missing artwork must never break functionality.
-
-## Current research references
-
-The current capability matrix is maintained in `docs/3DS_CAPABILITY_MATRIX.md`. It records conclusions from upstream project documentation and current RetroAchievements support information. When implementation choices change, update the matrix first and then update the corresponding code/milestone.
-
-## Runtime preference rule
-
-Runtime preference expresses what the user values most. It must never force an unavailable or incompatible runtime. Platform routing should intersect the user's preference with the target's detected capabilities and present the resulting recommendation transparently.
-
-## UI redesign rule
-
-The launch selector establishes the active handheld context and library provider. The selected management workspace may still expose cross-device status and global tools, but device-specific controls, target profiles, transports, and runtime preferences should remain compartmentalized behind their device profile.
+1. Do not hard-code a user's filesystem, device address or credentials.
+2. Discover a device/storage target or let the user select it, then validate it conservatively.
+3. Do not assume one emulator/runtime is universally best.
+4. Keep transport separate from runtime and format conversion decisions.
+5. Missing optional artwork must never break functionality.
+6. Do not remove compatibility code until active callers have migrated.
+7. Do not trade transfer verification/cancellation safety for visual cleanup.
+8. New interface work follows `DESIGN_SYSTEM.md` and uses centralized tokens rather than ad hoc colours.
+9. When a worker owns external resources such as FTP, HTTP servers or firewall rules, cleanup must complete before its owning thread/widget is destroyed.
