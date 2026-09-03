@@ -96,6 +96,7 @@ class ThreeDSLibraryWidget(QWidget):
         self._cache_displayed = False
         self._end_reached = False
         self._artwork_rom_id: int | None = None
+        self._active_artwork_rom_id: int | None = None
         self._filter_timer = QTimer(self)
         self._filter_timer.setSingleShot(True)
         self._filter_timer.setInterval(180)
@@ -471,6 +472,7 @@ class ThreeDSLibraryWidget(QWidget):
         worker.loaded.connect(lambda data, rid=requested_rom_id: self._artwork_loaded(data, rid))
         worker.failed.connect(lambda msg, rid=requested_rom_id: self._artwork_failed(msg, rid))
         worker.finished.connect(self._artwork_finished)
+        self._active_artwork_rom_id = requested_rom_id
         self.artwork_worker = worker
         worker.start()
 
@@ -495,11 +497,17 @@ class ThreeDSLibraryWidget(QWidget):
             self.artwork.setText(f"Artwork unavailable\n{message}")
 
     def _artwork_finished(self) -> None:
+        finished_rom_id = self._active_artwork_rom_id
+        self._active_artwork_rom_id = None
         self.artwork_worker = None
         current = self._selected_game()
-        if current is not None and current.rom_id == self._artwork_rom_id and current.cover_url:
-            if self.artwork.pixmap().isNull():
-                QTimer.singleShot(0, lambda game=current: self._load_artwork(game))
+        if (
+            current is not None
+            and current.cover_url
+            and current.rom_id == self._artwork_rom_id
+            and current.rom_id != finished_rom_id
+        ):
+            QTimer.singleShot(0, lambda game=current: self._load_artwork(game))
 
     def _clear_details(self) -> None:
         self._artwork_rom_id = None
