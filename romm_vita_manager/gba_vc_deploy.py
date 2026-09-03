@@ -101,6 +101,7 @@ class GbaCiaDeployWorker(QThread):
 
                     self.fbi_server = FBIUrlServer(cia_path)
                     server_ip = self.fbi_server.local_address(peer_host=self.three_ds_ip)
+                    self.status_changed.emit("Requesting temporary firewall access…")
                     self.firewall_rule = allow_temporary(
                         self.three_ds_ip,
                         self.fbi_server.port,
@@ -108,7 +109,7 @@ class GbaCiaDeployWorker(QThread):
                     )
                     if self.firewall_rule is not None:
                         self.status_changed.emit(
-                            f"Temporarily allowing {self.three_ds_ip} to reach {server_ip}:{self.fbi_server.port}…"
+                            f"Firewall access granted for {self.three_ds_ip} → {server_ip}:{self.fbi_server.port}."
                         )
                     else:
                         self.status_changed.emit("No supported active firewall detected; continuing…")
@@ -118,7 +119,7 @@ class GbaCiaDeployWorker(QThread):
                     self.status_changed.emit(
                         f"FBI accepted the request. Serving CIA from {served_url}. Confirm installation on the 3DS…"
                     )
-                    self.fbi_server.wait_for_download(cancel_event=self.cancel_event)
+                    self.fbi_server.wait_for_download()
                     self.completed.emit("fbi", self.destination)
                     return
 
