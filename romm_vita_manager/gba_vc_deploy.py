@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
-    QFileDialog,
+    QDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -15,12 +15,9 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QVBoxLayout,
-    QDialog,
 )
 
-from .config import save_config
-from .gba_assets import configured_boot_logo, extract_and_cache_boot_logo
-from .gba_vc import build_native_gba_cia, native_title_id_for_romm_id, read_asset
+from .gba_vc import build_native_gba_cia, native_title_id_for_romm_id
 from .romm_remote import RomMRemoteGame, download_artwork, download_rom
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
 from .three_ds_targets import default_destination
@@ -32,12 +29,11 @@ class GbaCiaDeployWorker(QThread):
     completed = Signal(str, str)
     failed = Signal(str)
 
-    def __init__(self, config: dict, game: RomMRemoteGame, target_key: str, boot_logo: Path, destination: str):
+    def __init__(self, config: dict, game: RomMRemoteGame, target_key: str, destination: str):
         super().__init__()
         self.config = config
         self.game = game
         self.target_key = target_key
-        self.boot_logo = boot_logo
         self.destination = destination
         self.cancel_event = threading.Event()
         self.backend: ThreeDSFtpBackend | None = None
@@ -62,16 +58,17 @@ class GbaCiaDeployWorker(QThread):
             if self.cancel_event.is_set():
                 return
 
-            self.status_changed.emit("Packaging GBA title…")
-            rom_data = self.temp_rom.read_bytes()
+            self.status_changed.emit("Fetching RomM artwork…")
             artwork = download_artwork(url, token, self.game.cover_url) if self.game.cover_url else None
             if not artwork:
                 raise ValueError("No usable RomM artwork is available for this title.")
+            if self.cancel_event.is_set():
+                return
 
+            self.status_changed.emit("Packaging GBA title through AGB_FIRM…")
             cia = build_native_gba_cia(
-                rom_data,
+                self.temp_rom.read_bytes(),
                 artwork,
-                boot_logo=read_asset(self.boot_logo),
                 title_id=native_title_id_for_romm_id(self.game.rom_id),
                 title_name=self.game.name,
             )
@@ -128,30 +125,13 @@ class GbaVcDeployDialog(QDialog):
         self.target_key = target_key
         self.worker: GbaCiaDeployWorker | None = None
         self.setWindowTitle("Deploy GBA to Nintendo 3DS")
-        self.resize(800, 560)
+        self.resize(800, 520)
 
         self.title_label = QLabel(game.name)
         self.title_label.setStyleSheet("font-size:18px;font-weight:800;")
         mode = "Native AGB_FIRM" if target_key == "native_gba" else "Virtual Console-style CIA"
         self.mode_label = QLabel(f"Mode: {mode}")
         self.mode_label.setStyleSheet("color:#8d96a4;")
-
-        self.boot_logo_edit = QLineEdit()
-        self.boot_logo_edit.setReadOnly(True)
-        stored_logo = configured_boot_logo(config)
-        if stored_logo is not None:
-            self.boot_logo_edit.setText(str(stored_logo))
-        else:
-            self.boot_logo_edit.setPlaceholderText("Not configured. Set up once below.")
-
-        browse = QPushButton("Use existing…")
-        browse.clicked.connect(self.browse_boot_logo)
-        setup = QPushButton("Automatic setup…")
-        setup.clicked.connect(self.setup_boot_logo)
-        boot_row = QHBoxLayout()
-        boot_row.addWidget(self.boot_logo_edit, 1)
-        boot_row.addWidget(browse)
-        boot_row.addWidget(setup)
 
         self.title_id_edit = QLineEdit(native_title_id_for_romm_id(game.rom_id).hex())
         self.title_id_edit.setReadOnly(True)
@@ -162,8 +142,8 @@ class GbaVcDeployDialog(QDialog):
 
         self.ftp_status = QLabel("3DS FTP settings are taken from the configured 3DS device.")
         self.status = QLabel(
-            "The GBA ROM and RomM artwork will be fetched automatically. "
-            "AGB_FIRM boot-logo setup is a one-time local extraction from a donor CIA and boot9 dump you supply."
+            "The GBA ROM and RomM artwork are fetched automatically. "
+            "RommHeld uses its bundled original boot-logo fallback, so no donor CIA, boot9 dump, or manual asset is required."
         )
         self.status.setWordWrap(True)
 
@@ -183,7 +163,6 @@ class GbaVcDeployDialog(QDialog):
         form = QFormLayout()
         form.addRow("Game:", self.title_label)
         form.addRow("Deployment:", self.mode_label)
-        form.addRow("AGB_FIRM boot logo:", boot_row)
         form.addRow("Title ID:", self.title_id_edit)
         form.addRow("Remote CIA:", self.destination_edit)
         form.addRow("FTP:", self.ftp_status)
@@ -194,51 +173,7 @@ class GbaVcDeployDialog(QDialog):
         layout.addWidget(self.progress)
         layout.addLayout(actions)
 
-    def browse_boot_logo(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Choose extracted AGB_FIRM boot logo")
-        if path:
-            self.boot_logo_edit.setText(path)
-            self.status.setText("Existing boot logo selected. Ready to package.")
-
-    def setup_boot_logo(self) -> None:
-        donor, _ = QFileDialog.getOpenFileName(
-            self,
-            "Choose a GBA Virtual Console donor CIA you own",
-            "",
-            "CIA files (*.cia);;All files (*)",
-        )
-        if not donor:
-            return
-        boot9, _ = QFileDialog.getOpenFileName(
-            self,
-            "Choose your boot9 dump",
-            "",
-            "boot9 dumps (*)",
-        )
-        if not boot9:
-            return
-        self.status.setText("Extracting the AGB_FIRM boot logo locally…")
-        try:
-            path = extract_and_cache_boot_logo(self.config, Path(donor), Path(boot9))
-            self.config = dict(self.config)
-            settings = dict(self.config.get("gba_vc", {})) if isinstance(self.config.get("gba_vc", {}), dict) else {}
-            settings["boot_logo_path"] = str(path)
-            self.config["gba_vc"] = settings
-            self.boot_logo_edit.setText(str(path))
-            self.status.setText("AGB_FIRM boot logo extracted and cached. Ready to package.")
-        except Exception as exc:
-            self.status.setText(f"Boot-logo setup failed: {exc}")
-
     def start(self) -> None:
-        raw_logo = self.boot_logo_edit.text().strip()
-        boot_logo = Path(raw_logo).expanduser() if raw_logo else configured_boot_logo(self.config)
-        if boot_logo is None or not boot_logo.is_file():
-            QMessageBox.warning(
-                self,
-                "Boot logo required",
-                "Run Automatic setup and provide a donor GBA Virtual Console CIA plus your boot9 dump, or choose an existing extracted boot logo.",
-            )
-            return
         saved = self.config.get("devices", {}).get("3ds", {})
         if not str(saved.get("host", "")).strip():
             QMessageBox.warning(self, "3DS FTP not configured", "Configure the Nintendo 3DS FTP host first.")
@@ -252,7 +187,6 @@ class GbaVcDeployDialog(QDialog):
             self.config,
             self.game,
             self.target_key,
-            boot_logo,
             self.destination_edit.text(),
         )
         self.worker.progress.connect(self._progress)
@@ -263,7 +197,6 @@ class GbaVcDeployDialog(QDialog):
         self.worker.start()
 
     def _progress(self, done: int) -> None:
-        # CIA size is unknown until packaging completes; upload progress is byte based.
         self.progress.setValue(min(99, max(0, done // 1024 // 1024)))
 
     def _completed(self, result: str, destination: str) -> None:
