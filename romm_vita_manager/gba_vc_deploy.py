@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFormLayout,
     QHBoxLayout,
@@ -17,6 +18,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from .fbi_remote_install import FBIUrlServer
 from .gba_vc import build_native_gba_cia, native_title_id_for_romm_id
 from .romm_remote import RomMRemoteGame, download_artwork, download_rom
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
@@ -29,14 +31,17 @@ class GbaCiaDeployWorker(QThread):
     completed = Signal(str, str)
     failed = Signal(str)
 
-    def __init__(self, config: dict, game: RomMRemoteGame, target_key: str, destination: str):
+    def __init__(self, config: dict, game: RomMRemoteGame, target_key: str, destination: str, install_method: str, three_ds_ip: str):
         super().__init__()
         self.config = config
         self.game = game
         self.target_key = target_key
         self.destination = destination
+        self.install_method = install_method
+        self.three_ds_ip = three_ds_ip.strip()
         self.cancel_event = threading.Event()
         self.backend: ThreeDSFtpBackend | None = None
+        self.fbi_server: FBIUrlServer | None = None
         self.temp_rom: Path | None = None
 
     def cancel(self) -> None:
@@ -86,6 +91,18 @@ class GbaCiaDeployWorker(QThread):
             handle.close()
             cia_path = Path(handle.name)
             try:
+                if self.install_method == "fbi":
+                    self.status_changed.emit("Preparing FBI Remote Install…")
+                    if not self.three_ds_ip:
+                        raise ValueError("Enter the 3DS IP address shown by FBI Remote Install.")
+                    self.fbi_server = FBIUrlServer(cia_path)
+                    self.fbi_server.start()
+                    self.fbi_server.send_to_fbi(self.three_ds_ip)
+                    self.status_changed.emit("CIA sent to FBI. Confirm installation on the 3DS…")
+                    self.fbi_server.wait_for_download()
+                    self.completed.emit("fbi", self.destination)
+                    return
+
                 self.status_changed.emit("Connecting to 3DS FTP…")
                 saved = self.config.get("devices", {}).get("3ds", {})
                 settings = ThreeDSFtpSettings(
@@ -119,6 +136,8 @@ class GbaCiaDeployWorker(QThread):
         except Exception as exc:
             self.failed.emit(str(exc))
         finally:
+            if self.fbi_server is not None:
+                self.fbi_server.close()
             if self.backend is not None:
                 self.backend.close()
             if self.temp_rom is not None:
@@ -139,7 +158,7 @@ class GbaVcDeployDialog(QDialog):
         self.target_key = target_key
         self.worker: GbaCiaDeployWorker | None = None
         self.setWindowTitle("Deploy GBA to Nintendo 3DS")
-        self.resize(800, 520)
+        self.resize(800, 560)
 
         self.title_label = QLabel(game.name)
         self.title_label.setStyleSheet("font-size:18px;font-weight:800;")
@@ -149,10 +168,25 @@ class GbaVcDeployDialog(QDialog):
 
         self.title_id_edit = QLineEdit(native_title_id_for_romm_id(game.rom_id).hex())
         self.title_id_edit.setReadOnly(True)
-        self.title_id_edit.setToolTip("Generated deterministically inside Nintendo's GBA Virtual Console title-ID range.")
+        self.title_id_edit.setToolTip("Generated deterministically inside the GBA Virtual Console title-ID range.")
 
         self.destination_edit = QLineEdit(default_destination("vc_cia", "gba", game.filename))
         self.destination_edit.setReadOnly(True)
+
+        saved = config.get("devices", {}).get("3ds", {})
+        self.three_ds_ip_edit = QLineEdit(str(saved.get("ip", "")))
+        self.three_ds_ip_edit.setPlaceholderText("e.g. 192.168.1.123")
+        self.three_ds_ip_edit.setToolTip("The IP shown by FBI > Remote Install > Receive URLs over the network.")
+        self.three_ds_ip_edit.editingFinished.connect(self._save_3ds_ip)
+
+        self.install_method_combo = QComboBox()
+        self.install_method_combo.addItem("FBI Remote Install (recommended)", "fbi")
+        self.install_method_combo.addItem("3DS FTP (copy CIA)", "ftp")
+        self.install_method_combo.currentIndexChanged.connect(self._install_method_changed)
+
+        self.install_hint = QLabel()
+        self.install_hint.setWordWrap(True)
+        self._install_method_changed()
 
         self.ftp_status = QLabel("3DS FTP settings are taken from the configured 3DS device.")
         self.status = QLabel(
@@ -178,7 +212,10 @@ class GbaVcDeployDialog(QDialog):
         form.addRow("Game:", self.title_label)
         form.addRow("Deployment:", self.mode_label)
         form.addRow("Title ID:", self.title_id_edit)
-        form.addRow("Remote CIA:", self.destination_edit)
+        form.addRow("CIA name:", self.destination_edit)
+        form.addRow("Install via:", self.install_method_combo)
+        form.addRow("3DS IP:", self.three_ds_ip_edit)
+        form.addRow("", self.install_hint)
         form.addRow("FTP:", self.ftp_status)
 
         layout = QVBoxLayout(self)
@@ -187,12 +224,44 @@ class GbaVcDeployDialog(QDialog):
         layout.addWidget(self.progress)
         layout.addLayout(actions)
 
+    def _install_method_changed(self) -> None:
+        method = str(self.install_method_combo.currentData())
+        is_fbi = method == "fbi"
+        self.three_ds_ip_edit.setEnabled(is_fbi)
+        if is_fbi:
+            self.install_hint.setText(
+                "On the 3DS: FBI → Remote Install → Receive URLs over the network. "
+                "RommHeld will send the generated CIA directly to FBI for installation."
+            )
+        else:
+            self.install_hint.setText(
+                "FTP copies the CIA to the configured 3DS path. Open the CIA in FBI to install it."
+            )
+
+    def _save_3ds_ip(self) -> None:
+        ip = self.three_ds_ip_edit.text().strip()
+        cfg = dict(self.config)
+        devices = dict(cfg.get("devices", {}))
+        device = dict(devices.get("3ds", {}))
+        device["ip"] = ip
+        devices["3ds"] = device
+        cfg["devices"] = devices
+        self.config = cfg
+
     def start(self) -> None:
+        method = str(self.install_method_combo.currentData())
         saved = self.config.get("devices", {}).get("3ds", {})
-        if not str(saved.get("host", "")).strip():
+        if method == "ftp" and not str(saved.get("host", "")).strip():
             QMessageBox.warning(self, "3DS FTP not configured", "Configure the Nintendo 3DS FTP host first.")
             return
-
+        if method == "fbi" and not self.three_ds_ip_edit.text().strip():
+            QMessageBox.warning(
+                self,
+                "3DS IP required",
+                "Open FBI → Remote Install → Receive URLs over the network and enter the IP shown there.",
+            )
+            return
+        self._save_3ds_ip()
         self.progress.setValue(0)
         self.status.setText("Preparing deployment…")
         self.deploy.setEnabled(False)
@@ -202,6 +271,8 @@ class GbaVcDeployDialog(QDialog):
             self.game,
             self.target_key,
             self.destination_edit.text(),
+            method,
+            self.three_ds_ip_edit.text(),
         )
         self.worker.progress.connect(self._progress)
         self.worker.status_changed.connect(self.status.setText)
@@ -215,10 +286,11 @@ class GbaVcDeployDialog(QDialog):
 
     def _completed(self, result: str, destination: str) -> None:
         messages = {
-            "copied": f"CIA deployed and verified at {destination}.",
+            "copied": f"CIA copied and verified at {destination}.",
             "resumed": f"CIA resumed and verified at {destination}.",
             "skipped": f"CIA already exists at {destination} with the same size.",
             "different": f"A different-size CIA exists at {destination}; nothing was overwritten.",
+            "fbi": "CIA delivered to FBI. Confirm the installation on the 3DS.",
         }
         self.progress.setValue(100)
         self.status.setText(messages.get(result, result))
