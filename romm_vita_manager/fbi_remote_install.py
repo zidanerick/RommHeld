@@ -34,6 +34,8 @@ class FBIUrlServer:
             raise FileNotFoundError(f"CIA file does not exist: {self.file_path}")
         self.bind_host = bind_host
         self.served_event = threading.Event()
+        self._fbi_socket: socket.socket | None = None
+        self._ack_thread: threading.Thread | None = None
 
         server = self
 
@@ -71,19 +73,43 @@ class FBIUrlServer:
         return f"http://{host}:{self.port}/{quote(self.file_path.name)}"
 
     def send_to_fbi(self, three_ds_ip: str, host: str | None = None, timeout: float = 8.0) -> str:
+        """Send the FBI URL and return once FBI has accepted the URL payload.
+
+        FBI sends its one-byte acknowledgement only after the install action closes
+        the connection, which can be much later than the initial URL hand-off.
+        Waiting for that ACK here makes the UI falsely report a timeout while FBI is
+        already displaying the installation prompt.
+        """
         three_ds_ip = three_ds_ip.strip()
         if not three_ds_ip:
             raise ValueError("3DS IP address is required for FBI Remote Install.")
+        if self._fbi_socket is not None:
+            raise RuntimeError("An FBI Remote Install request is already active.")
+
         url = self.url_for(self.local_address(host))
         payload = url.encode("ascii")
         packet = struct.pack("!L", len(payload)) + payload
-        with socket.create_connection((three_ds_ip, 5000), timeout=timeout) as sock:
+        sock = socket.create_connection((three_ds_ip, 5000), timeout=timeout)
+        try:
             sock.sendall(packet)
-            sock.settimeout(timeout)
-            ack = sock.recv(1)
-            if not ack:
-                raise TimeoutError("FBI did not acknowledge the remote-install request.")
+        except Exception:
+            sock.close()
+            raise
+
+        self._fbi_socket = sock
+        self._ack_thread = threading.Thread(target=self._wait_for_ack, daemon=True)
+        self._ack_thread.start()
         return url
+
+    def _wait_for_ack(self) -> None:
+        sock = self._fbi_socket
+        if sock is None:
+            return
+        try:
+            sock.settimeout(None)
+            sock.recv(1)
+        except OSError:
+            pass
 
     def wait_for_download(self, timeout: float = 120.0) -> None:
         if not self.served_event.wait(timeout):
@@ -95,6 +121,17 @@ class FBIUrlServer:
         if self.http_thread is not None:
             self.http_thread.join(timeout=2)
             self.http_thread = None
+        if self._fbi_socket is not None:
+            try:
+                self._fbi_socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                self._fbi_socket.close()
+            except OSError:
+                pass
+            self._fbi_socket = None
+        self._ack_thread = None
 
     def __enter__(self) -> "FBIUrlServer":
         self.start()
