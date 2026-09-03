@@ -14,18 +14,18 @@ MAX_HARDWARE_IMAGE_BYTES = 16 * 1024 * 1024
 
 
 class ConsoleIdentity(QWidget):
-    """Render optional hardware photos with bundled vectors as the offline fallback.
+    """Render optional hardware photos with bundled vectors as the offline fallback."""
 
-    Remote enhancement uses Qt's asynchronous network stack rather than a
-    QThread. Deleting the selector therefore cannot destroy a live worker
-    thread, and oversized responses are aborted before they can be cached.
-    """
-
+    # These are deliberately card-sized rather than source-art-sized. The
+    # selector reserves space below the hardware for title, capability summary,
+    # and support state, so oversized images must not force those labels out of
+    # the card on Linux Qt styles.
     DISPLAY_SIZE = {
-        "vita": (198, 96),
-        "3ds": (158, 154),
-        "ds": (158, 154),
-        "psp": (192, 118),
+        "vita": (176, 78),
+        "3ds": (104, 96),
+        "ds": (104, 96),
+        "psp": (174, 84),
+        "mobile": (104, 78),
     }
 
     def __init__(self, console_key: str, name: str, parent: QWidget | None = None):
@@ -36,11 +36,11 @@ class ConsoleIdentity(QWidget):
         self._network = QNetworkAccessManager(self)
         self._reply: QNetworkReply | None = None
         self._download = bytearray()
-        width, height = self.DISPLAY_SIZE.get(console_key, (170, 132))
+        width, height = self.DISPLAY_SIZE.get(console_key, (150, 82))
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(7)
+        root.setSpacing(4)
         root.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.device = QLabel()
@@ -112,12 +112,17 @@ class ConsoleIdentity(QWidget):
         if reply is None:
             return
 
-        # Drain any bytes emitted immediately before finished().
         if reply.bytesAvailable() and len(self._download) <= MAX_HARDWARE_IMAGE_BYTES:
             self._download.extend(bytes(reply.readAll()))
 
-        data = bytes(self._download) if len(self._download) <= MAX_HARDWARE_IMAGE_BYTES else b""
-        succeeded = reply.error() == QNetworkReply.NetworkError.NoError and bool(data)
+        data = (
+            bytes(self._download)
+            if len(self._download) <= MAX_HARDWARE_IMAGE_BYTES
+            else b""
+        )
+        succeeded = (
+            reply.error() == QNetworkReply.NetworkError.NoError and bool(data)
+        )
         reply.deleteLater()
         self._reply = None
         self._download.clear()
@@ -134,15 +139,13 @@ class ConsoleIdentity(QWidget):
         self.device.setPixmap(self._fit_photo(pixmap))
 
     def stop_loading(self) -> None:
-        """Abort optional network enhancement without affecting fallback art."""
         reply = self._reply
         if reply is not None and reply.isRunning():
             reply.abort()
 
     def _fit_pixmap(self, pixmap: QPixmap) -> QPixmap:
-        target = self.device.size()
         return pixmap.scaled(
-            target,
+            self.device.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
@@ -151,8 +154,6 @@ class ConsoleIdentity(QWidget):
         target = self.device.size()
         image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
 
-        # Vita's source image is a white-background photograph. Remove near-white
-        # pixels after scaling so the real hardware sits cleanly on the dark UI.
         if self.assets and self.assets.photo_remove_white:
             preview = image.scaled(
                 target,
@@ -162,7 +163,11 @@ class ConsoleIdentity(QWidget):
             for y in range(preview.height()):
                 for x in range(preview.width()):
                     pixel = preview.pixelColor(x, y)
-                    if pixel.red() >= 245 and pixel.green() >= 245 and pixel.blue() >= 245:
+                    if (
+                        pixel.red() >= 245
+                        and pixel.green() >= 245
+                        and pixel.blue() >= 245
+                    ):
                         pixel.setAlpha(0)
                         preview.setPixelColor(x, y, pixel)
             image = preview
@@ -173,7 +178,6 @@ class ConsoleIdentity(QWidget):
                 Qt.TransformationMode.SmoothTransformation,
             )
 
-        # Crop transparent margins introduced by the source photograph/canvas.
         left = image.width()
         top = image.height()
         right = -1
