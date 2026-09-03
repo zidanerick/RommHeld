@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .design_tokens import brand_for_platform
+
 ASSET_ROOT = Path(__file__).resolve().parent.parent / "assets" / "handhelds"
 
 
@@ -34,8 +36,15 @@ class PlatformAssets:
 
 PLATFORM_ASSETS = {
     "vita": PlatformAssets(
-        "playstation_vita", "PlayStation Vita", "device_large.svg", "device_small.svg", "logo.svg", "logo_dark.svg",
-        "#111111", "#3b9cf5", True,
+        "playstation_vita",
+        "PlayStation Vita",
+        "device_large.svg",
+        "device_small.svg",
+        "logo.svg",
+        "logo_dark.svg",
+        "#111111",
+        brand_for_platform("vita").accent,
+        True,
         "https://commons.wikimedia.org/wiki/File:PlayStation-Vita-1101-FL.png",
         "Original RommHeld vector retained as the offline fallback. The selector prefers the public-domain Evan-Amos PCH-1000 photograph below when available.",
         "https://commons.wikimedia.org/wiki/Special:Redirect/file/PlayStation-Vita-1101-FL.png",
@@ -43,8 +52,15 @@ PLATFORM_ASSETS = {
         "wordmark",
     ),
     "3ds": PlatformAssets(
-        "nintendo_3ds", "Nintendo 3DS", "device_large.svg", "device_small.svg", "logo_simpleicons.svg", "logo_simpleicons_dark.svg",
-        "#25a6c9", "#d12228", True,
+        "nintendo_3ds",
+        "Nintendo 3DS",
+        "device_large.svg",
+        "device_small.svg",
+        "logo_simpleicons.svg",
+        "logo_simpleicons_dark.svg",
+        "#25a6c9",
+        brand_for_platform("3ds").accent,
+        True,
         "https://commons.wikimedia.org/wiki/File:Nintendo-3DS-AquaOpen.png",
         "Original RommHeld vector retained as the offline fallback. The selector prefers the public-domain Evan-Amos Aqua Blue photograph below when available.",
         "https://commons.wikimedia.org/wiki/Special:Redirect/file/Nintendo-3DS-AquaOpen.png",
@@ -54,8 +70,15 @@ PLATFORM_ASSETS = {
         "logo_simpleicons_dark.svg",
     ),
     "ds": PlatformAssets(
-        "nintendo_ds", "Nintendo DS", "device_large.svg", "device_small.svg", "logo.svg", "logo_dark.svg",
-        "#dfe3e8", "#4b83b5", True,
+        "nintendo_ds",
+        "Nintendo DS",
+        "device_large.svg",
+        "device_small.svg",
+        "logo.svg",
+        "logo_dark.svg",
+        "#dfe3e8",
+        brand_for_platform("ds").accent,
+        True,
         "https://commons.wikimedia.org/wiki/File:Nintendo-DS-Fat-Blue.png",
         "Original RommHeld vector retained as the offline fallback. The selector prefers the public-domain Evan-Amos blue Nintendo DS photograph below when available.",
         "https://commons.wikimedia.org/wiki/Special:Redirect/file/Nintendo-DS-Fat-Blue.png",
@@ -63,8 +86,15 @@ PLATFORM_ASSETS = {
         "wordmark",
     ),
     "psp": PlatformAssets(
-        "playstation_portable", "PlayStation Portable", "device_large.svg", "device_small.svg", "logo.svg", "logo_dark.svg",
-        "#111111", "#777b84", True,
+        "playstation_portable",
+        "PlayStation Portable",
+        "device_large.svg",
+        "device_small.svg",
+        "logo.svg",
+        "logo_dark.svg",
+        "#111111",
+        brand_for_platform("psp").accent,
+        True,
         "https://commons.wikimedia.org/wiki/File:Sony-PSP-1000-Body.png",
         "Original RommHeld vector retained as the offline fallback. The selector prefers the public-domain Evan-Amos PSP-1000 photograph below when available.",
         "https://commons.wikimedia.org/wiki/Special:Redirect/file/Sony-PSP-1000-Body.png",
