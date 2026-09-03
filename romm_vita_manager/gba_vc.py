@@ -6,8 +6,6 @@ import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .gba_boot_logo import bundled_boot_logo
-
 if TYPE_CHECKING:
     from agbcia.banner.image import ImageSource
 
@@ -65,7 +63,8 @@ def prepare_gba_rom(rom: bytes) -> bytes:
 
     with archive:
         candidates = [
-            info for info in archive.infolist()
+            info
+            for info in archive.infolist()
             if not info.is_dir() and info.filename.lower().endswith(".gba")
         ]
         if not candidates:
@@ -73,7 +72,9 @@ def prepare_gba_rom(rom: bytes) -> bytes:
         candidates.sort(key=lambda info: (info.filename.count("/"), info.filename.lower()))
         selected = candidates[0]
         if selected.file_size > _MAX_GBA_ROM_SIZE:
-            raise ValueError("The GBA ROM inside the ZIP is larger than the 32 MiB maximum supported size.")
+            raise ValueError(
+                "The GBA ROM inside the ZIP is larger than the 32 MiB maximum supported size."
+            )
         return archive.read(selected)
 
 
@@ -81,7 +82,7 @@ def build_native_gba_cia(
     rom: bytes,
     artwork: "ImageSource",
     *,
-    boot_logo: bytes | None = None,
+    boot_logo: bytes,
     title_id: bytes,
     title_name: str,
     long_title: str | None = None,
@@ -91,10 +92,21 @@ def build_native_gba_cia(
 ) -> bytes:
     """Build an installable GBA CIA that boots through AGB_FIRM.
 
-    When no boot logo is supplied, use RommHeld's bundled original fallback
-    so normal packaging never requires a donor CIA or boot9 dump.
-    ZIP archives containing a .gba are accepted transparently.
+    Native mode requires a real AGB_FIRM boot-logo region extracted from a
+    GBA Virtual Console title owned by the user. Supplying arbitrary or blank
+    logo-region bytes can produce a CIA that installs but is unsafe to launch
+    on real hardware.
+
+    ``donor_banner`` is optional for native operation. When supplied, agbcia
+    reuses the donor title's real animated GBA Virtual Console banner scene and
+    patches the selected game's artwork into it.
     """
+    if not boot_logo:
+        raise ValueError(
+            "Native GBA packaging requires an extracted AGB_FIRM boot logo. "
+            "Configure a valid boot-logo asset before building the CIA."
+        )
+
     _, InjectionRequest, inject = _require_agbcia()
     rom = prepare_gba_rom(rom)
     request = InjectionRequest(
@@ -106,7 +118,7 @@ def build_native_gba_cia(
         banner_image=artwork,
         long_title=(long_title or title_name)[:128],
         publisher=publisher[:128],
-        boot_logo=boot_logo if boot_logo is not None else bundled_boot_logo(),
+        boot_logo=boot_logo,
         donor_banner=donor_banner,
         title_version=title_version,
     )
