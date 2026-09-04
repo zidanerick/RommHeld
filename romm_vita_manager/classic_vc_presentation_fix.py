@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .classic_vc_hardware_fix import validate_classic_package_identity, validate_retail_romfs
+from .vc_banner_patch import patch_official_vc_banner
 from .vc_metadata import normalize_vc_metadata
 from .vc_presentation import (
     prepare_official_vc_badge,
@@ -21,15 +22,14 @@ _INSTALLED = False
 
 
 def install() -> None:
-    """Layer donor-derived retail presentation over the validated GB/GBC builder.
+    """Layer donor-derived retail presentation over the validated classic builder.
 
     ``classic_vc_hardware_fix`` owns package/filesystem correctness. This layer
     deliberately leaves that code intact and changes only presentation:
 
-    * cache the donor SMDH visual frame in addition to its animated banner;
-    * retain the donor's family-specific cartridge frame in COMMON1;
-    * retain the donor's Virtual Console plate/chrome in COMMON2;
-    * replace only game-specific artwork/title/year pixels;
+    * cache the donor SMDH visual presentation in addition to its animated banner;
+    * retain each donor family's cartridge/console/banner scene;
+    * patch only the profile-declared game artwork and optional title badge;
     * rebuild SMDH text/flags rather than copying title-specific donor metadata.
 
     No donor binary is embedded in RommHeld. All retained material comes from
@@ -122,7 +122,11 @@ def install() -> None:
             tmd_format,
         ) = vc._require_classic_vc_tools()
 
-        icon_source = prepare_official_vc_icon_artwork(runtime.donor_icon, artwork)
+        icon_source = prepare_official_vc_icon_artwork(
+            runtime.donor_icon,
+            artwork,
+            family,
+        )
         icon = banner_assembly.build_icon(
             icon_source,
             metadata.short_title,
@@ -130,11 +134,6 @@ def install() -> None:
             metadata.publisher,
             save_data=vc._read_sci_save_data_size(exheader) > 0,
         )
-
-        try:
-            from agbcia.banner.donor import patch_donor_banner
-        except ImportError as exc:
-            raise RuntimeError("Animated GB/GBC VC banners require agbcia banner donor support.") from exc
 
         front_artwork = prepare_official_vc_front_artwork(
             runtime.donor_banner,
@@ -147,10 +146,11 @@ def install() -> None:
             family,
             release_year=release_year,
         )
-        banner = patch_donor_banner(
+        banner = patch_official_vc_banner(
             runtime.donor_banner,
             front_artwork,
-            bottom_badge_image=badge,
+            family,
+            badge_image=badge,
         )
 
         entries = [
@@ -195,9 +195,6 @@ def install() -> None:
         meta = cia_format.MetaRegion(icon=icon)
         cia = cia_format.build(ticket=ticket, tmd=tmd, content=ncch_bytes, meta=meta)
 
-        # Package identity was validated against the NCCH/TMD above. Keep a
-        # final cheap guard so presentation edits can never accidentally return
-        # an empty/truncated CIA unnoticed by callers.
         if len(cia) < len(ncch_bytes) or cia[:4] != (0x2020).to_bytes(4, "little"):
             raise ValueError("Generated classic VC CIA failed final container validation.")
         if hashlib.sha256(ncch_bytes).digest() not in tmd:
