@@ -77,6 +77,7 @@ SNES_PROFILE = VirtualConsoleProfile(
     runtime="nintendo-snes-vc",
     requires_boot9=True,
     requires_new_3ds=True,
+    implemented=True,
 )
 
 GAME_GEAR_PROFILE = VirtualConsoleProfile(
