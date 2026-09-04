@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from .send_file_dialog import SendFileDialog
+from .classic_vc_deploy import ClassicVcDeployDialog
 from .config import load_config, save_config
 from .console_selector import PlatformSelectorDialog
 from .design_tokens import DARK
@@ -600,7 +601,15 @@ class WorkspaceDashboardWindow(QMainWindow):
         target_key: str | None = None,
     ) -> None:
         config = self._reload_config()
-        if game is not None and target_key in {"native_gba", "vc_cia"}:
+        if game is not None and target_key == "vc_cia":
+            platform = (game.platform_slug or game.platform).strip().lower()
+            if platform in {"gb", "gbc"}:
+                ClassicVcDeployDialog(config, game, self).exec()
+                return
+            if platform == "gba":
+                GbaVcDeployDialog(config, game, target_key, self).exec()
+                return
+        if game is not None and target_key == "native_gba":
             GbaVcDeployDialog(config, game, target_key, self).exec()
             return
 
