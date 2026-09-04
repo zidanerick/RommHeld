@@ -28,10 +28,10 @@ def test_vc_profiles_match_nintendo_platform_families():
     assert profile_for_platform("genesis") is None
 
 
-def test_only_gba_injector_is_implemented_yet():
+def test_gb_gbc_and_gba_injectors_are_implemented():
     assert GBA_NATIVE_PROFILE.implemented
-    assert not GB_PROFILE.implemented
-    assert not GBC_PROFILE.implemented
+    assert GB_PROFILE.implemented
+    assert GBC_PROFILE.implemented
     assert not NES_PROFILE.implemented
     assert not SNES_PROFILE.implemented
     assert not GAME_GEAR_PROFILE.implemented
