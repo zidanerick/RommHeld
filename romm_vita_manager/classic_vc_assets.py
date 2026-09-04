@@ -8,7 +8,7 @@ from .classic_vc_hardware_fix import validate_retail_romfs
 from .config import package_cache_dir, save_config
 from .vc_donors import configure_boot9, configure_donor
 
-_SUPPORTED = {"gb", "gbc", "nes", "gamegear"}
+_SUPPORTED = {"gb", "gbc", "nes", "gamegear", "snes"}
 # Version 4 includes donor SMDH/banner presentation and uses the independently
 # validated retail RomFS cache contract for every supported software VC family.
 _CACHE_VERSION = 4
