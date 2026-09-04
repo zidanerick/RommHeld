@@ -57,11 +57,15 @@ GBA_NATIVE_PROFILE = VirtualConsoleProfile(
 NES_PROFILE = VirtualConsoleProfile(
     key="nes",
     label="NES Virtual Console",
-    platform_slugs=("nes", "famicom", "fds"),
-    source_extensions=(".nes", ".fds"),
+    # The native TNES builder currently accepts cartridge iNES/NES2 ROMs.
+    # Famicom/FDS remain available through RetroArch until disk-system payload
+    # generation is independently implemented.
+    platform_slugs=("nes",),
+    source_extensions=(".nes",),
     output_extension=".cia",
     runtime="nintendo-nes-vc",
     requires_boot9=True,
+    implemented=True,
 )
 
 SNES_PROFILE = VirtualConsoleProfile(
@@ -108,8 +112,6 @@ def profile_for_platform(platform_slug: str) -> VirtualConsoleProfile | None:
 
 def profile_for_rom(path: str | Path) -> VirtualConsoleProfile | None:
     suffix = Path(path).suffix.lower()
-    # Some extensions overlap between families (notably .gb). Extension-only
-    # detection is therefore advisory; platform metadata should be preferred.
     return next((profile for profile in PROFILES if suffix in profile.source_extensions), None)
 
 
