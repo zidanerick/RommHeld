@@ -46,8 +46,8 @@ def install() -> None:
             path = cached_donor_icon_path()
             if not path.is_file():
                 raise ValueError(
-                    "The GBA VC presentation cache predates official-style icons. "
-                    "Re-prepare the GBA donor once."
+                    "Official-style GBA VC packaging requires the cached donor SMDH icon. "
+                    "This presentation cache predates that asset; re-prepare the GBA donor once."
                 )
             donor_icon = path.read_bytes()
         return original_build(
