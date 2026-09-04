@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from PIL import Image, ImageDraw, ImageFont
 
+from .vc_metadata import normalize_vc_metadata
+
 if TYPE_CHECKING:
     from agbcia.banner.image import ImageSource
 
@@ -364,19 +366,26 @@ def build_native_gba_cia(
             "Configure a valid boot-logo asset before building the CIA."
         )
 
+    metadata = normalize_vc_metadata(
+        title_name,
+        long_title=long_title,
+        publisher=publisher,
+    )
     InjectionRequest, inject = _require_agbcia()
     rom = prepare_gba_rom(rom)
     icon_image = prepare_vc_icon_artwork(artwork) if isinstance(artwork, bytes) else artwork
-    bottom_badge_image = prepare_vc_title_badge(title_name) if donor_banner is not None else None
+    bottom_badge_image = (
+        prepare_vc_title_badge(metadata.banner_title) if donor_banner is not None else None
+    )
     request = InjectionRequest(
         mode="native",
         rom=rom,
         title_id=title_id,
-        title_name=title_name[:128],
+        title_name=metadata.short_title,
         icon_image=icon_image,
         banner_image=artwork,
-        long_title=(long_title or title_name)[:128],
-        publisher=publisher[:128],
+        long_title=metadata.long_title,
+        publisher=metadata.publisher,
         boot_logo=boot_logo,
         donor_banner=donor_banner,
         bottom_badge_image=bottom_badge_image,
