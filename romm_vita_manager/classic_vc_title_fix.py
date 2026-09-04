@@ -8,19 +8,19 @@ import hashlib
 # normal application range, with title variation byte 0x00.
 _CLASSIC_UID_BASE = 0x0E0000
 _CLASSIC_UID_MASK = 0x00FFFF
+_CLASSIC_FAMILIES = {"gb", "gbc", "nes"}
 
 
 def hardware_safe_classic_title_id(romm_id: int, family: str) -> bytes:
-    """Return a stable normal-application title ID for a GB/GBC inject.
+    """Return a stable normal-application title ID for a classic VC inject.
 
     TitleID-low is laid out as ``UUUUUUVV``: a 24-bit Unique ID followed by
-    an 8-bit variation. The first classic VC implementation accidentally used
-    a 28-bit value directly as TitleID-low, yielding Unique IDs around
-    0xE00000, outside the normal application range. On hardware that can make
-    HOME Menu fail title lookup at launch with ErrDisp 0xC8804478.
+    an 8-bit variation. Family is part of the hash input so GB/GBC/NES entries
+    with the same RomM numeric ID remain distinct while retaining the already
+    hardware-validated ID scheme used by existing generated titles.
     """
     family = family.lower()
-    if family not in {"gb", "gbc"}:
+    if family not in _CLASSIC_FAMILIES:
         raise ValueError(f"Unsupported classic VC family: {family}")
     if romm_id < 0:
         raise ValueError("RomM ROM ID must be non-negative.")
