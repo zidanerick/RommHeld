@@ -40,9 +40,11 @@ def test_snes_donor_is_new_3ds_only():
     assert vc_donors.donor_family("snes").requires_new_3ds
 
 
-def test_gba_is_only_implemented_family_injector():
+def test_implemented_family_injectors_are_explicit():
     assert vc_donors.donor_family("gba").injector_key == "agbcia"
-    for key in ("gb", "gbc", "nes", "snes", "gamegear"):
+    assert vc_donors.donor_family("gb").injector_key == "classic_vc"
+    assert vc_donors.donor_family("gbc").injector_key == "classic_vc"
+    for key in ("nes", "snes", "gamegear"):
         assert vc_donors.donor_family(key).injector_key is None
 
 
@@ -72,7 +74,7 @@ def test_invalid_boot9_is_rejected(tmp_path: Path):
         vc_donors.validate_boot9(boot9)
 
 
-def test_readiness_refuses_unimplemented_injector(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_gb_readiness_accepts_configured_donor_and_boot9(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(vc_donors, "save_config", lambda config: None)
     _stub_boot9_validation(monkeypatch)
     donor = tmp_path / "donor.cia"
@@ -83,8 +85,29 @@ def test_readiness_refuses_unimplemented_injector(tmp_path: Path, monkeypatch: p
     config = vc_donors.configure_donor({}, "gb", donor)
     config = vc_donors.configure_boot9(config, boot9)
     ready, message = vc_donors.donor_readiness(config, "gb")
-    assert not ready
-    assert "not implemented" in message
+    assert ready
+    assert "configured" in message
+
+
+def test_cached_gbc_runtime_is_ready_without_source_paths(tmp_path: Path):
+    exheader = tmp_path / "exheader.bin"
+    code = tmp_path / "code.bin"
+    romfs = tmp_path / "romfs.bin"
+    for path in (exheader, code, romfs):
+        path.write_bytes(b"cached")
+    config = {
+        "classic_vc": {
+            "gbc": {
+                "exheader_path": str(exheader),
+                "code_path": str(code),
+                "romfs_template_path": str(romfs),
+                "rom_path": "/rom/game.gbc",
+            }
+        }
+    }
+    ready, message = vc_donors.donor_readiness(config, "gbc")
+    assert ready
+    assert "cached" in message
 
 
 def test_gba_readiness_requires_donor_and_boot9(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
