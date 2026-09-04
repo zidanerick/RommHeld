@@ -8,9 +8,9 @@ from .classic_vc_hardware_fix import validate_retail_romfs
 from .config import package_cache_dir, save_config
 from .vc_donors import configure_boot9, configure_donor
 
-_SUPPORTED = {"gb", "gbc", "nes"}
-# Version 4 adds the donor SMDH visual presentation used by official-style
-# icons. The same cache contract now applies to the NES donor runtime.
+_SUPPORTED = {"gb", "gbc", "nes", "gamegear"}
+# Version 4 includes donor SMDH/banner presentation and uses the independently
+# validated retail RomFS cache contract for every supported software VC family.
 _CACHE_VERSION = 4
 
 
@@ -139,9 +139,9 @@ def extract_and_cache_classic_runtime(
     runtime = extract_classic_vc_runtime(donor_cia, boot9, family)
 
     if not getattr(runtime, "donor_banner", b""):
-        raise RuntimeError("Classic VC donor did not provide an animated HOME Menu banner.")
+        raise RuntimeError("Virtual Console donor did not provide an animated HOME Menu banner.")
     if not getattr(runtime, "donor_icon", b""):
-        raise RuntimeError("Classic VC donor did not provide a HOME Menu SMDH icon.")
+        raise RuntimeError("Virtual Console donor did not provide a HOME Menu SMDH icon.")
     validate_retail_romfs(runtime.romfs_template)
 
     cache = runtime_cache_dir(family)
@@ -168,5 +168,5 @@ def extract_and_cache_classic_runtime(
     updated = _forget_sources(updated, family)
     paths = configured_classic_runtime(updated, family)
     if paths is None:
-        raise RuntimeError("Classic VC runtime cache was written but failed structural validation.")
+        raise RuntimeError("Virtual Console runtime cache was written but failed structural validation.")
     return updated, paths
