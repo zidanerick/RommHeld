@@ -79,3 +79,48 @@ def test_snes_family_is_installed_in_validated_classic_backend() -> None:
     title_id = hardware_safe_classic_title_id(333, "snes")
     assert title_id[:4] == bytes.fromhex("00040000")
     assert title_id[7] == 0
+
+
+def test_snes_auxiliary_romfs_metadata_tracks_generated_product_id_and_icon() -> None:
+    data_bin = build_snes_data_bin(_snes_rom(), product_id="KTR-RH00")
+    files = {
+        "/data.bin": data_bin,
+        "/KTR-OLD1.icn": b"old-donor-icon",
+        "/shader/default.shbin": b"shader",
+    }
+    icon = b"generated-smdh"
+    result = classic_vc.prepare_runtime_aux_files(
+        files,
+        "snes",
+        "KTR-N-RABC",
+        icon,
+    )
+
+    assert "/KTR-OLD1.icn" not in result
+    assert result["/KTR-RABC.icn"] == icon
+    assert parse_snes_data_bin(result["/data.bin"]).product_id == "KTR-RABC"
+    assert result["/shader/default.shbin"] == b"shader"
+
+
+def test_snes_icon_is_marked_new3ds_only() -> None:
+    from agbcia.formats import smdh
+
+    small = bytes(smdh.ICON_SMALL_DIMENSIONS[0] * smdh.ICON_SMALL_DIMENSIONS[1] * 3)
+    large = bytes(smdh.ICON_LARGE_DIMENSIONS[0] * smdh.ICON_LARGE_DIMENSIONS[1] * 3)
+    source = smdh.build(smdh.Smdh(titles={}, icon_small=small, icon_large=large))
+
+    result = classic_vc.postprocess_vc_icon(source, "snes")
+    parsed = smdh.parse(result)
+    assert parsed.flags & smdh.FLAG_NEW_3DS
+
+
+def test_snes_ncch_is_marked_for_snake_new3ds_platform() -> None:
+    ncch = bytearray(0x200)
+    ncch[0x100:0x104] = b"NCCH"
+    ncch[0x18C] = 1
+
+    result = classic_vc.postprocess_vc_ncch(bytes(ncch), "snes")
+    assert result[0x18C] == 2
+
+    ordinary = classic_vc.postprocess_vc_ncch(bytes(ncch), "gbc")
+    assert ordinary[0x18C] == 1
