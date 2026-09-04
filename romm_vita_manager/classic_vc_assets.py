@@ -9,9 +9,10 @@ from .config import package_cache_dir, save_config
 from .vc_donors import configure_boot9, configure_donor
 
 _SUPPORTED = {"gb", "gbc"}
-# Version 3 is the first cache built with the retail directory hash table,
-# self-parented root entry, retail IVFC header marker, and preflight validation.
-_CACHE_VERSION = 3
+# Version 4 adds the donor SMDH visual frame used by the official-style icon
+# presentation. Version 3 caches remain structurally safe, but are deliberately
+# considered stale so the app never silently falls back to generic icon art.
+_CACHE_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class ClassicVcRuntimePaths:
     code: Path
     logo: Path | None
     donor_banner: Path
+    donor_icon: Path
     romfs_template: Path
     rom_path: str
 
@@ -35,6 +37,7 @@ class ClassicVcRuntimePaths:
             romfs_template=romfs,
             rom_path=self.rom_path,
             donor_banner=self.donor_banner.read_bytes(),
+            donor_icon=self.donor_icon.read_bytes(),
         )
 
 
@@ -73,17 +76,21 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
     logo = Path(logo_raw).expanduser() if logo_raw else None
     banner_raw = str(entry.get("donor_banner_path", "")).strip()
     donor_banner = Path(banner_raw).expanduser() if banner_raw else None
+    icon_raw = str(entry.get("donor_icon_path", "")).strip()
+    donor_icon = Path(icon_raw).expanduser() if icon_raw else None
     if not exheader.is_file() or not code.is_file() or not romfs.is_file() or not rom_path:
         return None
     if logo is not None and not logo.is_file():
         return None
     if donor_banner is None or not donor_banner.is_file():
         return None
+    if donor_icon is None or not donor_icon.is_file():
+        return None
     try:
         validate_retail_romfs(romfs.read_bytes())
     except (OSError, ValueError):
         # A cache is an optimization, never a reason to feed a malformed
-        # runtime into a hardware build.  Treat validation failure as stale.
+        # runtime into a hardware build. Treat validation failure as stale.
         return None
     return ClassicVcRuntimePaths(
         family=family,
@@ -91,6 +98,7 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
         code=code,
         logo=logo,
         donor_banner=donor_banner,
+        donor_icon=donor_icon,
         romfs_template=romfs,
         rom_path=rom_path,
     )
@@ -135,6 +143,8 @@ def extract_and_cache_classic_runtime(
 
     if not getattr(runtime, "donor_banner", b""):
         raise RuntimeError("Classic VC donor did not provide an animated HOME Menu banner.")
+    if not getattr(runtime, "donor_icon", b""):
+        raise RuntimeError("Classic VC donor did not provide a HOME Menu SMDH icon.")
     validate_retail_romfs(runtime.romfs_template)
 
     cache = runtime_cache_dir(family)
@@ -143,6 +153,7 @@ def extract_and_cache_classic_runtime(
     romfs = _write(cache / "romfs_template.bin", runtime.romfs_template)
     logo = _write(cache / "logo.bin", runtime.logo) if runtime.logo else None
     donor_banner = _write(cache / "donor_banner.bin", runtime.donor_banner)
+    donor_icon = _write(cache / "donor_icon.smdh", runtime.donor_icon)
 
     root = dict(updated.get("classic_vc", {})) if isinstance(updated.get("classic_vc", {}), dict) else {}
     root[family] = {
@@ -152,6 +163,7 @@ def extract_and_cache_classic_runtime(
         "romfs_template_path": str(romfs),
         "logo_path": str(logo) if logo is not None else "",
         "donor_banner_path": str(donor_banner),
+        "donor_icon_path": str(donor_icon),
         "rom_path": runtime.rom_path,
     }
     updated["classic_vc"] = root
