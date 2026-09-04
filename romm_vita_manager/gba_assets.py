@@ -3,12 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from .config import package_cache_dir, save_config
-from .gba_vc import extract_native_boot_logo, extract_native_donor_banner
+from .gba_vc import (
+    extract_native_boot_logo,
+    extract_native_donor_banner,
+    extract_native_donor_icon,
+)
 from .vc_donors import configure_boot9, configure_donor
 
 
 BOOT_LOGO_FILENAME = "agb_firm_boot_logo.bin"
 DONOR_BANNER_FILENAME = "gba_vc_donor_banner.bin"
+DONOR_ICON_FILENAME = "gba_vc_donor_icon.smdh"
 
 
 def cached_boot_logo_path() -> Path:
@@ -17,6 +22,10 @@ def cached_boot_logo_path() -> Path:
 
 def cached_donor_banner_path() -> Path:
     return package_cache_dir() / DONOR_BANNER_FILENAME
+
+
+def cached_donor_icon_path() -> Path:
+    return package_cache_dir() / DONOR_ICON_FILENAME
 
 
 def configured_boot_logo(config: dict) -> Path | None:
@@ -41,11 +50,23 @@ def configured_donor_banner(config: dict) -> Path | None:
     return path if path.is_file() else None
 
 
+def configured_donor_icon(config: dict) -> Path | None:
+    settings = config.get("gba_vc", {})
+    if not isinstance(settings, dict):
+        return None
+    raw = str(settings.get("donor_icon_path", "")).strip()
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    return path if path.is_file() else None
+
+
 def save_gba_vc_asset_paths(
     config: dict,
     *,
     boot_logo: Path | None = None,
     donor_banner: Path | None = None,
+    donor_icon: Path | None = None,
 ) -> dict:
     updated = dict(config)
     settings = (
@@ -57,6 +78,8 @@ def save_gba_vc_asset_paths(
         settings["boot_logo_path"] = str(boot_logo.expanduser())
     if donor_banner is not None:
         settings["donor_banner_path"] = str(donor_banner.expanduser())
+    if donor_icon is not None:
+        settings["donor_icon_path"] = str(donor_icon.expanduser())
     updated["gba_vc"] = settings
     save_config(updated)
     return updated
@@ -65,10 +88,10 @@ def save_gba_vc_asset_paths(
 def _forget_gba_donor_sources(config: dict) -> dict:
     """Drop donor/boot9 source paths once reusable cache files exist.
 
-    The extracted boot logo and banner are sufficient for subsequent GBA
-    packaging. Keeping source paths after a successful one-time preparation
-    only makes the deployment UI look as if the original CIA/boot9 are still
-    required.
+    The extracted boot logo, animated banner and SMDH icon are sufficient for
+    subsequent GBA packaging. Keeping source paths after a successful one-time
+    preparation only makes the deployment UI look as if the original CIA or
+    boot9 are still required.
     """
     updated = dict(config)
     vc = (
@@ -123,11 +146,12 @@ def extract_and_cache_boot_logo(config: dict, donor_cia: Path, boot9: Path) -> P
 def extract_and_cache_gba_donor_assets(
     config: dict, donor_cia: Path, boot9: Path
 ) -> tuple[dict, Path, Path]:
-    """Validate a GBA VC donor and cache the boot logo + animated banner.
+    """Validate a GBA VC donor and cache its reusable official presentation.
 
-    The donor CIA and boot9 dump are one-time inputs. After successful
-    extraction RommHeld retains only the cached assets and donor metadata; the
-    original source paths are deliberately forgotten.
+    The donor CIA and boot9 dump are one-time inputs. RommHeld retains the
+    AGB_FIRM boot logo, animated banner and SMDH icon frame, then forgets the
+    original source paths. The donor binaries themselves are never bundled in
+    the application or repository.
     """
     donor_cia = donor_cia.expanduser()
     boot9 = boot9.expanduser()
@@ -140,10 +164,14 @@ def extract_and_cache_gba_donor_assets(
     banner = _write_cached_asset(
         cached_donor_banner_path(), extract_native_donor_banner(donor_cia, boot9)
     )
+    icon = _write_cached_asset(
+        cached_donor_icon_path(), extract_native_donor_icon(donor_cia, boot9)
+    )
     updated = save_gba_vc_asset_paths(
         updated,
         boot_logo=logo,
         donor_banner=banner,
+        donor_icon=icon,
     )
     updated = _forget_gba_donor_sources(updated)
     return updated, logo, banner
