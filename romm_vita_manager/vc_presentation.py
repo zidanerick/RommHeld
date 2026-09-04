@@ -4,7 +4,15 @@ import io
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont
+
+from .vc_art_layout import (
+    GBA_BANNER_LAYOUT,
+    GBC_LABEL_LAYOUT,
+    GB_LABEL_LAYOUT,
+    ICON_LAYOUT,
+    prepare_artwork_for_viewport,
+)
 
 if TYPE_CHECKING:
     from agbcia.banner.image import ImageSource
@@ -120,60 +128,40 @@ def _png(image: Image.Image) -> bytes:
     return output.getvalue()
 
 
-def _edge_background(image: Image.Image) -> tuple[int, int, int]:
-    sample = image.convert("RGB").resize((16, 16), Image.Resampling.BILINEAR)
-    pixels: list[tuple[int, int, int]] = []
-    for x in range(sample.width):
-        pixels.append(sample.getpixel((x, 0)))
-        pixels.append(sample.getpixel((x, sample.height - 1)))
-    for y in range(1, sample.height - 1):
-        pixels.append(sample.getpixel((0, y)))
-        pixels.append(sample.getpixel((sample.width - 1, y)))
-    count = max(1, len(pixels))
-    return tuple(sum(pixel[c] for pixel in pixels) // count for c in range(3))
-
-
-def _contained_square(artwork: Image.Image, size: int, *, margin: int = 2) -> Image.Image:
-    source = artwork.convert("RGBA")
-    background = _edge_background(source)
-    canvas = Image.new("RGBA", (size, size), (*background, 255))
-    available = max(1, size - margin * 2)
-    fitted = ImageOps.contain(source, (available, available), Image.Resampling.LANCZOS)
-    canvas.alpha_composite(
-        fitted,
-        ((size - fitted.width) // 2, (size - fitted.height) // 2),
-    )
-    return canvas
-
-
 def prepare_official_vc_front_artwork(
     donor_banner: bytes,
     artwork: "ImageSource",
     family: str,
 ) -> bytes:
-    """Build the COMMON1 image while retaining the retail family shell.
+    """Build COMMON1 while respecting the actual Nintendo artwork viewport.
 
-    GB and GBC donors carry the Game Boy/Game Boy Color cartridge frame inside
-    COMMON1 itself. Replacing that entire texture with box art was the reason
-    early RommHeld injects looked unlike Nintendo VC releases. Only the label
-    rectangle is replaced now. GBA's shell is part of the 3D scene, so its
-    COMMON1 remains a square per-title label.
+    GB/GBC keep the donor cartridge shell and place the complete source artwork
+    inside the measured label safe area with a small inset. GBA's donor scene
+    expects a square label, so portrait box art is conservatively cropped to
+    that square after uniform scanner margins are trimmed. This prevents source
+    covers from touching or visibly overflowing Nintendo's frame.
     """
     profile = presentation_profile(family)
     source = _load_image(artwork).convert("RGBA")
     donor = _donor_texture_image(donor_banner, "COMMON1").convert("RGBA")
 
     if profile.front_label_rect is None:
-        return _png(_contained_square(source, donor.width, margin=max(2, donor.width // 32)))
+        replacement = prepare_artwork_for_viewport(
+            source,
+            donor.size,
+            GBA_BANNER_LAYOUT,
+        )
+        return _png(replacement)
 
     left, top, right, bottom = profile.front_label_rect
     if not (0 <= left < right <= donor.width and 0 <= top < bottom <= donor.height):
         raise ValueError("Virtual Console donor label rectangle is outside COMMON1.")
-    replacement = ImageOps.fit(
+
+    layout = GB_LABEL_LAYOUT if profile.family == "gb" else GBC_LABEL_LAYOUT
+    replacement = prepare_artwork_for_viewport(
         source,
         (right - left, bottom - top),
-        Image.Resampling.LANCZOS,
-        centering=(0.5, 0.5),
+        layout,
     )
     result = donor.copy()
     result.alpha_composite(replacement, (left, top))
@@ -216,21 +204,11 @@ def _wrap_lines(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont,
         lines.append(current)
     if len(lines) <= max_lines:
         return lines
-
-    # Keep the final line useful instead of blindly clipping halfway through a
-    # word. The caller will retry with a smaller font before reaching this.
     return lines[: max_lines - 1] + [" ".join(lines[max_lines - 1 :])]
 
 
 def _clear_badge_title_panel(image: Image.Image) -> Image.Image:
-    """Remove donor-specific text while retaining its exact badge chrome.
-
-    Retail GB/GBC/GBA donor COMMON2 textures share a 256x64 layout: the
-    Virtual Console mark and separator occupy the left side and the title panel
-    occupies the right. The right panel has a smooth grayscale gradient. Its
-    top/bottom clean pixels are used to reconstruct that gradient, so RommHeld
-    does not need to bundle a Nintendo template image.
-    """
+    """Remove donor-specific text while retaining its exact badge chrome."""
     badge = image.convert("LA").copy()
     width, height = badge.size
     left = max(1, round(width * 0.375))
@@ -257,13 +235,7 @@ def prepare_official_vc_badge(
     *,
     release_year: int | None = None,
 ) -> bytes:
-    """Rebuild COMMON2 using the donor's real Virtual Console badge.
-
-    The left-hand Virtual Console mark, border, separator, shading and rounded
-    panel come directly from the user's official donor. Only donor-specific
-    title text is removed. GB/GBC profiles reproduce the retail ``Released:``
-    line when RomM provides a year; the GBA donor layout uses title text only.
-    """
+    """Rebuild COMMON2 using the donor's real Virtual Console badge."""
     profile = presentation_profile(family)
     badge = _clear_badge_title_panel(_donor_texture_image(donor_banner, "COMMON2"))
     width, height = badge.size
@@ -316,14 +288,7 @@ def prepare_official_vc_icon_artwork(
     donor_icon: bytes,
     artwork: "ImageSource",
 ) -> bytes:
-    """Retain the retail donor's SMDH icon frame around new artwork.
-
-    Across the supplied retail GB/GBC/GBA donors the outer four pixels of the
-    48x48 icon are byte-identical family-neutral Home Menu chrome. RommHeld
-    keeps that frame and replaces only the 40x40 interior. The resulting PNG is
-    then passed through agbcia's normal SMDH builder, so title strings and safe
-    region settings remain generated rather than copied from the donor.
-    """
+    """Retain the retail SMDH frame and fill its inner artwork viewport."""
     try:
         from agbcia.formats import smdh as smdh_format
     except ImportError as exc:
@@ -336,7 +301,11 @@ def prepare_official_vc_icon_artwork(
     interior_size = frame.width - inset * 2
     if interior_size <= 0:
         raise ValueError("Donor SMDH icon is too small for its retail frame.")
-    interior = _contained_square(source, interior_size, margin=1)
+    interior = prepare_artwork_for_viewport(
+        source,
+        (interior_size, interior_size),
+        ICON_LAYOUT,
+    )
     result = frame.copy()
     result.alpha_composite(interior, (inset, inset))
     return _png(result)
