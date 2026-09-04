@@ -9,11 +9,41 @@ from pathlib import Path
 from urllib.parse import quote
 
 
+FBI_HTTP_PORT = 8080
+
+
 class _Handler(BaseHTTPRequestHandler):
     server: "_HttpServer"
 
+    def setup(self) -> None:
+        super().setup()
+        try:
+            # FBI pulls large CIA payloads over one long-lived TCP stream. A
+            # larger send buffer reduces avoidable stalls on fast LAN links;
+            # the OS may clamp this to its configured maximum.
+            self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024 * 1024)
+        except OSError:
+            pass
+
     def log_message(self, format: str, *args) -> None:
         return
+
+    def _send_payload(self, source: Path) -> None:
+        """Send the CIA with the kernel sendfile path when available."""
+        with source.open("rb") as handle:
+            try:
+                self.connection.sendfile(handle)
+                return
+            except (AttributeError, NotImplementedError):
+                # socket.sendfile is not available on every Python/platform.
+                pass
+
+            # Keep a large userspace fallback for platforms without sendfile.
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
 
     def _serve_file(self, *, track_download: bool) -> None:
         source = self.server.owner.file_path
@@ -31,16 +61,12 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Length", str(size))
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             if self.command == "HEAD":
                 completed = True
                 return
-            with source.open("rb") as handle:
-                while True:
-                    chunk = handle.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
+            self._send_payload(source)
             completed = True
         finally:
             if track_download:
@@ -68,6 +94,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 class _HttpServer(ThreadingHTTPServer):
     allow_reuse_address = True
+    request_queue_size = 8
 
     def __init__(self, owner: "FBIUrlServer", bind_host: str, port: int):
         self.owner = owner
@@ -75,11 +102,18 @@ class _HttpServer(ThreadingHTTPServer):
 
 
 class FBIUrlServer:
-    """Temporary HTTP server plus FBI Remote Install URL sender."""
+    """HTTP server plus FBI Remote Install URL sender.
+
+    Port 8080 remains the preferred stable port so RommHeld can create one
+    persistent, narrowly-scoped firewall rule and reuse it across transfers.
+    Fallback ports are retained for compatibility when another process already
+    owns 8080; callers should pass the resulting ``port`` to the firewall
+    helper so that fallback rule is remembered as well.
+    """
 
     FALLBACK_PORTS = (8000, 8888, 8081)
 
-    def __init__(self, file_path: Path, *, bind_host: str = "0.0.0.0", port: int = 8080):
+    def __init__(self, file_path: Path, *, bind_host: str = "0.0.0.0", port: int = FBI_HTTP_PORT):
         self.file_path = file_path.expanduser().resolve()
         if not self.file_path.is_file():
             raise FileNotFoundError(f"CIA file does not exist: {self.file_path}")
@@ -196,7 +230,7 @@ class FBIUrlServer:
         except OSError:
             pass
 
-    def wait_for_download(self, timeout: float = 180.0, cancel_event: threading.Event | None = None) -> None:
+    def wait_for_download(self, timeout: float = 600.0, cancel_event: threading.Event | None = None) -> None:
         elapsed = 0.0
         sleeper = threading.Event()
         while not self.request_started_event.is_set():
