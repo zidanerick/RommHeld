@@ -247,6 +247,10 @@ def _release_year(item: dict) -> int | None:
                 if 1900 <= value <= 2200:
                     return value
                 # Some metadata providers expose Unix seconds/milliseconds.
+                # Do not reinterpret arbitrary small integers (for example a
+                # malformed release_year=42) as seconds after the Unix epoch.
+                if value < 100_000_000:
+                    continue
                 stamp = value / 1000 if value > 10_000_000_000 else value
                 try:
                     year = datetime.fromtimestamp(stamp, tz=timezone.utc).year
