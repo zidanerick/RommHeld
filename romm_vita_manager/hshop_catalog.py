@@ -59,6 +59,19 @@ class _SearchParser(HTMLParser):
             self._parts = []
 
 
+class _TextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        if data.strip():
+            self.parts.append(data.strip())
+
+    def text(self) -> str:
+        return " ".join(self.parts)
+
+
 def _normalise_title(value: str) -> str:
     # Remove presentation-only marks before compatibility decomposition.
     # NFKD expands ™ to "TM", which would otherwise make an exact title like
@@ -100,7 +113,7 @@ def _parse_entry(href: str, text: str) -> HShopVcRelease | None:
     platform = platform_match.group(1).strip() if platform_match else "Virtual Console"
     region = tail.split("Virtual Console:", 1)[0].strip() if "Virtual Console:" in tail else ""
     title_id_match = re.search(r"\b([0-9A-F]{16})\s+Title ID\b", text, re.I)
-    product_match = re.search(r"\b(CTR-[A-Z0-9-]+)\s+Product Code\b", text, re.I)
+    product_match = re.search(r"\b((?:CTR|KTR)-[A-Z0-9-]+)\s+Product Code\b", text, re.I)
     content_match = re.search(r"\b(Legit|Pirate Legit|Standard)\s+Content Type\b", text, re.I)
 
     return HShopVcRelease(
@@ -112,6 +125,19 @@ def _parse_entry(href: str, text: str) -> HShopVcRelease | None:
         product_code=product_match.group(1) if product_match else "",
         content_type=content_match.group(1) if content_match else "",
     )
+
+
+def _fetch_html(url: str, *, timeout: float, opener=None) -> str | None:
+    req = request.Request(
+        url,
+        headers={"User-Agent": "RommHeld/1.0", "Accept": "text/html"},
+    )
+    client = opener or request.build_opener()
+    try:
+        with client.open(req, timeout=timeout) as response:
+            return response.read(2 * 1024 * 1024).decode("utf-8", errors="replace")
+    except (error.URLError, TimeoutError, OSError):
+        return None
 
 
 def find_official_vc_release(
@@ -130,15 +156,12 @@ def find_official_vc_release(
     if expected is None:
         return None
 
-    req = request.Request(
+    html = _fetch_html(
         _SEARCH_URL.format(query=quote_plus(title)),
-        headers={"User-Agent": "RommHeld/1.0", "Accept": "text/html"},
+        timeout=timeout,
+        opener=opener,
     )
-    client = opener or request.build_opener()
-    try:
-        with client.open(req, timeout=timeout) as response:
-            html = response.read(2 * 1024 * 1024).decode("utf-8", errors="replace")
-    except (error.URLError, TimeoutError, OSError):
+    if html is None:
         return None
 
     parser = _SearchParser()
@@ -159,3 +182,48 @@ def find_official_vc_release(
         return None
     candidates.sort(key=lambda item: (item[0], bool(item[1].title_id)), reverse=True)
     return candidates[0][1]
+
+
+def find_vc_seed_by_title_id(
+    title_id: str,
+    *,
+    timeout: float = 8.0,
+    opener=None,
+) -> bytes | None:
+    """Return a 16-byte NCCH seed published as hShop catalogue metadata.
+
+    New-3DS SNES donors frequently use seed crypto. The seed is public title
+    metadata, not CIA content. RommHeld uses hShop only to locate this value so
+    it can decrypt a user-supplied donor; no content/QR/download endpoint is
+    requested.
+    """
+    normalized = title_id.strip().upper()
+    if not re.fullmatch(r"[0-9A-F]{16}", normalized):
+        raise ValueError("3DS Title ID must contain exactly 16 hexadecimal digits.")
+
+    html = _fetch_html(
+        _SEARCH_URL.format(query=quote_plus(f"t:{normalized}")),
+        timeout=timeout,
+        opener=opener,
+    )
+    if html is None:
+        return None
+
+    parser = _SearchParser()
+    parser.feed(html)
+    release: HShopVcRelease | None = None
+    for href, text in parser.entries:
+        candidate = _parse_entry(href, text)
+        if candidate is not None and candidate.title_id == normalized:
+            release = candidate
+            break
+    if release is None:
+        return None
+
+    detail = _fetch_html(release.url, timeout=timeout, opener=opener)
+    if detail is None:
+        return None
+    text_parser = _TextParser()
+    text_parser.feed(detail)
+    match = re.search(r"\bSeed:\s*([0-9A-Fa-f]{32})\b", text_parser.text())
+    return bytes.fromhex(match.group(1)) if match else None
