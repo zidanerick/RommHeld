@@ -3,20 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .classic_vc_title_fix import install as install_classic_title_fix
-from .classic_vc_root_fix import install as install_classic_vc_root_fix
-from .classic_vc_hardware_fix import install as install_classic_vc_hardware_fix
-
-install_classic_title_fix()
-install_classic_vc_root_fix()
-install_classic_vc_hardware_fix()
-
 from .classic_vc import ClassicVcRuntime, extract_classic_vc_runtime
+from .classic_vc_hardware_fix import validate_retail_romfs
 from .config import package_cache_dir, save_config
 from .vc_donors import configure_boot9, configure_donor
 
 _SUPPORTED = {"gb", "gbc"}
-_CACHE_VERSION = 2
+# Version 3 is the first cache built with the retail directory hash table,
+# self-parented root entry, retail IVFC header marker, and preflight validation.
+_CACHE_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -30,12 +25,14 @@ class ClassicVcRuntimePaths:
     rom_path: str
 
     def load(self) -> ClassicVcRuntime:
+        romfs = self.romfs_template.read_bytes()
+        validate_retail_romfs(romfs)
         return ClassicVcRuntime(
             family=self.family,
             exheader=self.exheader.read_bytes(),
             code=self.code.read_bytes(),
             logo=self.logo.read_bytes() if self.logo is not None else b"",
-            romfs_template=self.romfs_template.read_bytes(),
+            romfs_template=romfs,
             rom_path=self.rom_path,
             donor_banner=self.donor_banner.read_bytes(),
         )
@@ -81,6 +78,12 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
     if logo is not None and not logo.is_file():
         return None
     if donor_banner is None or not donor_banner.is_file():
+        return None
+    try:
+        validate_retail_romfs(romfs.read_bytes())
+    except (OSError, ValueError):
+        # A cache is an optimization, never a reason to feed a malformed
+        # runtime into a hardware build.  Treat validation failure as stale.
         return None
     return ClassicVcRuntimePaths(
         family=family,
@@ -132,6 +135,7 @@ def extract_and_cache_classic_runtime(
 
     if not getattr(runtime, "donor_banner", b""):
         raise RuntimeError("Classic VC donor did not provide an animated HOME Menu banner.")
+    validate_retail_romfs(runtime.romfs_template)
 
     cache = runtime_cache_dir(family)
     exheader = _write(cache / "exheader.bin", runtime.exheader)
@@ -155,5 +159,5 @@ def extract_and_cache_classic_runtime(
     updated = _forget_sources(updated, family)
     paths = configured_classic_runtime(updated, family)
     if paths is None:
-        raise RuntimeError("Classic VC runtime cache was written but could not be reopened.")
+        raise RuntimeError("Classic VC runtime cache was written but failed structural validation.")
     return updated, paths
