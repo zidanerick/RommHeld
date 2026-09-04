@@ -64,6 +64,9 @@ class GbaCiaDeployWorker(QThread):
         destination: str,
         install_method: str,
         three_ds_ip: str,
+        *,
+        display_title: str | None = None,
+        publisher: str = "",
     ):
         super().__init__()
         self.config = config
@@ -72,6 +75,8 @@ class GbaCiaDeployWorker(QThread):
         self.destination = destination
         self.install_method = install_method
         self.three_ds_ip = three_ds_ip.strip()
+        self.display_title = (display_title or game.name).strip() or game.name
+        self.publisher = publisher.strip()
         self.cancel_event = threading.Event()
         self.backend: ThreeDSFtpBackend | None = None
         self.fbi_server: FBIUrlServer | None = None
@@ -138,7 +143,9 @@ class GbaCiaDeployWorker(QThread):
                 boot_logo=boot_logo_path.read_bytes(),
                 donor_banner=donor_banner_path.read_bytes() if donor_banner_path is not None else None,
                 title_id=native_title_id_for_romm_id(self.game.rom_id),
-                title_name=self.game.name,
+                title_name=self.display_title,
+                long_title=self.display_title,
+                publisher=self.publisher,
             )
             self._check_cancelled()
 
@@ -285,52 +292,64 @@ class GbaVcDeployDialog(QDialog):
         official.content.addLayout(official_row)
 
         donor_card = SurfaceCard()
-        donor_title = QLabel("One-time GBA Virtual Console donor setup")
+        donor_title = QLabel("GBA Virtual Console runtime")
         donor_title.setStyleSheet("font-size:14px;font-weight:700;")
         donor_card.content.addWidget(donor_title)
-        donor_note = QLabel(
-            "Choose a genuine GBA Virtual Console donor CIA and your own boot9 dump once. "
-            "RommHeld extracts and caches the AGB_FIRM boot logo and animated VC banner automatically; "
-            "you do not need to supply those extracted files yourself."
-        )
-        donor_note.setWordWrap(True)
-        donor_note.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
-        donor_card.content.addWidget(donor_note)
 
+        assets_ready = configured_boot_logo(config) is not None and configured_donor_banner(config) is not None
         configured_donor = configured_donor_path(config, "gba")
         configured_boot9 = configured_boot9_path(config)
         self.donor_cia_edit = QLineEdit(str(configured_donor) if configured_donor else "")
         self.donor_cia_edit.setPlaceholderText("GBA Virtual Console donor (.cia)")
-        donor_browse = QPushButton("Browse…")
-        donor_browse.clicked.connect(self._choose_donor_cia)
-        donor_row = QHBoxLayout()
-        donor_row.addWidget(self.donor_cia_edit, 1)
-        donor_row.addWidget(donor_browse)
-
         self.boot9_edit = QLineEdit(str(configured_boot9) if configured_boot9 else "")
         self.boot9_edit.setPlaceholderText("boot9.bin or boot9_prot.bin")
-        boot9_browse = QPushButton("Browse…")
-        boot9_browse.clicked.connect(self._choose_boot9)
-        boot9_row = QHBoxLayout()
-        boot9_row.addWidget(self.boot9_edit, 1)
-        boot9_row.addWidget(boot9_browse)
 
-        donor_form = QFormLayout()
-        donor_form.setContentsMargins(0, 0, 0, 0)
-        donor_form.addRow("GBA VC donor", donor_row)
-        donor_form.addRow("boot9 dump", boot9_row)
-        donor_card.content.addLayout(donor_form)
+        if assets_ready:
+            donor_note = QLabel(
+                "Ready — the required AGB_FIRM boot logo and animated VC banner are cached locally. "
+                "The original donor CIA and boot9 dump are no longer needed for normal GBA deployments."
+            )
+            donor_note.setWordWrap(True)
+            donor_note.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
+            donor_card.content.addWidget(donor_note)
+        else:
+            donor_note = QLabel(
+                "One-time setup: choose a genuine GBA Virtual Console donor CIA and your own boot9 dump. "
+                "RommHeld extracts only the two reusable assets it needs and then forgets the source paths."
+            )
+            donor_note.setWordWrap(True)
+            donor_note.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
+            donor_card.content.addWidget(donor_note)
+
+            donor_browse = QPushButton("Browse…")
+            donor_browse.clicked.connect(self._choose_donor_cia)
+            donor_row = QHBoxLayout()
+            donor_row.addWidget(self.donor_cia_edit, 1)
+            donor_row.addWidget(donor_browse)
+
+            boot9_browse = QPushButton("Browse…")
+            boot9_browse.clicked.connect(self._choose_boot9)
+            boot9_row = QHBoxLayout()
+            boot9_row.addWidget(self.boot9_edit, 1)
+            boot9_row.addWidget(boot9_browse)
+
+            donor_form = QFormLayout()
+            donor_form.setContentsMargins(0, 0, 0, 0)
+            donor_form.addRow("GBA VC donor", donor_row)
+            donor_form.addRow("boot9 dump", boot9_row)
+            donor_card.content.addLayout(donor_form)
 
         self.donor_status = QLabel()
         self.donor_status.setWordWrap(True)
         self.donor_status.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
         donor_card.content.addWidget(self.donor_status)
-        prepare = QPushButton("Prepare donor assets")
-        prepare.clicked.connect(self._prepare_donor_assets)
-        prepare_row = QHBoxLayout()
-        prepare_row.addStretch()
-        prepare_row.addWidget(prepare)
-        donor_card.content.addLayout(prepare_row)
+        if not assets_ready:
+            prepare = QPushButton("Prepare donor assets")
+            prepare.clicked.connect(self._prepare_donor_assets)
+            prepare_row = QHBoxLayout()
+            prepare_row.addStretch()
+            prepare_row.addWidget(prepare)
+            donor_card.content.addLayout(prepare_row)
         self._refresh_donor_status()
 
         configuration = SurfaceCard()
@@ -343,6 +362,17 @@ class GbaVcDeployDialog(QDialog):
         self.title_id_edit.setToolTip("Generated deterministically inside the GBA Virtual Console title-ID range.")
         self.destination_edit = QLineEdit(default_destination("vc_cia", "gba", game.filename))
         self.destination_edit.setReadOnly(True)
+        self.display_title_edit = QLineEdit(game.name)
+        self.display_title_edit.setReadOnly(True)
+        self.display_title_edit.setToolTip(
+            "Uses the official hShop title spelling when a confident catalogue match exists."
+        )
+        self.publisher_edit = QLineEdit(game.publisher)
+        self.publisher_edit.setReadOnly(True)
+        self.publisher_edit.setPlaceholderText("Not available in RomM metadata")
+        self.publisher_edit.setToolTip(
+            "Publisher comes from RomM metadata when available. Unknown publishers are left blank instead of being labelled Homebrew."
+        )
 
         saved = config.get("devices", {}).get("3ds", {})
         self.three_ds_ip_edit = QLineEdit(str(saved.get("ip", "")))
@@ -361,6 +391,8 @@ class GbaVcDeployDialog(QDialog):
         form.setVerticalSpacing(9)
         form.addRow("Install with", self.install_method_combo)
         form.addRow("3DS IP", self.three_ds_ip_edit)
+        form.addRow("Display title", self.display_title_edit)
+        form.addRow("Publisher", self.publisher_edit)
         form.addRow("Title ID", self.title_id_edit)
         form.addRow("CIA destination", self.destination_edit)
         configuration.content.addLayout(form)
@@ -429,6 +461,7 @@ class GbaVcDeployDialog(QDialog):
             self.open_official_button.setEnabled(False)
             return
         item = self.official_release
+        self.display_title_edit.setText(item.title)
         details = [f"Official release found: {item.title}", item.platform]
         if item.region:
             details.append(item.region)
@@ -472,7 +505,7 @@ class GbaVcDeployDialog(QDialog):
         logo = configured_boot_logo(self.config)
         banner = configured_donor_banner(self.config)
         if logo is not None and banner is not None:
-            self.donor_status.setText("Ready — donor assets are already extracted and cached locally.")
+            self.donor_status.setText("Ready — cached GBA VC runtime assets will be reused automatically.")
         elif self.donor_cia_edit.text().strip() and self.boot9_edit.text().strip():
             self.donor_status.setText("Donor and boot9 selected. RommHeld will extract the required assets locally.")
         else:
@@ -493,7 +526,11 @@ class GbaVcDeployDialog(QDialog):
         except Exception as exc:
             QMessageBox.warning(self, "Could not prepare GBA VC donor", str(exc))
             return False
-        self.donor_status.setText(f"Ready — cached {logo.name} and {banner.name} from the donor CIA.")
+        self.donor_cia_edit.clear()
+        self.boot9_edit.clear()
+        self.donor_status.setText(
+            f"Ready — cached {logo.name} and {banner.name}. Source paths were discarded and are no longer required."
+        )
         return True
 
     def _ensure_donor_assets(self) -> bool:
@@ -561,6 +598,8 @@ class GbaVcDeployDialog(QDialog):
             self.destination_edit.text(),
             method,
             self.three_ds_ip_edit.text(),
+            display_title=self.display_title_edit.text(),
+            publisher=self.publisher_edit.text(),
         )
         self.worker.progress.connect(self.progress.setValue)
         self.worker.status_changed.connect(self.status.setText)
