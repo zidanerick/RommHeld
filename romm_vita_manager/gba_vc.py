@@ -9,6 +9,11 @@ from typing import TYPE_CHECKING
 from PIL import Image, ImageDraw, ImageFont
 
 from .vc_metadata import normalize_vc_metadata
+from .vc_presentation import (
+    prepare_official_vc_badge,
+    prepare_official_vc_front_artwork,
+    prepare_official_vc_icon_artwork,
+)
 
 if TYPE_CHECKING:
     from agbcia.banner.image import ImageSource
@@ -199,6 +204,14 @@ def extract_native_donor_banner(donor_cia: Path, boot9: Path) -> bytes:
     return _extract_ncch_exefs_entry(ncch, keys, "banner")
 
 
+def extract_native_donor_icon(donor_cia: Path, boot9: Path) -> bytes:
+    """Extract the retail donor SMDH so its visual icon frame can be reused."""
+    donor = read_asset(donor_cia)
+    keys = read_asset(boot9)
+    ncch = _primary_ncch_from_cia(donor)
+    return _extract_ncch_exefs_entry(ncch, keys, "icon")
+
+
 def prepare_gba_rom(rom: bytes) -> bytes:
     """Return a raw GBA ROM, transparently extracting a .gba from ZIP input."""
     if len(rom) > _MAX_GBA_ROM_SIZE:
@@ -273,7 +286,11 @@ def prepare_vc_title_badge(
     width: int = 512,
     height: int = 128,
 ) -> bytes:
-    """Render the per-title text texture displayed below the rotating VC box."""
+    """Legacy generic badge renderer kept for non-donor callers/tests.
+
+    Real VC builds now use :func:`prepare_official_vc_badge`, which retains the
+    official donor's Virtual Console mark, panel chrome and family layout.
+    """
     title = " ".join(title_name.split()).strip()[:128]
     if not title:
         raise ValueError("Virtual Console title badge requires a non-empty title.")
@@ -352,18 +369,27 @@ def build_native_gba_cia(
     long_title: str | None = None,
     publisher: str = "",
     donor_banner: bytes | None = None,
+    donor_icon: bytes | None = None,
+    release_year: int | None = None,
     title_version: int = 0,
 ) -> bytes:
     """Build an installable GBA CIA that boots through AGB_FIRM.
 
-    ``publisher`` is intentionally blank by default. Callers should pass real
-    game metadata when available instead of stamping generated titles with a
-    generic "Homebrew" marker.
+    When a donor banner is supplied, its official animated CGFX scene and badge
+    chrome are retained. A matching donor SMDH is also required so the Home Menu
+    icon keeps the retail VC frame instead of looking like a generic homebrew
+    icon. Nintendo-owned binary assets remain local cache inputs and are never
+    embedded in RommHeld itself.
     """
     if not boot_logo:
         raise ValueError(
             "Native GBA packaging requires an extracted AGB_FIRM boot logo. "
             "Configure a valid boot-logo asset before building the CIA."
+        )
+    if donor_banner is not None and donor_icon is None:
+        raise ValueError(
+            "Official-style GBA VC presentation requires the cached donor SMDH icon. "
+            "Re-prepare the GBA donor assets once."
         )
 
     metadata = normalize_vc_metadata(
@@ -373,17 +399,28 @@ def build_native_gba_cia(
     )
     InjectionRequest, inject = _require_agbcia()
     rom = prepare_gba_rom(rom)
-    icon_image = prepare_vc_icon_artwork(artwork) if isinstance(artwork, bytes) else artwork
-    bottom_badge_image = (
-        prepare_vc_title_badge(metadata.banner_title) if donor_banner is not None else None
-    )
+
+    if donor_banner is not None:
+        icon_image = prepare_official_vc_icon_artwork(donor_icon, artwork)
+        banner_image = prepare_official_vc_front_artwork(donor_banner, artwork, "gba")
+        bottom_badge_image = prepare_official_vc_badge(
+            donor_banner,
+            metadata.banner_title,
+            "gba",
+            release_year=release_year,
+        )
+    else:
+        icon_image = prepare_vc_icon_artwork(artwork) if isinstance(artwork, bytes) else artwork
+        banner_image = artwork
+        bottom_badge_image = None
+
     request = InjectionRequest(
         mode="native",
         rom=rom,
         title_id=title_id,
         title_name=metadata.short_title,
         icon_image=icon_image,
-        banner_image=artwork,
+        banner_image=banner_image,
         long_title=metadata.long_title,
         publisher=metadata.publisher,
         boot_logo=boot_logo,
