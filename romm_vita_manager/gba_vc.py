@@ -69,13 +69,7 @@ def _align64(value: int) -> int:
 
 
 def _primary_ncch_from_cia(donor_cia: bytes) -> bytes:
-    """Return the primary application NCCH from a retail/piratelegit CIA.
-
-    Real eShop-style CIAs normally encrypt each content with the title key
-    even though the inner NCCH has its own CTR encryption. agbcia's donor
-    helpers operate on the NCCH layer, so RommHeld removes the outer CIA CBC
-    layer first. The donor bytes are never modified on disk.
-    """
+    """Return the primary application NCCH from a retail/piratelegit CIA."""
     try:
         from Crypto.Cipher import AES
     except ImportError as exc:
@@ -123,8 +117,6 @@ def _primary_ncch_from_cia(donor_cia: bytes) -> bytes:
     if content_count < 1:
         raise ValueError("CIA contains no application content.")
 
-    # The first TMD content is the executable application NCCH for the VC
-    # donors we support. Manuals/auxiliary content follow it.
     row = donor_cia[chunk_table : chunk_table + 0x30]
     if len(row) < 0x30:
         raise ValueError("CIA TMD content table is truncated.")
@@ -243,11 +235,16 @@ def build_native_gba_cia(
     title_id: bytes,
     title_name: str,
     long_title: str | None = None,
-    publisher: str = "Homebrew",
+    publisher: str = "",
     donor_banner: bytes | None = None,
     title_version: int = 0,
 ) -> bytes:
-    """Build an installable GBA CIA that boots through AGB_FIRM."""
+    """Build an installable GBA CIA that boots through AGB_FIRM.
+
+    ``publisher`` is intentionally blank by default. Callers should pass real
+    game metadata when available instead of stamping generated titles with a
+    generic "Homebrew" marker.
+    """
     if not boot_logo:
         raise ValueError(
             "Native GBA packaging requires an extracted AGB_FIRM boot logo. "
