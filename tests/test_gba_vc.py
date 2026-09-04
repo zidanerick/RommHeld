@@ -10,6 +10,7 @@ from romm_vita_manager.gba_vc import (
     native_title_id_for_romm_id,
     prepare_gba_rom,
     prepare_vc_icon_artwork,
+    prepare_vc_title_badge,
 )
 
 
@@ -65,6 +66,7 @@ def test_native_builder_does_not_stamp_homebrew_publisher(monkeypatch):
     assert captured["publisher"] == ""
     assert captured["icon_image"] == b"icon"
     assert captured["banner_image"] == b"image"
+    assert captured["bottom_badge_image"] is None
 
 
 def test_native_builder_uses_real_publisher_when_supplied(monkeypatch):
@@ -92,6 +94,32 @@ def test_native_builder_uses_real_publisher_when_supplied(monkeypatch):
     assert captured["publisher"] == "Nintendo"
 
 
+def test_native_builder_supplies_title_badge_for_donor_banner(monkeypatch):
+    captured = {}
+
+    class Request:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        gba_vc,
+        "_require_agbcia",
+        lambda: (Request, lambda request: SimpleNamespace(cia=b"cia")),
+    )
+    monkeypatch.setattr(gba_vc, "prepare_vc_icon_artwork", lambda artwork: b"icon")
+    monkeypatch.setattr(gba_vc, "prepare_vc_title_badge", lambda title: b"title-badge")
+
+    build_native_gba_cia(
+        b"GBA TEST ROM",
+        b"image",
+        boot_logo=b"real-logo",
+        donor_banner=b"donor-banner",
+        title_id=native_title_id_for_romm_id(42),
+        title_name="Metroid Fusion",
+    )
+    assert captured["bottom_badge_image"] == b"title-badge"
+
+
 def test_prepare_vc_icon_artwork_preserves_portrait_cover_inside_square():
     source = Image.new("RGB", (120, 180), (20, 40, 60))
     source.paste((220, 100, 40), (20, 20, 100, 160))
@@ -102,9 +130,16 @@ def test_prepare_vc_icon_artwork_preserves_portrait_cover_inside_square():
     image = Image.open(io.BytesIO(result))
     assert image.size == (256, 256)
     assert image.format == "PNG"
-    # A portrait cover is contained rather than expanded/cropped to fill width.
     assert image.getpixel((0, 128)) == image.getpixel((255, 128))
     assert image.getpixel((128, 128)) != image.getpixel((0, 128))
+
+
+def test_prepare_vc_title_badge_renders_visible_transparent_png():
+    result = prepare_vc_title_badge("The Legend of Zelda: The Minish Cap", width=512, height=128)
+    image = Image.open(io.BytesIO(result)).convert("RGBA")
+    assert image.size == (512, 128)
+    assert image.getchannel("A").getbbox() is not None
+    assert image.getpixel((0, 0))[3] == 0
 
 
 def test_prepare_gba_rom_extracts_gba_from_zip():
