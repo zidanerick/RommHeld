@@ -20,8 +20,8 @@ NATIVE_GBA = DeploymentTarget(
 
 VC_CIA = DeploymentTarget(
     "vc_cia",
-    "GBA Virtual Console CIA",
-    "Create an installable GBA AGB_FIRM CIA with per-title Home Menu metadata and a real donor Virtual Console banner.",
+    "Nintendo Virtual Console CIA",
+    "Create an installable Nintendo Virtual Console CIA using the family-specific runtime for this platform.",
     "cia",
 )
 
@@ -39,9 +39,6 @@ RETROARCH = DeploymentTarget(
     "retroarch",
 )
 
-# Platforms for which the current Nintendo 3DS RetroArch build publishes
-# usable core CIA packages. This is intentionally an explicit 3DS list rather
-# than inheriting the Vita RetroFlow mapping.
 RETROARCH_PLATFORM_SLUGS = frozenset(
     {
         "3ds",
@@ -78,11 +75,10 @@ RETROARCH_PLATFORM_SLUGS = frozenset(
     }
 )
 
-# RommHeld currently has a real CIA injector only for GBA via AGB_FIRM.
-# Do not advertise generic "VC" packaging for GB/GBC/NES/SNES/Game Gear until
-# platform-specific injectors exist; routing those ROMs through the GBA builder
-# produces invalid titles on hardware.
-VC_IMPLEMENTED_PLATFORM_SLUGS = frozenset({"gba"})
+# GB/GBC now use their own donor-backed Nintendo VC runtime. NES, SNES and
+# Game Gear remain hidden until their family-specific runtime layouts are
+# implemented and verified separately.
+VC_IMPLEMENTED_PLATFORM_SLUGS = frozenset({"gba", "gb", "gbc"})
 NATIVE_PLATFORM_SLUGS = frozenset({"gba"})
 
 
