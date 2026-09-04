@@ -70,7 +70,7 @@ def test_official_badge_retains_left_vc_chrome_and_replaces_title(monkeypatch):
     assert result.crop((0, 0, 90, 64)).tobytes() == donor.crop((0, 0, 90, 64)).tobytes()
     assert result.crop((100, 5, 250, 59)).tobytes() != donor.crop((100, 5, 250, 59)).tobytes()
     # Rendered title/year create dark glyph pixels in the cleaned panel.
-    assert min(result.crop((100, 5, 250, 59)).getchannel("L").getdata()) < 80
+    assert result.crop((100, 5, 250, 59)).getchannel("L").getextrema()[0] < 80
 
 
 def test_official_icon_preserves_retail_frame_and_replaces_interior():
@@ -87,6 +87,8 @@ def test_official_icon_preserves_retail_frame_and_replaces_interior():
             icon_large=large.tobytes(),
         )
     )
+    parsed_donor = smdh.parse(donor)
+    decoded_large = Image.frombytes("RGB", smdh.ICON_LARGE_DIMENSIONS, parsed_donor.icon_large)
     artwork = Image.new("RGB", (90, 140), (20, 80, 220))
 
     result = Image.open(
@@ -94,6 +96,8 @@ def test_official_icon_preserves_retail_frame_and_replaces_interior():
     ).convert("RGBA")
 
     assert result.size == (48, 48)
-    assert result.getpixel((0, 0))[:3] == large.getpixel((0, 0))
-    assert result.getpixel((47, 47))[:3] == large.getpixel((47, 47))
-    assert result.getpixel((24, 24))[:3] != large.getpixel((24, 24))
+    # SMDH stores RGB565, so compare against the donor after its real
+    # encode/decode quantization rather than the pre-encoded synthetic source.
+    assert result.getpixel((0, 0))[:3] == decoded_large.getpixel((0, 0))
+    assert result.getpixel((47, 47))[:3] == decoded_large.getpixel((47, 47))
+    assert result.getpixel((24, 24))[:3] != decoded_large.getpixel((24, 24))
