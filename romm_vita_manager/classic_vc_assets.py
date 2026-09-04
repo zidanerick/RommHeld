@@ -4,9 +4,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .classic_vc_title_fix import install as install_classic_title_fix
+from .classic_vc_root_fix import install as install_classic_vc_root_fix
 from .classic_vc_hardware_fix import install as install_classic_vc_hardware_fix
 
 install_classic_title_fix()
+install_classic_vc_root_fix()
 install_classic_vc_hardware_fix()
 
 from .classic_vc import ClassicVcRuntime, extract_classic_vc_runtime
@@ -14,6 +16,7 @@ from .config import package_cache_dir, save_config
 from .vc_donors import configure_boot9, configure_donor
 
 _SUPPORTED = {"gb", "gbc"}
+_CACHE_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -63,6 +66,8 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
     entry = root.get(family, {}) if isinstance(root, dict) else {}
     if not isinstance(entry, dict):
         return None
+    if entry.get("cache_version") != _CACHE_VERSION:
+        return None
     exheader = Path(str(entry.get("exheader_path", ""))).expanduser()
     code = Path(str(entry.get("code_path", ""))).expanduser()
     romfs = Path(str(entry.get("romfs_template_path", ""))).expanduser()
@@ -75,9 +80,6 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
         return None
     if logo is not None and not logo.is_file():
         return None
-    # Caches created by the first GB/GBC implementation did not retain the
-    # donor's animated banner. Treat them as stale so the setup card asks for
-    # the donor once more instead of silently producing the generic flat banner.
     if donor_banner is None or not donor_banner.is_file():
         return None
     return ClassicVcRuntimePaths(
@@ -140,6 +142,7 @@ def extract_and_cache_classic_runtime(
 
     root = dict(updated.get("classic_vc", {})) if isinstance(updated.get("classic_vc", {}), dict) else {}
     root[family] = {
+        "cache_version": _CACHE_VERSION,
         "exheader_path": str(exheader),
         "code_path": str(code),
         "romfs_template_path": str(romfs),
