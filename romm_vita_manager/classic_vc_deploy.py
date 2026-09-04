@@ -127,7 +127,9 @@ class ClassicVcDeployWorker(QThread):
                 raise ValueError("No usable RomM artwork is available for this title.")
             self._check_cancelled()
 
-            self.status_changed.emit(f"Packaging {_FAMILY_LABELS[self.family]} Nintendo Virtual Console CIA…")
+            self.status_changed.emit(
+                f"Packaging {_FAMILY_LABELS[self.family]} Nintendo Virtual Console CIA with retail donor presentation…"
+            )
             cia = build_classic_vc_cia(
                 self.temp_rom.read_bytes(),
                 artwork,
@@ -136,6 +138,7 @@ class ClassicVcDeployWorker(QThread):
                 title_name=self.display_title,
                 long_title=self.display_title,
                 publisher=self.publisher,
+                release_year=self.game.release_year,
             )
             self._check_cancelled()
 
@@ -159,7 +162,9 @@ class ClassicVcDeployWorker(QThread):
                     self._check_cancelled()
                     self.fbi_server.start()
                     served_url = self.fbi_server.send_to_fbi(self.three_ds_ip, host=server_ip)
-                    self.status_changed.emit(f"FBI accepted the request. Serving {served_url}…")
+                    self.status_changed.emit(
+                        f"FBI received {served_url}. Confirm 'Install from the received URL(s)?' on the 3DS."
+                    )
                     self.fbi_server.wait_for_download(cancel_event=self.cancel_event)
                     self._check_cancelled()
                     self.progress.emit(100)
@@ -201,7 +206,7 @@ class ClassicVcDeployWorker(QThread):
                 try:
                     remove_temporary(self.firewall_rule)
                 except FirewallError as exc:
-                    self.status_changed.emit(f"Warning: could not remove temporary firewall rule: {exc}")
+                    self.status_changed.emit(f"Warning: could not clean up firewall state: {exc}")
             if self.backend is not None:
                 self.backend.close()
             if self.temp_rom is not None:
@@ -259,14 +264,14 @@ class ClassicVcDeployDialog(QDialog):
         self.runtime_status.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
         if runtime is not None:
             self.runtime_status.setText(
-                "Ready — the donor emulator runtime has been extracted, sanitized and cached locally. "
+                "Ready — the donor emulator runtime, animated banner and official HOME Menu icon frame are cached locally. "
                 "The original donor CIA and boot9 dump are not required for normal deployments."
             )
             runtime_card.content.addWidget(self.runtime_status)
         else:
             note = QLabel(
                 f"One-time setup: choose a genuine {family_label} Virtual Console donor CIA and your own boot9 dump. "
-                "RommHeld caches the emulator runtime with the donor ROM and title-specific patch files removed."
+                "RommHeld caches the emulator runtime and retail presentation while removing the donor ROM and title-specific patch files."
             )
             note.setWordWrap(True)
             note.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
@@ -292,7 +297,7 @@ class ClassicVcDeployDialog(QDialog):
             prepare_row.addStretch()
             prepare_row.addWidget(prepare)
             runtime_card.content.addLayout(prepare_row)
-            self.runtime_status.setText("Runtime not prepared yet.")
+            self.runtime_status.setText("Runtime/presentation cache is not prepared yet.")
 
         configuration = SurfaceCard()
         configuration.content.addWidget(QLabel("Installation"))
@@ -371,7 +376,9 @@ class ClassicVcDeployDialog(QDialog):
             self.runtime_status.setText(str(exc))
             return
         self.config = updated
-        self.runtime_status.setText("Ready — reusable VC runtime cached locally. You can build this title now.")
+        self.runtime_status.setText(
+            "Ready — reusable VC runtime and retail presentation cached locally. You can build this title now."
+        )
         self.deploy.setEnabled(True)
 
     def _start_hshop_lookup(self) -> None:
@@ -415,7 +422,11 @@ class ClassicVcDeployDialog(QDialog):
 
     def _start(self) -> None:
         if configured_classic_runtime(self.config, self.family) is None:
-            QMessageBox.warning(self, "VC runtime required", f"Prepare the {_FAMILY_LABELS[self.family]} VC runtime first.")
+            QMessageBox.warning(
+                self,
+                "VC runtime required",
+                f"Prepare the {_FAMILY_LABELS[self.family]} VC runtime/presentation cache first.",
+            )
             return
         self.deploy.setEnabled(False)
         self.cancel.setText("Cancel deployment")
@@ -443,7 +454,7 @@ class ClassicVcDeployDialog(QDialog):
 
     def _completed(self, method: str, destination: str) -> None:
         if method == "fbi":
-            self.status.setText("CIA delivered to FBI. Complete installation on the Nintendo 3DS.")
+            self.status.setText("FBI reported that the CIA installation workflow finished.")
         else:
             self.status.setText(f"CIA uploaded to {destination}. Install it with FBI on the Nintendo 3DS.")
 
