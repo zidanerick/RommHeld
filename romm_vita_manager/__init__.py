@@ -1,16 +1,19 @@
 """RomM Vita Manager package."""
 
-# Classic VC modules are imported from several UI paths with ``from ... import``.
-# Install title identity, hardware layout and donor-derived presentation in that
-# order so every later symbol binding sees the same live implementation.
+# VC modules are imported from several UI paths with ``from ... import``.
+# Install corrections before those callers bind their local symbols so every
+# deployment path sees the same validated implementation.
 from .classic_vc_title_fix import install as _install_classic_vc_title_fix
 from .classic_vc_hardware_fix import install as _install_classic_vc_hardware_fix
 from .classic_vc_presentation_fix import install as _install_classic_vc_presentation_fix
+from .gba_vc_presentation_compat import install as _install_gba_vc_presentation_compat
 
 _install_classic_vc_title_fix()
 _install_classic_vc_hardware_fix()
 _install_classic_vc_presentation_fix()
+_install_gba_vc_presentation_compat()
 
 del _install_classic_vc_title_fix
 del _install_classic_vc_hardware_fix
 del _install_classic_vc_presentation_fix
+del _install_gba_vc_presentation_compat
