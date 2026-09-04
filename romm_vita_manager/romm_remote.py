@@ -4,6 +4,7 @@ import http.client
 import json
 import socket
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, request
 from urllib.parse import quote, urlencode, urlparse, urlunparse, parse_qsl
@@ -23,6 +24,7 @@ class RomMRemoteGame:
     cover_url: str | None = None
     platform_slug: str = ""
     publisher: str = ""
+    release_year: int | None = None
 
 
 def _auth_headers(token: str, *, accept: str = "application/json", include_auth: bool = True) -> dict[str, str]:
@@ -224,6 +226,42 @@ def _publisher_name(item: dict) -> str:
     return ""
 
 
+def _release_year(item: dict) -> int | None:
+    """Best-effort release year extraction across RomM metadata providers."""
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    for source in (item, metadata):
+        if not isinstance(source, dict):
+            continue
+        for key in (
+            "release_year",
+            "year",
+            "first_release_date",
+            "release_date",
+            "released",
+            "date_released",
+        ):
+            value = source.get(key)
+            if value is None or isinstance(value, bool):
+                continue
+            if isinstance(value, int):
+                if 1900 <= value <= 2200:
+                    return value
+                # Some metadata providers expose Unix seconds/milliseconds.
+                stamp = value / 1000 if value > 10_000_000_000 else value
+                try:
+                    year = datetime.fromtimestamp(stamp, tz=timezone.utc).year
+                except (OverflowError, OSError, ValueError):
+                    continue
+                if 1900 <= year <= 2200:
+                    return year
+            text = str(value).strip()
+            if len(text) >= 4 and text[:4].isdigit():
+                year = int(text[:4])
+                if 1900 <= year <= 2200:
+                    return year
+    return None
+
+
 def resolve_cover_url(instance_url: str, cover: str | None) -> str | None:
     """Resolve a RomM cover path using RomM's frontend resource base."""
     if not cover:
@@ -371,6 +409,7 @@ def _list_games_for_platform_slugs(
                 resolve_cover_url(instance_url, cover),
                 slug,
                 _publisher_name(item),
+                _release_year(item),
             )
         )
     return games
@@ -406,6 +445,7 @@ def list_3ds_games(instance_url: str, token: str, *, limit: int = 200) -> list[R
             game.cover_url,
             game.platform_slug,
             game.publisher,
+            game.release_year,
         )
         for game in games
     ]
