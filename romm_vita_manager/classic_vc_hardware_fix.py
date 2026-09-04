@@ -6,9 +6,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .gba_vc import prepare_vc_title_badge
+from .vc_metadata import normalize_vc_metadata
 
 if TYPE_CHECKING:
     from agbcia.banner.image import ImageSource
+
+
+_INSTALLED = False
 
 
 def _align(value: int, boundary: int) -> int:
@@ -35,6 +39,10 @@ def install() -> None:
     generic flat banner. This compatibility layer fixes both while the family
     injector is being hardened on hardware.
     """
+    global _INSTALLED
+    if _INSTALLED:
+        return
+
     from . import classic_vc as vc
 
     @dataclass(frozen=True)
@@ -141,6 +149,12 @@ def install() -> None:
         family = runtime.family.lower()
         if family not in vc._CLASSIC_FAMILIES:
             raise ValueError(f"Unsupported classic VC family: {family}")
+
+        metadata = normalize_vc_metadata(
+            title_name,
+            long_title=long_title,
+            publisher=publisher,
+        )
         rom = vc.prepare_classic_rom(rom, family)
         title_id = vc.classic_title_id_for_romm_id(romm_id, family)
         product_code = vc._product_code(family, romm_id)
@@ -166,9 +180,9 @@ def install() -> None:
         icon_source = vc.prepare_vc_icon_artwork(artwork) if isinstance(artwork, bytes) else artwork
         icon = banner_assembly.build_icon(
             icon_source,
-            title_name[:128],
-            (long_title or title_name)[:128],
-            publisher[:128],
+            metadata.short_title,
+            metadata.long_title,
+            metadata.publisher,
             save_data=vc._read_sci_save_data_size(exheader) > 0,
         )
 
@@ -178,17 +192,13 @@ def install() -> None:
             except ImportError as exc:
                 raise RuntimeError("Animated GB/GBC VC banners require agbcia banner donor support.") from exc
             # Official GB/GBC donors use the same COMMON1 (box art) and
-            # COMMON2 (title badge) texture contract as the GBA VC donor
-            # banner. Leave the donor shell/environment textures untouched.
+            # COMMON2 (visible title/header badge) texture contract as GBA VC.
             banner = patch_donor_banner(
                 runtime.donor_banner,
                 artwork,
-                bottom_badge_image=prepare_vc_title_badge(title_name),
+                bottom_badge_image=prepare_vc_title_badge(metadata.banner_title),
             )
         else:
-            # Old caches created before animated-banner extraction can still
-            # launch after the IVFC fix; re-preparing the donor upgrades the
-            # presentation without making the cache unusable.
             banner = banner_assembly.build_banner(artwork)
 
         entries = [
@@ -231,3 +241,4 @@ def install() -> None:
     vc.build_romfs = build_romfs
     vc.extract_classic_vc_runtime = extract_runtime
     vc.build_classic_vc_cia = build_cia
+    _INSTALLED = True
