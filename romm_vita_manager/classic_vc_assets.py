@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .classic_vc_title_fix import install as install_classic_title_fix
 from .classic_vc_hardware_fix import install as install_classic_vc_hardware_fix
 
+install_classic_title_fix()
 install_classic_vc_hardware_fix()
 
 from .classic_vc import ClassicVcRuntime, extract_classic_vc_runtime
