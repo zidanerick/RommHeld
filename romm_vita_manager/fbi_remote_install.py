@@ -104,7 +104,12 @@ class _HttpServer(ThreadingHTTPServer):
 class FBIUrlServer:
     """HTTP server plus FBI Remote Install URL sender.
 
-    Port 8080 remains the preferred stable port so RommHeld can create one
+    FBI's port-5000 protocol only delivers one or more URLs. FBI then asks the
+    user to approve the install, starts the HTTP GET after approval, streams the
+    CIA into the 3DS install service, and finally sends one acknowledgement byte
+    back over the port-5000 control socket when that install workflow ends.
+
+    Port 8080 remains the preferred stable HTTP port so RommHeld can create one
     persistent, narrowly-scoped firewall rule and reuse it across transfers.
     Fallback ports are retained for compatibility when another process already
     owns 8080; callers should pass the resulting ``port`` to the firewall
@@ -122,6 +127,8 @@ class FBIUrlServer:
         self.request_started_event = threading.Event()
         self.served_event = threading.Event()
         self.request_failed_event = threading.Event()
+        self.ack_event = threading.Event()
+        self.control_closed_event = threading.Event()
         self.request_path: str | None = None
         self._request_lock = threading.Lock()
         self._fbi_socket: socket.socket | None = None
@@ -197,7 +204,13 @@ class FBIUrlServer:
         return f"http://{host}:{self.port}/{quote(self.file_path.name)}"
 
     def send_to_fbi(self, three_ds_ip: str, host: str | None = None, timeout: float = 8.0) -> str:
-        """Send the FBI URL and return once the URL payload is handed to FBI."""
+        """Send the URL payload to FBI and start listening for its final ACK.
+
+        Receiving this payload is not the same as approving the installation:
+        stock FBI shows a confirmation prompt before it performs the HTTP GET.
+        ``request_started_event`` therefore doubles as the reliable indication
+        that the user approved the request and FBI actually started fetching.
+        """
         three_ds_ip = three_ds_ip.strip()
         if not three_ds_ip:
             raise ValueError("3DS IP address is required for FBI Remote Install.")
@@ -226,36 +239,84 @@ class FBIUrlServer:
             return
         try:
             sock.settimeout(None)
-            sock.recv(1)
+            ack = sock.recv(1)
+            if ack:
+                self.ack_event.set()
+            else:
+                self.control_closed_event.set()
         except OSError:
-            pass
+            self.control_closed_event.set()
 
-    def wait_for_download(self, timeout: float = 600.0, cancel_event: threading.Event | None = None) -> None:
+    @staticmethod
+    def _cancelled(cancel_event: threading.Event | None) -> bool:
+        return cancel_event is not None and cancel_event.is_set()
+
+    def wait_for_request_start(
+        self,
+        timeout: float = 600.0,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
+        """Wait until FBI approves the request and begins the HTTP download."""
         elapsed = 0.0
         sleeper = threading.Event()
         while not self.request_started_event.is_set():
-            if self.served_event.is_set():
-                return
-            if cancel_event is not None and cancel_event.is_set():
+            if self._cancelled(cancel_event):
                 raise InterruptedError
+            if self.ack_event.is_set():
+                raise PermissionError(
+                    "FBI closed the request before starting the CIA download. "
+                    "The install was declined or FBI rejected the received URL."
+                )
+            if self.control_closed_event.is_set():
+                raise ConnectionError(
+                    "FBI closed the Remote Install control connection before starting the CIA download."
+                )
             if elapsed >= timeout:
                 raise TimeoutError(
-                    f"FBI accepted the URL, but the 3DS never connected to the CIA server at "
-                    f"http://<PC>:{self.port}. Check the PC address in the generated URL and the PC firewall."
+                    "FBI received the URL but never started the CIA download. "
+                    "Confirm 'Install from the received URL(s)?' on the 3DS."
                 )
             sleeper.wait(0.25)
             elapsed += 0.25
 
+    def wait_for_download(self, timeout: float = 600.0, cancel_event: threading.Event | None = None) -> None:
+        """Wait for approval, complete HTTP delivery, and FBI's final ACK.
+
+        The HTTP send finishing only means FBI has received the CIA bytes. The
+        acknowledgement on the port-5000 control socket is the signal used by
+        FBI's own sender script to indicate that its install workflow has ended,
+        so RommHeld waits for it before reporting the deployment complete.
+        """
+        self.wait_for_request_start(timeout=timeout, cancel_event=cancel_event)
+
         elapsed = 0.0
+        sleeper = threading.Event()
         while not self.served_event.is_set():
-            if cancel_event is not None and cancel_event.is_set():
+            if self._cancelled(cancel_event):
                 raise InterruptedError
             if self.request_failed_event.is_set():
                 raise ConnectionError(
                     "The 3DS connected to the CIA server, but the HTTP transfer ended before the complete CIA was sent."
                 )
+            if self.control_closed_event.is_set() and not self.ack_event.is_set():
+                raise ConnectionError("FBI closed the Remote Install control connection during the CIA transfer.")
             if elapsed >= timeout:
                 raise TimeoutError("The 3DS connected to the CIA server but did not finish downloading the CIA.")
+            sleeper.wait(0.25)
+            elapsed += 0.25
+
+        elapsed = 0.0
+        while not self.ack_event.is_set():
+            if self._cancelled(cancel_event):
+                raise InterruptedError
+            if self.control_closed_event.is_set():
+                raise ConnectionError(
+                    "The CIA transfer completed, but FBI closed the control connection without reporting install completion."
+                )
+            if elapsed >= timeout:
+                raise TimeoutError(
+                    "The CIA transfer completed, but FBI did not report that the installation finished."
+                )
             sleeper.wait(0.25)
             elapsed += 0.25
 
