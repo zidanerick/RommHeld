@@ -16,6 +16,7 @@ class ClassicVcRuntimePaths:
     exheader: Path
     code: Path
     logo: Path | None
+    donor_banner: Path | None
     romfs_template: Path
     rom_path: str
 
@@ -27,6 +28,7 @@ class ClassicVcRuntimePaths:
             logo=self.logo.read_bytes() if self.logo is not None else b"",
             romfs_template=self.romfs_template.read_bytes(),
             rom_path=self.rom_path,
+            donor_banner=self.donor_banner.read_bytes() if self.donor_banner is not None else b"",
         )
 
 
@@ -61,15 +63,20 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
     rom_path = str(entry.get("rom_path", "")).strip()
     logo_raw = str(entry.get("logo_path", "")).strip()
     logo = Path(logo_raw).expanduser() if logo_raw else None
+    banner_raw = str(entry.get("donor_banner_path", "")).strip()
+    donor_banner = Path(banner_raw).expanduser() if banner_raw else None
     if not exheader.is_file() or not code.is_file() or not romfs.is_file() or not rom_path:
         return None
     if logo is not None and not logo.is_file():
+        return None
+    if donor_banner is not None and not donor_banner.is_file():
         return None
     return ClassicVcRuntimePaths(
         family=family,
         exheader=exheader,
         code=code,
         logo=logo,
+        donor_banner=donor_banner,
         romfs_template=romfs,
         rom_path=rom_path,
     )
@@ -117,6 +124,11 @@ def extract_and_cache_classic_runtime(
     code = _write(cache / "code.bin", runtime.code)
     romfs = _write(cache / "romfs_template.bin", runtime.romfs_template)
     logo = _write(cache / "logo.bin", runtime.logo) if runtime.logo else None
+    donor_banner = (
+        _write(cache / "donor_banner.bin", runtime.donor_banner)
+        if getattr(runtime, "donor_banner", b"")
+        else None
+    )
 
     root = dict(updated.get("classic_vc", {})) if isinstance(updated.get("classic_vc", {}), dict) else {}
     root[family] = {
@@ -124,6 +136,7 @@ def extract_and_cache_classic_runtime(
         "code_path": str(code),
         "romfs_template_path": str(romfs),
         "logo_path": str(logo) if logo is not None else "",
+        "donor_banner_path": str(donor_banner) if donor_banner is not None else "",
         "rom_path": runtime.rom_path,
     }
     updated["classic_vc"] = root
