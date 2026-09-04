@@ -40,14 +40,22 @@ def configured_boot_logo(config: dict) -> Path | None:
 
 
 def configured_donor_banner(config: dict) -> Path | None:
+    """Return the donor banner only when the complete presentation cache exists.
+
+    Older caches contained a banner but no SMDH icon frame. Treat those as
+    stale so the deployment dialog asks for one donor refresh instead of
+    silently producing a generic-looking HOME Menu icon.
+    """
     settings = config.get("gba_vc", {})
     if not isinstance(settings, dict):
         return None
     raw = str(settings.get("donor_banner_path", "")).strip()
-    if not raw:
+    icon_raw = str(settings.get("donor_icon_path", "")).strip()
+    if not raw or not icon_raw:
         return None
     path = Path(raw).expanduser()
-    return path if path.is_file() else None
+    icon = Path(icon_raw).expanduser()
+    return path if path.is_file() and icon.is_file() else None
 
 
 def configured_donor_icon(config: dict) -> Path | None:
