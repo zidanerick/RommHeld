@@ -29,9 +29,18 @@ VC_DONOR_FAMILIES: tuple[VcDonorFamily, ...] = (
     VcDonorFamily("gb", "Game Boy", ("gb",), injector_key="classic_vc"),
     VcDonorFamily("gbc", "Game Boy Color", ("gbc",), injector_key="classic_vc"),
     VcDonorFamily("gba", "Game Boy Advance", ("gba",), requires_boot_logo=True, injector_key="agbcia"),
-    VcDonorFamily("nes", "NES", ("nes", "famicom", "fds"), injector_key=None),
-    VcDonorFamily("snes", "Super Nintendo", ("snes",), requires_new_3ds=True, injector_key=None),
-    VcDonorFamily("gamegear", "Game Gear", ("gamegear",), injector_key=None),
+    # The TNES builder currently accepts cartridge iNES/NES2 inputs only.
+    # Famicom/FDS remain explicit RetroArch routes rather than being silently
+    # associated with a donor format that has not been verified for them.
+    VcDonorFamily("nes", "NES", ("nes",), injector_key="classic_vc"),
+    VcDonorFamily(
+        "snes",
+        "Super Nintendo",
+        ("snes",),
+        requires_new_3ds=True,
+        injector_key="classic_vc",
+    ),
+    VcDonorFamily("gamegear", "Game Gear", ("gamegear",), injector_key="classic_vc"),
 )
 
 _FAMILY_BY_KEY = {family.key: family for family in VC_DONOR_FAMILIES}
@@ -73,7 +82,7 @@ def inspect_cia_container(path: str | Path) -> tuple[str, int]:
 
     This intentionally validates only the outer CIA structure. Family-specific
     NCCH/runtime validation happens in the injector because encrypted donor
-    content can require boot9 and, for some New 3DS titles, seed data.
+    content can require boot9 and, for New 3DS SNES titles, public seed data.
     """
     candidate = Path(path).expanduser()
     if not candidate.is_file():
@@ -202,14 +211,20 @@ def _cached_classic_runtime_ready(config: dict, family_key: str) -> bool:
     entry = root.get(family_key, {}) if isinstance(root, dict) else {}
     if not isinstance(entry, dict):
         return False
-    required = ("exheader_path", "code_path", "romfs_template_path")
+    required = (
+        "exheader_path",
+        "code_path",
+        "romfs_template_path",
+        "donor_banner_path",
+        "donor_icon_path",
+    )
     if not str(entry.get("rom_path", "")).strip():
         return False
     return all(
-        Path(str(entry.get(key, ""))).expanduser().is_file()
+        str(entry.get(key, "")).strip()
+        and Path(str(entry.get(key, ""))).expanduser().is_file()
         for key in required
-        if str(entry.get(key, "")).strip()
-    ) and all(str(entry.get(key, "")).strip() for key in required)
+    )
 
 
 def _cached_gba_runtime_ready(config: dict) -> bool:
@@ -228,10 +243,11 @@ def _cached_gba_runtime_ready(config: dict) -> bool:
 def donor_readiness(config: dict, platform_slug: str) -> tuple[bool, str]:
     family = donor_family_for_platform(platform_slug)
     if family is None:
-        return False, "Nintendo did not provide a supported 3DS Virtual Console family for this platform."
+        return False, "Nintendo did not provide an implemented 3DS Virtual Console route for this platform."
 
-    if family.key in {"gb", "gbc"} and _cached_classic_runtime_ready(config, family.key):
-        return True, f"{family.label} Virtual Console runtime is cached and ready."
+    if family.injector_key == "classic_vc" and _cached_classic_runtime_ready(config, family.key):
+        qualifier = " A New Nintendo 3DS is required." if family.requires_new_3ds else ""
+        return True, f"{family.label} Virtual Console runtime is cached and ready.{qualifier}"
     if family.key == "gba" and _cached_gba_runtime_ready(config):
         return True, "Game Boy Advance donor assets are cached and ready."
 
@@ -240,8 +256,11 @@ def donor_readiness(config: dict, platform_slug: str) -> tuple[bool, str]:
         return False, f"Configure a {family.label} Virtual Console donor CIA first."
     if family.requires_boot9 and configured_boot9_path(config) is None:
         return False, "Configure a valid retail boot9.bin/boot9_prot.bin dump first."
-    if family.requires_new_3ds:
-        return False, f"{family.label} donor is configured. New 3DS seed-aware injection is not implemented yet."
     if family.injector_key is None:
         return False, f"{family.label} donor is configured, but its family-specific injector is not implemented yet."
+    if family.requires_new_3ds:
+        return True, (
+            f"{family.label} donor is configured. Donor preparation will resolve its public seed metadata; "
+            "generated titles require a New Nintendo 3DS."
+        )
     return True, f"{family.label} donor assets are configured."
