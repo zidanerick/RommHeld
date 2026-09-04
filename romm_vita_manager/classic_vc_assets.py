@@ -16,7 +16,7 @@ class ClassicVcRuntimePaths:
     exheader: Path
     code: Path
     logo: Path | None
-    donor_banner: Path | None
+    donor_banner: Path
     romfs_template: Path
     rom_path: str
 
@@ -28,7 +28,7 @@ class ClassicVcRuntimePaths:
             logo=self.logo.read_bytes() if self.logo is not None else b"",
             romfs_template=self.romfs_template.read_bytes(),
             rom_path=self.rom_path,
-            donor_banner=self.donor_banner.read_bytes() if self.donor_banner is not None else b"",
+            donor_banner=self.donor_banner.read_bytes(),
         )
 
 
@@ -69,7 +69,10 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
         return None
     if logo is not None and not logo.is_file():
         return None
-    if donor_banner is not None and not donor_banner.is_file():
+    # Caches created by the first GB/GBC implementation did not retain the
+    # donor's animated banner. Treat them as stale so the setup card asks for
+    # the donor once more instead of silently producing the generic flat banner.
+    if donor_banner is None or not donor_banner.is_file():
         return None
     return ClassicVcRuntimePaths(
         family=family,
@@ -119,16 +122,15 @@ def extract_and_cache_classic_runtime(
     updated = configure_donor(updated, family, donor_cia)
     runtime = extract_classic_vc_runtime(donor_cia, boot9, family)
 
+    if not getattr(runtime, "donor_banner", b""):
+        raise RuntimeError("Classic VC donor did not provide an animated HOME Menu banner.")
+
     cache = runtime_cache_dir(family)
     exheader = _write(cache / "exheader.bin", runtime.exheader)
     code = _write(cache / "code.bin", runtime.code)
     romfs = _write(cache / "romfs_template.bin", runtime.romfs_template)
     logo = _write(cache / "logo.bin", runtime.logo) if runtime.logo else None
-    donor_banner = (
-        _write(cache / "donor_banner.bin", runtime.donor_banner)
-        if getattr(runtime, "donor_banner", b"")
-        else None
-    )
+    donor_banner = _write(cache / "donor_banner.bin", runtime.donor_banner)
 
     root = dict(updated.get("classic_vc", {})) if isinstance(updated.get("classic_vc", {}), dict) else {}
     root[family] = {
@@ -136,7 +138,7 @@ def extract_and_cache_classic_runtime(
         "code_path": str(code),
         "romfs_template_path": str(romfs),
         "logo_path": str(logo) if logo is not None else "",
-        "donor_banner_path": str(donor_banner) if donor_banner is not None else "",
+        "donor_banner_path": str(donor_banner),
         "rom_path": runtime.rom_path,
     }
     updated["classic_vc"] = root
