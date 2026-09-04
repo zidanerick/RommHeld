@@ -62,6 +62,41 @@ def save_gba_vc_asset_paths(
     return updated
 
 
+def _forget_gba_donor_sources(config: dict) -> dict:
+    """Drop donor/boot9 source paths once reusable cache files exist.
+
+    The extracted boot logo and banner are sufficient for subsequent GBA
+    packaging. Keeping source paths after a successful one-time preparation
+    only makes the deployment UI look as if the original CIA/boot9 are still
+    required.
+    """
+    updated = dict(config)
+    vc = (
+        dict(updated.get("three_ds_vc", {}))
+        if isinstance(updated.get("three_ds_vc", {}), dict)
+        else {}
+    )
+    vc.pop("boot9_path", None)
+    vc.pop("boot9_variant", None)
+    donors = dict(vc.get("donors", {})) if isinstance(vc.get("donors", {}), dict) else {}
+    gba = dict(donors.get("gba", {})) if isinstance(donors.get("gba", {}), dict) else {}
+    gba.pop("cia_path", None)
+    if gba:
+        donors["gba"] = gba
+    else:
+        donors.pop("gba", None)
+    if donors:
+        vc["donors"] = donors
+    else:
+        vc.pop("donors", None)
+    if vc:
+        updated["three_ds_vc"] = vc
+    else:
+        updated.pop("three_ds_vc", None)
+    save_config(updated)
+    return updated
+
+
 def _write_cached_asset(destination: Path, data: bytes) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_suffix(destination.suffix + ".tmp")
@@ -90,9 +125,9 @@ def extract_and_cache_gba_donor_assets(
 ) -> tuple[dict, Path, Path]:
     """Validate a GBA VC donor and cache the boot logo + animated banner.
 
-    The caller supplies the donor CIA and boot9 dump. RommHeld records both in
-    the shared VC donor configuration and caches only the two assets needed by
-    the GBA injector; it never modifies the donor itself.
+    The donor CIA and boot9 dump are one-time inputs. After successful
+    extraction RommHeld retains only the cached assets and donor metadata; the
+    original source paths are deliberately forgotten.
     """
     donor_cia = donor_cia.expanduser()
     boot9 = boot9.expanduser()
@@ -110,4 +145,5 @@ def extract_and_cache_gba_donor_assets(
         boot_logo=logo,
         donor_banner=banner,
     )
+    updated = _forget_gba_donor_sources(updated)
     return updated, logo, banner
