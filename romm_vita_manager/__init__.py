@@ -1,18 +1,21 @@
 """RomM Vita Manager package."""
 
 # VC modules are imported from several UI paths with ``from ... import``.
-# Install corrections before those callers bind their local symbols so every
-# deployment path sees the same validated implementation.
+# Install family extensions/corrections before those callers bind their local
+# symbols so every deployment path sees the same validated implementation.
+from .nes_vc import install as _install_nes_vc
 from .classic_vc_title_fix import install as _install_classic_vc_title_fix
 from .classic_vc_hardware_fix import install as _install_classic_vc_hardware_fix
 from .classic_vc_presentation_fix import install as _install_classic_vc_presentation_fix
 from .gba_vc_presentation_compat import install as _install_gba_vc_presentation_compat
 
+_install_nes_vc()
 _install_classic_vc_title_fix()
 _install_classic_vc_hardware_fix()
 _install_classic_vc_presentation_fix()
 _install_gba_vc_presentation_compat()
 
+del _install_nes_vc
 del _install_classic_vc_title_fix
 del _install_classic_vc_hardware_fix
 del _install_classic_vc_presentation_fix
