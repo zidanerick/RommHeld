@@ -78,7 +78,7 @@ RETROARCH_PLATFORM_SLUGS = frozenset(
 # Every slug listed here has a concrete family-specific package builder and
 # PC-side structural validation. Hardware validation status is tracked
 # separately; exposure never means another family is routed through GBA code.
-VC_IMPLEMENTED_PLATFORM_SLUGS = frozenset({"gba", "gb", "gbc", "nes"})
+VC_IMPLEMENTED_PLATFORM_SLUGS = frozenset({"gba", "gb", "gbc", "nes", "gamegear"})
 NATIVE_PLATFORM_SLUGS = frozenset({"gba"})
 
 
