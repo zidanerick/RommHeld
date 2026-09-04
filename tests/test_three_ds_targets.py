@@ -10,15 +10,20 @@ def test_gba_exposes_native_retroarch_and_vc_targets():
     assert keys == ["native_gba", "retroarch", "vc_cia"]
 
 
-def test_gb_and_gbc_expose_retroarch_and_vc_targets():
-    for slug in ("gb", "gbc"):
+def test_gb_gbc_and_nes_expose_retroarch_and_vc_targets():
+    for slug in ("gb", "gbc", "nes"):
         keys = [target.key for target in available_targets(slug)]
         assert keys == ["retroarch", "vc_cia"]
 
 
-def test_other_research_vc_platforms_do_not_claim_unimplemented_injectors():
-    for slug in ("nes", "snes", "gamegear"):
+def test_unfinished_vc_platforms_remain_hidden():
+    for slug in ("snes", "gamegear"):
         assert "vc_cia" not in [target.key for target in available_targets(slug)]
+
+
+def test_famicom_and_fds_remain_retroarch_only():
+    for slug in ("famicom", "fds"):
+        assert [target.key for target in available_targets(slug)] == ["retroarch"]
 
 
 def test_3ds_exposes_existing_cia_target():
@@ -46,6 +51,10 @@ def test_default_destinations_are_stable_and_explicit():
     assert (
         default_destination("vc_cia", "gbc", "Oracle of Seasons.gbc")
         == "/cias/Oracle of Seasons.cia"
+    )
+    assert (
+        default_destination("vc_cia", "nes", "Renegade.nes")
+        == "/cias/Renegade.cia"
     )
     assert (
         default_destination("native_3ds_cia", "3ds", "Metroid.3ds")
