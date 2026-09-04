@@ -105,7 +105,9 @@ def test_native_builder_requires_donor_icon_with_official_banner():
             title_name="Metroid Fusion",
         )
     except ValueError as exc:
-        assert "donor smdh icon" in str(exc).lower()
+        message = str(exc).lower()
+        assert "presentation cache" in message
+        assert "re-prepare" in message
     else:
         raise AssertionError("Expected official-style GBA build without donor icon to be rejected")
 
