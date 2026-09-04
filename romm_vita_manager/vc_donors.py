@@ -26,8 +26,8 @@ class VcDonorFamily:
 
 
 VC_DONOR_FAMILIES: tuple[VcDonorFamily, ...] = (
-    VcDonorFamily("gb", "Game Boy", ("gb",), injector_key=None),
-    VcDonorFamily("gbc", "Game Boy Color", ("gbc",), injector_key=None),
+    VcDonorFamily("gb", "Game Boy", ("gb",), injector_key="classic_vc"),
+    VcDonorFamily("gbc", "Game Boy Color", ("gbc",), injector_key="classic_vc"),
     VcDonorFamily("gba", "Game Boy Advance", ("gba",), requires_boot_logo=True, injector_key="agbcia"),
     VcDonorFamily("nes", "NES", ("nes", "famicom", "fds"), injector_key=None),
     VcDonorFamily("snes", "Super Nintendo", ("snes",), requires_new_3ds=True, injector_key=None),
@@ -197,10 +197,44 @@ def configure_boot9(config: dict, boot9_path: str | Path) -> dict:
     return updated
 
 
+def _cached_classic_runtime_ready(config: dict, family_key: str) -> bool:
+    root = config.get("classic_vc", {})
+    entry = root.get(family_key, {}) if isinstance(root, dict) else {}
+    if not isinstance(entry, dict):
+        return False
+    required = ("exheader_path", "code_path", "romfs_template_path")
+    if not str(entry.get("rom_path", "")).strip():
+        return False
+    return all(
+        Path(str(entry.get(key, ""))).expanduser().is_file()
+        for key in required
+        if str(entry.get(key, "")).strip()
+    ) and all(str(entry.get(key, "")).strip() for key in required)
+
+
+def _cached_gba_runtime_ready(config: dict) -> bool:
+    settings = config.get("gba_vc", {})
+    if not isinstance(settings, dict):
+        return False
+    return all(
+        raw and Path(raw).expanduser().is_file()
+        for raw in (
+            str(settings.get("boot_logo_path", "")).strip(),
+            str(settings.get("donor_banner_path", "")).strip(),
+        )
+    )
+
+
 def donor_readiness(config: dict, platform_slug: str) -> tuple[bool, str]:
     family = donor_family_for_platform(platform_slug)
     if family is None:
         return False, "Nintendo did not provide a supported 3DS Virtual Console family for this platform."
+
+    if family.key in {"gb", "gbc"} and _cached_classic_runtime_ready(config, family.key):
+        return True, f"{family.label} Virtual Console runtime is cached and ready."
+    if family.key == "gba" and _cached_gba_runtime_ready(config):
+        return True, "Game Boy Advance donor assets are cached and ready."
+
     donor = configured_donor_path(config, family.key)
     if donor is None:
         return False, f"Configure a {family.label} Virtual Console donor CIA first."
