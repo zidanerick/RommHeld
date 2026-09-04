@@ -8,10 +8,9 @@ from .classic_vc_hardware_fix import validate_retail_romfs
 from .config import package_cache_dir, save_config
 from .vc_donors import configure_boot9, configure_donor
 
-_SUPPORTED = {"gb", "gbc"}
-# Version 4 adds the donor SMDH visual frame used by the official-style icon
-# presentation. Version 3 caches remain structurally safe, but are deliberately
-# considered stale so the app never silently falls back to generic icon art.
+_SUPPORTED = {"gb", "gbc", "nes"}
+# Version 4 adds the donor SMDH visual presentation used by official-style
+# icons. The same cache contract now applies to the NES donor runtime.
 _CACHE_VERSION = 4
 
 
@@ -89,8 +88,6 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
     try:
         validate_retail_romfs(romfs.read_bytes())
     except (OSError, ValueError):
-        # A cache is an optimization, never a reason to feed a malformed
-        # runtime into a hardware build. Treat validation failure as stale.
         return None
     return ClassicVcRuntimePaths(
         family=family,
