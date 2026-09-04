@@ -586,7 +586,7 @@ class WorkspaceDashboardWindow(QMainWindow):
         config = self._reload_config()
         if game is not None and target_key == "vc_cia":
             platform = (game.platform_slug or game.platform).strip().lower()
-            if platform in {"gb", "gbc", "nes"}:
+            if platform in {"gb", "gbc", "nes", "gamegear", "snes"}:
                 ClassicVcDeployDialog(config, game, self).exec()
                 return
             if platform == "gba":
