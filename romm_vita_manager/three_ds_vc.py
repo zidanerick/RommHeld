@@ -58,8 +58,8 @@ NES_PROFILE = VirtualConsoleProfile(
     key="nes",
     label="NES Virtual Console",
     # The native TNES builder currently accepts cartridge iNES/NES2 ROMs.
-    # Famicom/FDS remain available through RetroArch until disk-system payload
-    # generation is independently implemented.
+    # Famicom/FDS remain available through RetroArch until their source
+    # container conventions are independently implemented.
     platform_slugs=("nes",),
     source_extensions=(".nes",),
     output_extension=".cia",
@@ -87,6 +87,7 @@ GAME_GEAR_PROFILE = VirtualConsoleProfile(
     output_extension=".cia",
     runtime="nintendo-gamegear-vc",
     requires_boot9=True,
+    implemented=True,
 )
 
 
