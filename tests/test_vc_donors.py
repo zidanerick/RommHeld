@@ -24,15 +24,18 @@ def _stub_boot9_validation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(vc_donors, "validate_boot9", lambda path: "full")
 
 
-def test_donor_family_mapping_covers_nintendo_3ds_vc_platforms():
+def test_donor_family_mapping_covers_implemented_nintendo_3ds_vc_platforms():
     assert vc_donors.donor_family_for_platform("gb").key == "gb"
     assert vc_donors.donor_family_for_platform("gbc").key == "gbc"
     assert vc_donors.donor_family_for_platform("gba").key == "gba"
     assert vc_donors.donor_family_for_platform("nes").key == "nes"
-    assert vc_donors.donor_family_for_platform("famicom").key == "nes"
-    assert vc_donors.donor_family_for_platform("fds").key == "nes"
     assert vc_donors.donor_family_for_platform("snes").key == "snes"
     assert vc_donors.donor_family_for_platform("gamegear").key == "gamegear"
+    # The native NES builder currently accepts cartridge iNES/NES2 payloads;
+    # Famicom/FDS remain explicit RetroArch routes until those source formats
+    # are independently implemented.
+    assert vc_donors.donor_family_for_platform("famicom") is None
+    assert vc_donors.donor_family_for_platform("fds") is None
     assert vc_donors.donor_family_for_platform("genesis") is None
 
 
@@ -42,10 +45,8 @@ def test_snes_donor_is_new_3ds_only():
 
 def test_implemented_family_injectors_are_explicit():
     assert vc_donors.donor_family("gba").injector_key == "agbcia"
-    assert vc_donors.donor_family("gb").injector_key == "classic_vc"
-    assert vc_donors.donor_family("gbc").injector_key == "classic_vc"
-    for key in ("nes", "snes", "gamegear"):
-        assert vc_donors.donor_family(key).injector_key is None
+    for key in ("gb", "gbc", "nes", "gamegear", "snes"):
+        assert vc_donors.donor_family(key).injector_key == "classic_vc"
 
 
 def test_configure_and_read_donor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
@@ -93,7 +94,9 @@ def test_cached_gbc_runtime_is_ready_without_source_paths(tmp_path: Path):
     exheader = tmp_path / "exheader.bin"
     code = tmp_path / "code.bin"
     romfs = tmp_path / "romfs.bin"
-    for path in (exheader, code, romfs):
+    banner = tmp_path / "banner.bin"
+    icon = tmp_path / "icon.smdh"
+    for path in (exheader, code, romfs, banner, icon):
         path.write_bytes(b"cached")
     config = {
         "classic_vc": {
@@ -101,6 +104,8 @@ def test_cached_gbc_runtime_is_ready_without_source_paths(tmp_path: Path):
                 "exheader_path": str(exheader),
                 "code_path": str(code),
                 "romfs_template_path": str(romfs),
+                "donor_banner_path": str(banner),
+                "donor_icon_path": str(icon),
                 "rom_path": "/rom/game.gbc",
             }
         }
@@ -128,7 +133,10 @@ def test_gba_readiness_requires_donor_and_boot9(tmp_path: Path, monkeypatch: pyt
     assert ready
 
 
-def test_snes_readiness_calls_out_seed_aware_requirement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_snes_readiness_requires_new_3ds_and_defers_seed_lookup_to_preparation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
     monkeypatch.setattr(vc_donors, "save_config", lambda config: None)
     _stub_boot9_validation(monkeypatch)
     donor = tmp_path / "snes.cia"
@@ -138,5 +146,6 @@ def test_snes_readiness_calls_out_seed_aware_requirement(tmp_path: Path, monkeyp
     config = vc_donors.configure_donor({}, "snes", donor)
     config = vc_donors.configure_boot9(config, boot9)
     ready, message = vc_donors.donor_readiness(config, "snes")
-    assert not ready
-    assert "seed-aware" in message
+    assert ready
+    assert "public seed" in message
+    assert "New Nintendo 3DS" in message
