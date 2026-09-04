@@ -94,8 +94,25 @@ def test_native_builder_uses_real_publisher_when_supplied(monkeypatch):
     assert captured["publisher"] == "Nintendo"
 
 
-def test_native_builder_supplies_title_badge_for_donor_banner(monkeypatch):
+def test_native_builder_requires_donor_icon_with_official_banner():
+    try:
+        build_native_gba_cia(
+            b"GBA TEST ROM",
+            b"image",
+            boot_logo=b"real-logo",
+            donor_banner=b"donor-banner",
+            title_id=native_title_id_for_romm_id(42),
+            title_name="Metroid Fusion",
+        )
+    except ValueError as exc:
+        assert "donor smdh icon" in str(exc).lower()
+    else:
+        raise AssertionError("Expected official-style GBA build without donor icon to be rejected")
+
+
+def test_native_builder_uses_donor_derived_official_presentation(monkeypatch):
     captured = {}
+    calls = {}
 
     class Request:
         def __init__(self, **kwargs):
@@ -106,18 +123,47 @@ def test_native_builder_supplies_title_badge_for_donor_banner(monkeypatch):
         "_require_agbcia",
         lambda: (Request, lambda request: SimpleNamespace(cia=b"cia")),
     )
-    monkeypatch.setattr(gba_vc, "prepare_vc_icon_artwork", lambda artwork: b"icon")
-    monkeypatch.setattr(gba_vc, "prepare_vc_title_badge", lambda title: b"title-badge")
+    monkeypatch.setattr(
+        gba_vc,
+        "prepare_official_vc_icon_artwork",
+        lambda donor_icon, artwork: calls.setdefault("icon", (donor_icon, artwork)) and b"retail-icon",
+    )
+    monkeypatch.setattr(
+        gba_vc,
+        "prepare_official_vc_front_artwork",
+        lambda donor_banner, artwork, family: calls.setdefault(
+            "front", (donor_banner, artwork, family)
+        )
+        and b"retail-front",
+    )
 
-    build_native_gba_cia(
+    def badge(donor_banner, title, family, *, release_year=None):
+        calls["badge"] = (donor_banner, title, family, release_year)
+        return b"retail-badge"
+
+    monkeypatch.setattr(gba_vc, "prepare_official_vc_badge", badge)
+
+    result = build_native_gba_cia(
         b"GBA TEST ROM",
         b"image",
         boot_logo=b"real-logo",
         donor_banner=b"donor-banner",
+        donor_icon=b"donor-smdh",
+        release_year=2004,
         title_id=native_title_id_for_romm_id(42),
         title_name="Metroid Fusion",
+        publisher="Nintendo",
     )
-    assert captured["bottom_badge_image"] == b"title-badge"
+
+    assert result == b"cia"
+    assert calls["icon"] == (b"donor-smdh", b"image")
+    assert calls["front"] == (b"donor-banner", b"image", "gba")
+    assert calls["badge"] == (b"donor-banner", "Metroid Fusion", "gba", 2004)
+    assert captured["icon_image"] == b"retail-icon"
+    assert captured["banner_image"] == b"retail-front"
+    assert captured["donor_banner"] == b"donor-banner"
+    assert captured["bottom_badge_image"] == b"retail-badge"
+    assert captured["publisher"] == "Nintendo"
 
 
 def test_prepare_vc_icon_artwork_preserves_portrait_cover_inside_square():
