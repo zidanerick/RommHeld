@@ -12,14 +12,17 @@ from romm_vita_manager.vc_art_layout import (
 
 def test_contain_layout_keeps_artwork_inside_nintendo_label_safe_area() -> None:
     artwork = Image.new("RGB", (80, 140), (245, 245, 245))
-    ImageDraw.Draw(artwork).rectangle((8, 10, 71, 129), fill=(20, 90, 210))
+    draw = ImageDraw.Draw(artwork)
+    draw.rectangle((8, 10, 71, 129), fill=(20, 90, 210))
+    draw.rectangle((24, 40, 55, 99), fill=(210, 45, 35))
 
     result = prepare_artwork_for_viewport(artwork, (70, 74), GBC_LABEL_LAYOUT)
 
     assert result.size == (70, 74)
-    # The three-pixel family inset remains available around the fitted label.
-    assert result.getpixel((0, 0)) == result.getpixel((2, 2))
-    assert result.getpixel((35, 37)) != result.getpixel((0, 0))
+    # The family inset/background remains around the contained art while its
+    # central subject remains visible and centred inside Nintendo's viewport.
+    assert result.getpixel((0, 0))[:3] == (20, 90, 210)
+    assert result.getpixel((35, 37))[:3] == (210, 45, 35)
 
 
 def test_gba_cover_layout_fills_square_without_portrait_letterboxing() -> None:
