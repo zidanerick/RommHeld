@@ -9,10 +9,9 @@ from PIL import Image, ImageOps
 class ArtworkLayout:
     """How source artwork is fitted into a Nintendo VC presentation viewport.
 
-    ``platform_chrome`` removes the family branding that belongs to a retail
-    box scan but not to Nintendo's small VC label texture.  The crop is only
-    applied to portrait artwork, which is the normal shape of box-front scans;
-    square/title-screen artwork is left untouched.
+    ``platform_chrome`` removes family branding that belongs to a retail box
+    scan but not to Nintendo's small VC label texture. The crop is only applied
+    to clearly portrait artwork; square/title-screen artwork is left untouched.
     """
 
     mode: str
@@ -22,11 +21,9 @@ class ArtworkLayout:
     platform_chrome: str | None = None
 
 
-# Nintendo's retail donor textures do not display a complete retail box front.
-# They use a compact game-art label inside the family-specific frame.  RomM
-# commonly supplies box-front artwork, so remove the platform-only chrome and
-# then crop to fill the donor's measured label viewport rather than shrinking
-# the complete portrait cover into it.
+# These layouts describe only the game-specific artwork viewport. Nintendo's
+# actual cartridge/console/VC chrome remains in the locally extracted donor
+# banner and is never bundled in RommHeld.
 GBA_BANNER_LAYOUT = ArtworkLayout(
     "cover",
     padding=3,
@@ -45,7 +42,41 @@ GBC_LABEL_LAYOUT = ArtworkLayout(
     centering=(0.54, 0.48),
     platform_chrome="gbc_left",
 )
+
+# The supplied retail NES and SNES donors use a complete square game-art/title
+# texture inside their animated scene rather than an inner cartridge-label
+# rectangle. A small inset prevents resampling bleed against the scene edge.
+NES_BANNER_LAYOUT = ArtworkLayout("cover", padding=2, centering=(0.5, 0.48))
+SNES_BANNER_LAYOUT = ArtworkLayout("cover", padding=2, centering=(0.5, 0.48))
+
+# The retail Game Gear donor's game-specific texture is COMMON2. COMMON3 is the
+# Game Gear hardware shell/atlas and must remain untouched. Both the banner art
+# and SMDH are full-art rather than using the four-pixel frame shared by the
+# Nintendo-published GB/GBC/GBA/NES/SNES donors supplied for development.
+GAME_GEAR_BANNER_LAYOUT = ArtworkLayout("cover", padding=2, centering=(0.5, 0.48))
+GAME_GEAR_ICON_LAYOUT = ArtworkLayout("cover", padding=1, centering=(0.5, 0.45))
+
+# Shared framed SMDH interior for Nintendo families whose official donor icon
+# carries reusable outer chrome.
 ICON_LAYOUT = ArtworkLayout("cover", padding=1, centering=(0.5, 0.45))
+
+
+_LAYOUTS_BY_FAMILY = {
+    "gb": GB_LABEL_LAYOUT,
+    "gbc": GBC_LABEL_LAYOUT,
+    "gba": GBA_BANNER_LAYOUT,
+    "nes": NES_BANNER_LAYOUT,
+    "snes": SNES_BANNER_LAYOUT,
+    "gamegear": GAME_GEAR_BANNER_LAYOUT,
+}
+
+
+def banner_layout_for_family(family: str) -> ArtworkLayout:
+    key = family.strip().lower()
+    try:
+        return _LAYOUTS_BY_FAMILY[key]
+    except KeyError:
+        raise ValueError(f"No Virtual Console artwork layout for {family!r}.") from None
 
 
 def _edge_background(image: Image.Image) -> tuple[int, int, int]:
@@ -67,13 +98,7 @@ def _uniform_border_bbox(
     threshold: int = 22,
     max_trim_ratio: float = 0.18,
 ) -> tuple[int, int, int, int]:
-    """Return a conservative crop for flat scanner/box-art margins.
-
-    The reference colour comes from the four corners. Only pixels that differ
-    materially from that colour are considered content, and each edge is
-    capped to a modest fraction of the source size so a legitimate background
-    cannot accidentally be stripped away.
-    """
+    """Return a conservative crop for flat scanner/box-art margins."""
     source = image.convert("RGB")
     width, height = source.size
     if width < 8 or height < 8:
@@ -87,8 +112,6 @@ def _uniform_border_bbox(
     )
     reference = tuple(sum(pixel[channel] for pixel in corners) // 4 for channel in range(3))
 
-    # Scan a bounded working copy so large RomM cover images do not make banner
-    # generation unnecessarily expensive.
     scale = min(1.0, 320 / max(width, height))
     if scale < 1.0:
         work = source.resize(
@@ -133,18 +156,7 @@ def _uniform_border_bbox(
 
 
 def _strip_platform_chrome(image: Image.Image, kind: str | None) -> Image.Image:
-    """Remove box-only platform branding before adapting art to a VC label.
-
-    The supplied official donors show that Nintendo's VC textures contain game
-    artwork, not the full retail box-front chrome.  Typical RomM box scans use
-    a horizontal ``GAME BOY ADVANCE`` header or a vertical GB/GBC family strip.
-    Removing those areas before the final cover crop prevents the platform logo
-    from consuming a large part of the tiny 128x128/70x74 VC viewport.
-
-    This is deliberately conservative: only clearly portrait source images are
-    altered.  Square artwork, title screens and already-prepared labels pass
-    through unchanged.
-    """
+    """Remove box-only platform branding before adapting art to a VC label."""
     if not kind:
         return image
     source = image.convert("RGBA")
@@ -153,18 +165,12 @@ def _strip_platform_chrome(image: Image.Image, kind: str | None) -> Image.Image:
         return source
 
     if kind == "gba_top":
-        # Retail GBA covers reserve roughly the top eighth for the platform
-        # masthead.  The remaining art is then cropped to Nintendo's square VC
-        # label, which also naturally removes most bottom legal-copy space.
         top = min(height - 1, max(1, round(height * 0.13)))
         return source.crop((0, top, width, height))
     if kind == "gb_left":
-        # Original Game Boy boxes commonly carry a narrow vertical GAME BOY
-        # family strip on the left edge.
         left = min(width - 1, max(1, round(width * 0.12)))
         return source.crop((left, 0, width, height))
     if kind == "gbc_left":
-        # Game Boy Color boxes use a slightly wider black GAME BOY COLOR strip.
         left = min(width - 1, max(1, round(width * 0.15)))
         return source.crop((left, 0, width, height))
     raise ValueError(f"Unsupported VC platform-chrome crop: {kind}")
