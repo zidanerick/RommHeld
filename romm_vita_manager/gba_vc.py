@@ -6,6 +6,8 @@ import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from PIL import Image
+
 if TYPE_CHECKING:
     from agbcia.banner.image import ImageSource
 
@@ -227,6 +229,42 @@ def prepare_gba_rom(rom: bytes) -> bytes:
         return archive.read(selected)
 
 
+def prepare_vc_icon_artwork(artwork: bytes, *, canvas_size: int = 256) -> bytes:
+    """Fit full box artwork into a square HOME Menu icon without destructive cropping."""
+    image = Image.open(io.BytesIO(artwork)).convert("RGB")
+    if image.width < 1 or image.height < 1:
+        raise ValueError("Artwork has invalid dimensions.")
+
+    sample = image.resize((16, 16), Image.Resampling.BILINEAR)
+    edge_pixels: list[tuple[int, int, int]] = []
+    for x in range(sample.width):
+        edge_pixels.append(sample.getpixel((x, 0)))
+        edge_pixels.append(sample.getpixel((x, sample.height - 1)))
+    for y in range(1, sample.height - 1):
+        edge_pixels.append(sample.getpixel((0, y)))
+        edge_pixels.append(sample.getpixel((sample.width - 1, y)))
+    count = max(1, len(edge_pixels))
+    background = tuple(
+        sum(pixel[channel] for pixel in edge_pixels) // count for channel in range(3)
+    )
+
+    margin = max(10, canvas_size // 16)
+    available = canvas_size - margin * 2
+    scale = min(available / image.width, available / image.height)
+    fitted = image.resize(
+        (max(1, round(image.width * scale)), max(1, round(image.height * scale))),
+        Image.Resampling.LANCZOS,
+    )
+    canvas = Image.new("RGB", (canvas_size, canvas_size), background)
+    canvas.paste(
+        fitted,
+        ((canvas_size - fitted.width) // 2, (canvas_size - fitted.height) // 2),
+    )
+    output = io.BytesIO()
+    canvas.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
 def build_native_gba_cia(
     rom: bytes,
     artwork: "ImageSource",
@@ -253,12 +291,13 @@ def build_native_gba_cia(
 
     InjectionRequest, inject = _require_agbcia()
     rom = prepare_gba_rom(rom)
+    icon_image = prepare_vc_icon_artwork(artwork) if isinstance(artwork, bytes) else artwork
     request = InjectionRequest(
         mode="native",
         rom=rom,
         title_id=title_id,
         title_name=title_name[:128],
-        icon_image=artwork,
+        icon_image=icon_image,
         banner_image=artwork,
         long_title=(long_title or title_name)[:128],
         publisher=publisher[:128],
