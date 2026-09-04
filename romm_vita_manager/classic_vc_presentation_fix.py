@@ -87,9 +87,9 @@ def install() -> None:
         metadata = normalize_vc_metadata(title_name, long_title=long_title, publisher=publisher)
         payload_builder = getattr(vc, "prepare_runtime_payload", None)
         if callable(payload_builder):
-            rom = payload_builder(rom, family, runtime.rom_path)
+            payload = payload_builder(rom, family, runtime.rom_path)
         else:
-            rom = vc.prepare_classic_rom(rom, family)
+            payload = vc.prepare_classic_rom(rom, family)
         title_id = vc.classic_title_id_for_romm_id(romm_id, family)
         product_code = vc._product_code(family, romm_id)
         exheader = vc._patch_exheader(runtime.exheader, title_id, product_code)
@@ -98,9 +98,7 @@ def install() -> None:
         files = vc.parse_romfs_files(runtime.romfs_template)
         if runtime.rom_path not in files:
             raise ValueError("Cached VC runtime is missing its ROM placeholder.")
-        files[runtime.rom_path] = rom
-        romfs = vc.build_romfs(files)
-        validate_retail_romfs(romfs)
+        files[runtime.rom_path] = payload
 
         (
             banner_assembly,
@@ -124,6 +122,18 @@ def install() -> None:
         icon_postprocessor = getattr(vc, "postprocess_vc_icon", None)
         if callable(icon_postprocessor):
             icon = icon_postprocessor(icon, family)
+
+        # SNES (and any future runtime with title-specific RomFS metadata) can
+        # update auxiliary files after the final SMDH exists but before the
+        # IVFC tree is built. GB/GBC/NES/Game Gear simply leave the dictionary
+        # unchanged here.
+        auxiliary_builder = getattr(vc, "prepare_runtime_aux_files", None)
+        if callable(auxiliary_builder):
+            files = auxiliary_builder(files, family, product_code, icon)
+        if runtime.rom_path not in files:
+            raise ValueError("VC runtime preparation removed its ROM payload path.")
+        romfs = vc.build_romfs(files)
+        validate_retail_romfs(romfs)
 
         front_artwork = prepare_official_vc_front_artwork(runtime.donor_banner, artwork, family)
         badge = prepare_official_vc_badge(
