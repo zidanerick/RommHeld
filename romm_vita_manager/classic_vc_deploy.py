@@ -34,7 +34,20 @@ from .ui_components import AccentButton, SurfaceCard
 from .vc_donors import configured_boot9_path, configured_donor_path
 
 
-_FAMILY_LABELS = {"gb": "Game Boy", "gbc": "Game Boy Color"}
+_FAMILY_LABELS = {
+    "gb": "Game Boy",
+    "gbc": "Game Boy Color",
+    "nes": "NES",
+    "gamegear": "Game Gear",
+    "snes": "Super Nintendo",
+}
+_FAMILY_SUFFIXES = {
+    "gb": ".gb",
+    "gbc": ".gbc",
+    "nes": ".nes",
+    "gamegear": ".gg",
+    "snes": ".sfc",
+}
 
 
 class ClassicHShopLookupWorker(QThread):
@@ -113,7 +126,7 @@ class ClassicVcDeployWorker(QThread):
             if not url or not token:
                 raise ValueError("RomM Server is not configured.")
 
-            suffix = ".gb" if self.family == "gb" else ".gbc"
+            suffix = _FAMILY_SUFFIXES[self.family]
             handle = tempfile.NamedTemporaryFile(prefix=f"rommheld-{self.family}-", suffix=suffix, delete=False)
             handle.close()
             self.temp_rom = Path(handle.name)
@@ -264,14 +277,14 @@ class ClassicVcDeployDialog(QDialog):
         self.runtime_status.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
         if runtime is not None:
             self.runtime_status.setText(
-                "Ready — the donor emulator runtime, animated banner and official HOME Menu icon frame are cached locally. "
+                "Ready — the donor emulator runtime, animated banner and official HOME Menu icon presentation are cached locally. "
                 "The original donor CIA and boot9 dump are not required for normal deployments."
             )
             runtime_card.content.addWidget(self.runtime_status)
         else:
             note = QLabel(
                 f"One-time setup: choose a genuine {family_label} Virtual Console donor CIA and your own boot9 dump. "
-                "RommHeld caches the emulator runtime and retail presentation while removing the donor ROM and title-specific patch files."
+                "RommHeld caches the emulator runtime and retail presentation while removing the donor game payload from the reusable runtime."
             )
             note.setWordWrap(True)
             note.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
@@ -398,9 +411,10 @@ class ClassicVcDeployDialog(QDialog):
         if release.region:
             details.append(release.region)
         if release.title_id:
-            details.append(f"Title ID {release.title_id}")
+            details.append(release.title_id)
         self.official_status.setText(
-            "Official release found: " + " • ".join(part for part in details if part) + ". Prefer the official release when you already have it available."
+            "Official release found: " + " • ".join(item for item in details if item) +
+            ". Prefer the official release when you already have lawful local access to it; donor-backed injection remains available as a fallback."
         )
         self.open_official_button.setEnabled(True)
 
@@ -408,64 +422,76 @@ class ClassicVcDeployDialog(QDialog):
         if self.official_release is not None:
             webbrowser.open(self.official_release.url)
 
-    def _save_3ds_ip(self) -> None:
-        ip = self.three_ds_ip_edit.text().strip()
-        devices = dict(self.config.get("devices", {})) if isinstance(self.config.get("devices", {}), dict) else {}
-        three_ds = dict(devices.get("3ds", {})) if isinstance(devices.get("3ds", {}), dict) else {}
-        three_ds["ip"] = ip
-        devices["3ds"] = three_ds
-        self.config["devices"] = devices
-        save_config(self.config)
-
     def _install_method_changed(self) -> None:
-        self.three_ds_ip_edit.setEnabled(self.install_method.currentData() == "fbi")
+        fbi = self.install_method.currentData() == "fbi"
+        self.three_ds_ip_edit.setEnabled(fbi)
+        self.destination_edit.setEnabled(not fbi)
+
+    def _save_3ds_ip(self) -> None:
+        value = self.three_ds_ip_edit.text().strip()
+        if not value:
+            return
+        updated = dict(self.config)
+        devices = dict(updated.get("devices", {})) if isinstance(updated.get("devices", {}), dict) else {}
+        saved = dict(devices.get("3ds", {})) if isinstance(devices.get("3ds", {}), dict) else {}
+        saved["ip"] = value
+        devices["3ds"] = saved
+        updated["devices"] = devices
+        self.config = updated
+        save_config(updated)
 
     def _start(self) -> None:
+        if self.worker and self.worker.isRunning():
+            return
         if configured_classic_runtime(self.config, self.family) is None:
-            QMessageBox.warning(
-                self,
-                "VC runtime required",
-                f"Prepare the {_FAMILY_LABELS[self.family]} VC runtime/presentation cache first.",
-            )
+            self.status.setText("Prepare the donor Virtual Console runtime first.")
             return
         self.deploy.setEnabled(False)
-        self.cancel.setText("Cancel deployment")
+        self.progress.setValue(0)
+        self.status.setText("Preparing deployment…")
         worker = ClassicVcDeployWorker(
             self.config,
             self.game,
             self.family,
-            self.destination_edit.text(),
+            self.destination_edit.text().strip(),
             str(self.install_method.currentData()),
-            self.three_ds_ip_edit.text(),
-            self.display_title_edit.text(),
-            self.publisher_edit.text(),
+            self.three_ds_ip_edit.text().strip(),
+            self.display_title_edit.text().strip(),
+            self.publisher_edit.text().strip(),
         )
         worker.progress.connect(self.progress.setValue)
         worker.status_changed.connect(self.status.setText)
-        worker.failed.connect(self._failed)
         worker.completed.connect(self._completed)
-        worker.finished.connect(self._finished)
+        worker.failed.connect(self._failed)
+        worker.finished.connect(self._worker_finished)
         self.worker = worker
         worker.start()
 
+    def _completed(self, result: str, destination: str) -> None:
+        if result == "fbi":
+            self.status.setText("FBI finished receiving/installing the generated Virtual Console CIA.")
+        else:
+            self.status.setText(f"Uploaded to {destination}: {result}")
+
     def _failed(self, message: str) -> None:
         self.status.setText(message)
-        QMessageBox.critical(self, "Deployment failed", message)
+        QMessageBox.critical(self, "Virtual Console deployment failed", message)
 
-    def _completed(self, method: str, destination: str) -> None:
-        if method == "fbi":
-            self.status.setText("FBI reported that the CIA installation workflow finished.")
-        else:
-            self.status.setText(f"CIA uploaded to {destination}. Install it with FBI on the Nintendo 3DS.")
-
-    def _finished(self) -> None:
+    def _worker_finished(self) -> None:
         self.worker = None
         self.deploy.setEnabled(True)
-        self.cancel.setText("Close")
 
-    def reject(self) -> None:
-        if self.worker is not None and self.worker.isRunning():
+    def closeEvent(self, event) -> None:
+        if self.worker and self.worker.isRunning():
             self.worker.cancel()
-            self.status.setText("Cancelling…")
-            return
-        super().reject()
+            self.worker.wait(2000)
+            if self.worker.isRunning():
+                event.ignore()
+                return
+        if self.hshop_worker and self.hshop_worker.isRunning():
+            self.hshop_worker.requestInterruption()
+            self.hshop_worker.wait(2000)
+            if self.hshop_worker.isRunning():
+                event.ignore()
+                return
+        event.accept()
