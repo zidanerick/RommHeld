@@ -1,6 +1,8 @@
 import io
 import zipfile
+from types import SimpleNamespace
 
+import romm_vita_manager.gba_vc as gba_vc
 from romm_vita_manager.gba_vc import (
     build_native_gba_cia,
     native_title_id_for_romm_id,
@@ -33,6 +35,54 @@ def test_native_builder_rejects_blank_boot_logo_before_packaging():
         assert "boot logo" in str(exc).lower()
     else:
         raise AssertionError("Expected blank AGB_FIRM boot logo to be rejected")
+
+
+def test_native_builder_does_not_stamp_homebrew_publisher(monkeypatch):
+    captured = {}
+
+    class Request:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        gba_vc,
+        "_require_agbcia",
+        lambda: (Request, lambda request: SimpleNamespace(cia=b"cia")),
+    )
+
+    result = build_native_gba_cia(
+        b"GBA TEST ROM",
+        b"image",
+        boot_logo=b"real-logo",
+        title_id=native_title_id_for_romm_id(42),
+        title_name="Test Game",
+    )
+    assert result == b"cia"
+    assert captured["publisher"] == ""
+
+
+def test_native_builder_uses_real_publisher_when_supplied(monkeypatch):
+    captured = {}
+
+    class Request:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(
+        gba_vc,
+        "_require_agbcia",
+        lambda: (Request, lambda request: SimpleNamespace(cia=b"cia")),
+    )
+
+    build_native_gba_cia(
+        b"GBA TEST ROM",
+        b"image",
+        boot_logo=b"real-logo",
+        title_id=native_title_id_for_romm_id(42),
+        title_name="Test Game",
+        publisher="Nintendo",
+    )
+    assert captured["publisher"] == "Nintendo"
 
 
 def test_prepare_gba_rom_extracts_gba_from_zip():
