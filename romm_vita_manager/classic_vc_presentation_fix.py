@@ -22,19 +22,7 @@ _INSTALLED = False
 
 
 def install() -> None:
-    """Layer donor-derived retail presentation over the validated classic builder.
-
-    ``classic_vc_hardware_fix`` owns package/filesystem correctness. This layer
-    deliberately leaves that code intact and changes only presentation:
-
-    * cache the donor SMDH visual presentation in addition to its animated banner;
-    * retain each donor family's cartridge/console/banner scene;
-    * patch only the profile-declared game artwork and optional title badge;
-    * rebuild SMDH text/flags rather than copying title-specific donor metadata.
-
-    No donor binary is embedded in RommHeld. All retained material comes from
-    the user's locally prepared donor cache.
-    """
+    """Layer donor-derived retail presentation over the validated VC builder."""
     global _INSTALLED
     if _INSTALLED:
         return
@@ -61,7 +49,7 @@ def install() -> None:
         ncch = vc._primary_ncch_from_cia(donor)
         donor_icon = vc._extract_ncch_exefs_entry(ncch, keys, "icon")
         if not donor_icon:
-            raise ValueError("Classic VC donor did not provide a usable SMDH icon.")
+            raise ValueError("Virtual Console donor did not provide a usable SMDH icon.")
         validate_retail_romfs(base.romfs_template)
         return PresentedClassicVcRuntime(
             family=base.family,
@@ -90,15 +78,18 @@ def install() -> None:
         if family not in vc._CLASSIC_FAMILIES:
             raise ValueError(f"Unsupported classic VC family: {family}")
         if not runtime.donor_banner:
-            raise ValueError("Cached classic VC runtime is missing its animated donor banner.")
+            raise ValueError("Cached VC runtime is missing its animated donor banner.")
         if not runtime.donor_icon:
             raise ValueError(
-                "Cached classic VC runtime is missing its donor icon presentation. "
-                "Re-prepare this VC donor once."
+                "Cached VC runtime is missing its donor icon presentation. Re-prepare this VC donor once."
             )
 
         metadata = normalize_vc_metadata(title_name, long_title=long_title, publisher=publisher)
-        rom = vc.prepare_classic_rom(rom, family)
+        payload_builder = getattr(vc, "prepare_runtime_payload", None)
+        if callable(payload_builder):
+            rom = payload_builder(rom, family, runtime.rom_path)
+        else:
+            rom = vc.prepare_classic_rom(rom, family)
         title_id = vc.classic_title_id_for_romm_id(romm_id, family)
         product_code = vc._product_code(family, romm_id)
         exheader = vc._patch_exheader(runtime.exheader, title_id, product_code)
@@ -106,7 +97,7 @@ def install() -> None:
         validate_retail_romfs(runtime.romfs_template)
         files = vc.parse_romfs_files(runtime.romfs_template)
         if runtime.rom_path not in files:
-            raise ValueError("Cached classic VC runtime is missing its ROM placeholder.")
+            raise ValueError("Cached VC runtime is missing its ROM placeholder.")
         files[runtime.rom_path] = rom
         romfs = vc.build_romfs(files)
         validate_retail_romfs(romfs)
@@ -122,11 +113,7 @@ def install() -> None:
             tmd_format,
         ) = vc._require_classic_vc_tools()
 
-        icon_source = prepare_official_vc_icon_artwork(
-            runtime.donor_icon,
-            artwork,
-            family,
-        )
+        icon_source = prepare_official_vc_icon_artwork(runtime.donor_icon, artwork, family)
         icon = banner_assembly.build_icon(
             icon_source,
             metadata.short_title,
@@ -134,12 +121,11 @@ def install() -> None:
             metadata.publisher,
             save_data=vc._read_sci_save_data_size(exheader) > 0,
         )
+        icon_postprocessor = getattr(vc, "postprocess_vc_icon", None)
+        if callable(icon_postprocessor):
+            icon = icon_postprocessor(icon, family)
 
-        front_artwork = prepare_official_vc_front_artwork(
-            runtime.donor_banner,
-            artwork,
-            family,
-        )
+        front_artwork = prepare_official_vc_front_artwork(runtime.donor_banner, artwork, family)
         badge = prepare_official_vc_badge(
             runtime.donor_banner,
             metadata.banner_title,
@@ -170,6 +156,9 @@ def install() -> None:
             romfs=romfs,
         )
         ncch_bytes = ncch_format.build(ncch)
+        ncch_postprocessor = getattr(vc, "postprocess_vc_ncch", None)
+        if callable(ncch_postprocessor):
+            ncch_bytes = ncch_postprocessor(ncch_bytes, family)
         ticket = ticket_format.build(ticket_format.Ticket(title_id=title_id))
         content = tmd_format.content_chunk_from_data(
             content_id=0,
@@ -196,9 +185,9 @@ def install() -> None:
         cia = cia_format.build(ticket=ticket, tmd=tmd, content=ncch_bytes, meta=meta)
 
         if len(cia) < len(ncch_bytes) or cia[:4] != (0x2020).to_bytes(4, "little"):
-            raise ValueError("Generated classic VC CIA failed final container validation.")
+            raise ValueError("Generated VC CIA failed final container validation.")
         if hashlib.sha256(ncch_bytes).digest() not in tmd:
-            raise ValueError("Generated classic VC TMD lost its NCCH content hash.")
+            raise ValueError("Generated VC TMD lost its NCCH content hash.")
         return cia
 
     vc.ClassicVcRuntime = PresentedClassicVcRuntime
