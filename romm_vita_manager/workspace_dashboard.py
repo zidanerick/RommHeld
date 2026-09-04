@@ -427,31 +427,20 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.settings_local_edit.setText(path)
 
     def _save_settings_source(self) -> None:
-        if self.settings_local_radio.isChecked():
-            root = Path(self.settings_local_edit.text()).expanduser()
-            if not root.is_dir():
-                self.statusBar().showMessage("Local ROM directory does not exist.", 5000)
-                return
-            source = LibrarySource(mode="local", local_root=str(root))
-        else:
+        mode = "local" if self.settings_local_radio.isChecked() else "romm_api"
+        local_root = self.settings_local_edit.text().strip()
+        romm_url = self.settings_url_edit.text().strip()
+        token = self.settings_token_edit.text().strip()
+        if mode == "romm_api":
             try:
-                url = normalize_romm_url(self.settings_url_edit.text())
+                romm_url = normalize_romm_url(romm_url)
             except ValueError as exc:
                 self.statusBar().showMessage(str(exc), 5000)
                 return
-            token = self.settings_token_edit.text().strip()
-            if not token:
-                self.statusBar().showMessage("Enter a RomM Client API Token.", 5000)
-                return
-            source = LibrarySource(mode="romm_api", romm_url=url, api_token=token)
-
-        self.config = save_library_source(load_config(), source)
-        save_config(self.config)
-        self.local_library.set_config(self.config)
-        if self.three_ds_library is not None:
-            self.three_ds_library.config = self.config
-        self.statusBar().showMessage("Library settings saved.", 5000)
-        self.refresh_games()
+        source = LibrarySource(mode=mode, local_root=local_root, romm_url=romm_url, api_token=token)
+        save_library_source(self.config, source)
+        self.config = self._reload_config()
+        self._rebuild_workspace_sections()
 
     def _runtime_preference_changed(self, checked: bool) -> None:
         if not checked:
@@ -459,16 +448,15 @@ class WorkspaceDashboardWindow(QMainWindow):
         radio = self.sender()
         if not isinstance(radio, QRadioButton):
             return
-        try:
-            updated = set_device_preference(
-                load_config(),
-                self.workspace_key,
-                str(radio.property("preference_key")),
-            )
-            save_config(updated)
-            self.config = updated
-        except (TypeError, ValueError, OSError):
+        key = str(radio.property("preference_key") or "")
+        if not key:
             return
+        self.config = set_device_preference(self.config, self.workspace_key, key)
+
+    def copy_selected(self) -> None:
+        if self.workspace_key != "vita":
+            return
+        self.local_library.copy_selected()
 
     def refresh_games(self) -> None:
         self.config = self._reload_config()
@@ -488,11 +476,6 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.vita if self.workspace_key == "vita" else None,
         )
         self.local_library.refresh_library()
-
-    def copy_selected(self) -> None:
-        if self.workspace_key != "vita":
-            return
-        self.local_library.copy_selected()
 
     def refresh_workspace(self) -> None:
         self.refresh_device_page()
@@ -603,7 +586,7 @@ class WorkspaceDashboardWindow(QMainWindow):
         config = self._reload_config()
         if game is not None and target_key == "vc_cia":
             platform = (game.platform_slug or game.platform).strip().lower()
-            if platform in {"gb", "gbc"}:
+            if platform in {"gb", "gbc", "nes"}:
                 ClassicVcDeployDialog(config, game, self).exec()
                 return
             if platform == "gba":
@@ -648,7 +631,6 @@ class WorkspaceDashboardWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         if self.three_ds_library is not None:
             self.three_ds_library.close()
-        self.local_library.close()
         super().closeEvent(event)
 
 
