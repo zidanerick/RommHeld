@@ -75,10 +75,10 @@ RETROARCH_PLATFORM_SLUGS = frozenset(
     }
 )
 
-# GB/GBC now use their own donor-backed Nintendo VC runtime. NES, SNES and
-# Game Gear remain hidden until their family-specific runtime layouts are
-# implemented and verified separately.
-VC_IMPLEMENTED_PLATFORM_SLUGS = frozenset({"gba", "gb", "gbc"})
+# Every slug listed here has a concrete family-specific package builder and
+# PC-side structural validation. Hardware validation status is tracked
+# separately; exposure never means another family is routed through GBA code.
+VC_IMPLEMENTED_PLATFORM_SLUGS = frozenset({"gba", "gb", "gbc", "nes"})
 NATIVE_PLATFORM_SLUGS = frozenset({"gba"})
 
 
