@@ -46,7 +46,7 @@ def test_list_3ds_games_maps_platform_and_rom_fields(monkeypatch):
             "Nintendo 3DS",
             1234,
             "https://romm.example/assets/romm/resources/roms/12/42/cover.jpg",
-            "",
+            "3ds",
         )
     ]
 
