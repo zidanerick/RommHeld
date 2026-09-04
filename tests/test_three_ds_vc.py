@@ -21,9 +21,6 @@ def test_vc_profiles_match_nintendo_platform_families():
     assert profile_for_platform("gbc") == GBC_PROFILE
     assert profile_for_platform("gba") == GBA_NATIVE_PROFILE
     assert profile_for_platform("nes") == NES_PROFILE
-    # The implemented TNES converter accepts cartridge iNES/NES2 payloads.
-    # Famicom Disk System remains a RetroArch route, and RomM Famicom is kept
-    # separate until its source-container conventions are verified.
     assert profile_for_platform("famicom") is None
     assert profile_for_platform("fds") is None
     assert profile_for_platform("snes") == SNES_PROFILE
@@ -31,13 +28,13 @@ def test_vc_profiles_match_nintendo_platform_families():
     assert profile_for_platform("genesis") is None
 
 
-def test_validated_vc_injectors_are_marked_implemented():
+def test_all_supported_nintendo_vc_injectors_are_marked_implemented():
     assert GBA_NATIVE_PROFILE.implemented
     assert GB_PROFILE.implemented
     assert GBC_PROFILE.implemented
     assert NES_PROFILE.implemented
-    assert not SNES_PROFILE.implemented
-    assert not GAME_GEAR_PROFILE.implemented
+    assert SNES_PROFILE.implemented
+    assert GAME_GEAR_PROFILE.implemented
     assert SNES_PROFILE.requires_new_3ds
 
 
