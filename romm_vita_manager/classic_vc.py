@@ -79,9 +79,9 @@ def classic_title_id_for_romm_id(romm_id: int, family: str) -> bytes:
 
 
 def _product_code(family: str, romm_id: int) -> str:
-    suffix = hashlib.sha256(f"{family}:{romm_id}".encode("ascii")).hexdigest()[:4].upper()
-    prefix = "RHGB" if family == "gb" else "RHGC"
-    return f"CTR-N-{prefix[:2]}{suffix[:2]}"
+    suffix = hashlib.sha256(f"{family}:{romm_id}".encode("ascii")).hexdigest()[:3].upper()
+    family_tag = "G" if family == "gb" else "C"
+    return f"CTR-N-R{family_tag}{suffix}"
 
 
 def _application_tag(product_code: str) -> bytes:
@@ -146,24 +146,36 @@ def _align(value: int, boundary: int) -> int:
     return value if remainder == 0 else value + boundary - remainder
 
 
+def _looks_like_level3(romfs: bytes, offset: int) -> bool:
+    if offset < 0 or offset + 0x28 > len(romfs):
+        return False
+    if int.from_bytes(romfs[offset : offset + 4], "little") != 0x28:
+        return False
+    values = [
+        int.from_bytes(romfs[offset + pos : offset + pos + 4], "little")
+        for pos in range(4, 40, 4)
+    ]
+    if len(values) != 9:
+        return False
+    dir_hash, _, dir_meta, _, file_hash, _, file_meta, _, file_data = values
+    return (
+        0x28 <= dir_hash <= dir_meta <= file_hash <= file_meta <= file_data
+        and offset + file_data <= len(romfs)
+    )
+
+
 def _find_level3_offset(romfs: bytes) -> int:
-    # Nintendo-authored RomFS images and our own builder can place Level 3 at
-    # different aligned physical offsets. Detect the filesystem header instead
-    # of assuming one layout.
-    for offset in range(0x1000, min(len(romfs), 0x400000), 0x1000):
-        if int.from_bytes(romfs[offset : offset + 4], "little") != 0x28:
-            continue
-        values = [
-            int.from_bytes(romfs[offset + pos : offset + pos + 4], "little")
-            for pos in range(4, 40, 4)
-        ]
-        if len(values) != 9:
-            continue
-        dir_hash, _, dir_meta, _, file_hash, _, file_meta, _, file_data = values
-        if (
-            0x28 <= dir_hash <= dir_meta <= file_hash <= file_meta <= file_data
-            and offset + file_data <= len(romfs)
-        ):
+    # IVFC stores the physical Level 3 offset in its third level descriptor.
+    # Prefer that authoritative value; fall back to a conservative scan for
+    # older/unusual donor layouts whose descriptor cannot be trusted.
+    if len(romfs) >= 0x44 and romfs[:4] == b"IVFC":
+        described = int.from_bytes(romfs[0x3C:0x44], "little")
+        if _looks_like_level3(romfs, described):
+            return described
+
+    limit = min(len(romfs), 0x400000)
+    for offset in range(0x20, limit, 0x10):
+        if _looks_like_level3(romfs, offset):
             return offset
     raise ValueError("Unable to locate the RomFS Level 3 filesystem header.")
 
