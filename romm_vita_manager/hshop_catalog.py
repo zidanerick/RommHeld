@@ -60,10 +60,13 @@ class _SearchParser(HTMLParser):
 
 
 def _normalise_title(value: str) -> str:
+    # Remove presentation-only marks before compatibility decomposition.
+    # NFKD expands ™ to "TM", which would otherwise make an exact title like
+    # "PAC-MAN™" compare as "pac mantm" rather than "pac man".
+    value = value.replace("™", "").replace("®", "")
     value = unicodedata.normalize("NFKD", value)
     value = "".join(ch for ch in value if not unicodedata.combining(ch))
     value = value.casefold()
-    value = value.replace("™", "").replace("®", "")
     return " ".join(re.findall(r"[a-z0-9]+", value))
 
 
