@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 if TYPE_CHECKING:
     from agbcia.banner.image import ImageSource
@@ -265,6 +265,81 @@ def prepare_vc_icon_artwork(artwork: bytes, *, canvas_size: int = 256) -> bytes:
     return output.getvalue()
 
 
+def prepare_vc_title_badge(
+    title_name: str,
+    *,
+    width: int = 512,
+    height: int = 128,
+) -> bytes:
+    """Render the per-title text texture displayed below the rotating VC box."""
+    title = " ".join(title_name.split()).strip()[:128]
+    if not title:
+        raise ValueError("Virtual Console title badge requires a non-empty title.")
+
+    canvas = Image.new("RGBA", (width, height), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(canvas)
+    margin_x = max(8, width // 32)
+    margin_y = max(6, height // 16)
+    max_width = width - margin_x * 2
+    max_height = height - margin_y * 2
+
+    chosen_font = None
+    chosen_lines = [title]
+    for size in range(max(18, height // 3), 9, -2):
+        try:
+            font = ImageFont.load_default(size=size)
+        except TypeError:
+            font = ImageFont.load_default()
+
+        words = title.split()
+        lines: list[str] = []
+        current = ""
+        for word in words:
+            candidate = f"{current} {word}".strip()
+            bbox = draw.textbbox((0, 0), candidate, font=font, stroke_width=1)
+            if current and bbox[2] - bbox[0] > max_width:
+                lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+
+        if len(lines) > 2:
+            continue
+        line_boxes = [draw.textbbox((0, 0), line, font=font, stroke_width=1) for line in lines]
+        line_heights = [box[3] - box[1] for box in line_boxes]
+        total_height = sum(line_heights) + max(0, len(lines) - 1) * 4
+        if all((box[2] - box[0]) <= max_width for box in line_boxes) and total_height <= max_height:
+            chosen_font = font
+            chosen_lines = lines
+            break
+
+    if chosen_font is None:
+        chosen_font = ImageFont.load_default()
+
+    boxes = [draw.textbbox((0, 0), line, font=chosen_font, stroke_width=1) for line in chosen_lines]
+    heights = [box[3] - box[1] for box in boxes]
+    total_height = sum(heights) + max(0, len(chosen_lines) - 1) * 4
+    y = (height - total_height) // 2
+    for line, box, line_height in zip(chosen_lines, boxes, heights):
+        line_width = box[2] - box[0]
+        x = (width - line_width) // 2
+        draw.text(
+            (x, y),
+            line,
+            font=chosen_font,
+            fill=(255, 255, 255, 255),
+            stroke_width=1,
+            stroke_fill=(0, 0, 0, 210),
+        )
+        y += line_height + 4
+
+    output = io.BytesIO()
+    canvas.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
 def build_native_gba_cia(
     rom: bytes,
     artwork: "ImageSource",
@@ -292,6 +367,7 @@ def build_native_gba_cia(
     InjectionRequest, inject = _require_agbcia()
     rom = prepare_gba_rom(rom)
     icon_image = prepare_vc_icon_artwork(artwork) if isinstance(artwork, bytes) else artwork
+    bottom_badge_image = prepare_vc_title_badge(title_name) if donor_banner is not None else None
     request = InjectionRequest(
         mode="native",
         rom=rom,
@@ -303,6 +379,7 @@ def build_native_gba_cia(
         publisher=publisher[:128],
         boot_logo=boot_logo,
         donor_banner=donor_banner,
+        bottom_badge_image=bottom_badge_image,
         title_version=title_version,
     )
     result = inject(request)
