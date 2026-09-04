@@ -2,11 +2,14 @@ import io
 import zipfile
 from types import SimpleNamespace
 
+from PIL import Image
+
 import romm_vita_manager.gba_vc as gba_vc
 from romm_vita_manager.gba_vc import (
     build_native_gba_cia,
     native_title_id_for_romm_id,
     prepare_gba_rom,
+    prepare_vc_icon_artwork,
 )
 
 
@@ -49,6 +52,7 @@ def test_native_builder_does_not_stamp_homebrew_publisher(monkeypatch):
         "_require_agbcia",
         lambda: (Request, lambda request: SimpleNamespace(cia=b"cia")),
     )
+    monkeypatch.setattr(gba_vc, "prepare_vc_icon_artwork", lambda artwork: b"icon")
 
     result = build_native_gba_cia(
         b"GBA TEST ROM",
@@ -59,6 +63,8 @@ def test_native_builder_does_not_stamp_homebrew_publisher(monkeypatch):
     )
     assert result == b"cia"
     assert captured["publisher"] == ""
+    assert captured["icon_image"] == b"icon"
+    assert captured["banner_image"] == b"image"
 
 
 def test_native_builder_uses_real_publisher_when_supplied(monkeypatch):
@@ -73,6 +79,7 @@ def test_native_builder_uses_real_publisher_when_supplied(monkeypatch):
         "_require_agbcia",
         lambda: (Request, lambda request: SimpleNamespace(cia=b"cia")),
     )
+    monkeypatch.setattr(gba_vc, "prepare_vc_icon_artwork", lambda artwork: b"icon")
 
     build_native_gba_cia(
         b"GBA TEST ROM",
@@ -83,6 +90,21 @@ def test_native_builder_uses_real_publisher_when_supplied(monkeypatch):
         publisher="Nintendo",
     )
     assert captured["publisher"] == "Nintendo"
+
+
+def test_prepare_vc_icon_artwork_preserves_portrait_cover_inside_square():
+    source = Image.new("RGB", (120, 180), (20, 40, 60))
+    source.paste((220, 100, 40), (20, 20, 100, 160))
+    source_bytes = io.BytesIO()
+    source.save(source_bytes, format="PNG")
+
+    result = prepare_vc_icon_artwork(source_bytes.getvalue(), canvas_size=256)
+    image = Image.open(io.BytesIO(result))
+    assert image.size == (256, 256)
+    assert image.format == "PNG"
+    # A portrait cover is contained rather than expanded/cropped to fill width.
+    assert image.getpixel((0, 128)) == image.getpixel((255, 128))
+    assert image.getpixel((128, 128)) != image.getpixel((0, 128))
 
 
 def test_prepare_gba_rom_extracts_gba_from_zip():
