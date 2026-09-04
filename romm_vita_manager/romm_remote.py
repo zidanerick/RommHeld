@@ -22,6 +22,7 @@ class RomMRemoteGame:
     size: int
     cover_url: str | None = None
     platform_slug: str = ""
+    publisher: str = ""
 
 
 def _auth_headers(token: str, *, accept: str = "application/json", include_auth: bool = True) -> dict[str, str]:
@@ -135,9 +136,6 @@ def download_artwork(
 
     romm_host = urlparse(normalize_romm_url(instance_url)).hostname or ""
     same_host = bool(parsed.hostname) and parsed.hostname.lower() == romm_host.lower()
-    # RomM cover metadata can contain timestamps with spaces (for example,
-    # "?ts=2026-08-10 12:36:56"). urllib rejects those raw control/space
-    # characters, so rebuild the URL with a properly encoded query string.
     query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
     safe_query = urlencode(query_pairs, doseq=True)
     target = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, safe_query, parsed.fragment))
@@ -182,6 +180,48 @@ def _as_int(value) -> int | None:
         return int(text) if text else None
     except (TypeError, ValueError):
         return None
+
+
+def _publisher_name(item: dict) -> str:
+    """Best-effort publisher extraction across RomM metadata providers/versions."""
+
+    def text_value(value) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            for key in ("name", "company", "publisher"):
+                candidate = value.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+        return ""
+
+    for source in (item, item.get("metadata") if isinstance(item.get("metadata"), dict) else {}):
+        for key in ("publisher", "publishers"):
+            value = source.get(key) if isinstance(source, dict) else None
+            direct = text_value(value)
+            if direct:
+                return direct
+            if isinstance(value, list):
+                names = [text_value(entry) for entry in value]
+                names = [name for name in names if name]
+                if names:
+                    return ", ".join(names[:2])
+
+    companies = item.get("companies")
+    if isinstance(companies, list):
+        publishers: list[str] = []
+        for company in companies:
+            if not isinstance(company, dict):
+                continue
+            role = str(company.get("role") or company.get("type") or "").casefold()
+            if role and "publish" not in role:
+                continue
+            name = text_value(company)
+            if name:
+                publishers.append(name)
+        if publishers:
+            return ", ".join(publishers[:2])
+    return ""
 
 
 def resolve_cover_url(instance_url: str, cover: str | None) -> str | None:
@@ -330,6 +370,7 @@ def _list_games_for_platform_slugs(
                 size,
                 resolve_cover_url(instance_url, cover),
                 slug,
+                _publisher_name(item),
             )
         )
     return games
@@ -356,7 +397,16 @@ def list_3ds_games(instance_url: str, token: str, *, limit: int = 200) -> list[R
         missing_message="RomM has no Nintendo 3DS platform (slug: 3ds).",
     )
     return [
-        RomMRemoteGame(game.rom_id, game.name, game.filename, game.platform, game.size, game.cover_url)
+        RomMRemoteGame(
+            game.rom_id,
+            game.name,
+            game.filename,
+            game.platform,
+            game.size,
+            game.cover_url,
+            game.platform_slug,
+            game.publisher,
+        )
         for game in games
     ]
 
