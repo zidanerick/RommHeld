@@ -1,3 +1,4 @@
+import hashlib
 import io
 import zipfile
 
@@ -30,6 +31,43 @@ def test_nested_romfs_round_trip_preserves_paths_and_empty_placeholder():
     rebuilt = build_romfs(files)
     assert rebuilt.startswith(b"IVFC")
     assert parse_romfs_files(rebuilt) == files
+
+
+def test_romfs_uses_retail_physical_level3_layout_and_padded_hashes():
+    files = {
+        "/config.ini": b"mode=vc\n",
+        "/rom/DMGTEST0.000": b"ROM" * 1733,
+    }
+    rebuilt = build_romfs(files)
+    block = 0x1000
+
+    # Retail 3DS RomFS places the Level-3 filesystem at physical 0x1000;
+    # the offsets in the IVFC descriptors are logical hash-tree offsets.
+    assert int.from_bytes(rebuilt[0x1000:0x1004], "little") == 0x28
+
+    master_size = int.from_bytes(rebuilt[0x08:0x0C], "little")
+    level1_size = int.from_bytes(rebuilt[0x14:0x1C], "little")
+    level2_size = int.from_bytes(rebuilt[0x2C:0x34], "little")
+    level3_size = int.from_bytes(rebuilt[0x44:0x4C], "little")
+
+    level3_physical = 0x1000
+    level1_physical = level3_physical + ((level3_size + block - 1) // block) * block
+    level2_physical = level1_physical + ((level1_size + block - 1) // block) * block
+
+    level3 = rebuilt[level3_physical : level3_physical + level3_size]
+    level2 = rebuilt[level2_physical : level2_physical + level2_size]
+    level1 = rebuilt[level1_physical : level1_physical + level1_size]
+    master = rebuilt[0x60 : 0x60 + master_size]
+
+    def hashes(data: bytes) -> bytes:
+        return b"".join(
+            hashlib.sha256(data[offset : offset + block].ljust(block, b"\x00")).digest()
+            for offset in range(0, len(data), block)
+        )
+
+    assert hashes(level3) == level2
+    assert hashes(level2) == level1
+    assert hashes(level1) == master
 
 
 def test_patch_exheader_updates_identity_without_touching_access_descriptor():
