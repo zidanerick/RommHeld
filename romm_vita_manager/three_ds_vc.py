@@ -27,6 +27,7 @@ GB_PROFILE = VirtualConsoleProfile(
     output_extension=".cia",
     runtime="nintendo-gb-vc",
     requires_boot9=True,
+    implemented=True,
 )
 
 GBC_PROFILE = VirtualConsoleProfile(
@@ -37,6 +38,7 @@ GBC_PROFILE = VirtualConsoleProfile(
     output_extension=".cia",
     runtime="nintendo-gbc-vc",
     requires_boot9=True,
+    implemented=True,
 )
 
 GBA_NATIVE_PROFILE = VirtualConsoleProfile(
