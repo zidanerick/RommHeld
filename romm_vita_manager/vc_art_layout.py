@@ -7,17 +7,44 @@ from PIL import Image, ImageOps
 
 @dataclass(frozen=True, slots=True)
 class ArtworkLayout:
-    """How source artwork is fitted into a Nintendo VC presentation viewport."""
+    """How source artwork is fitted into a Nintendo VC presentation viewport.
+
+    ``platform_chrome`` removes the family branding that belongs to a retail
+    box scan but not to Nintendo's small VC label texture.  The crop is only
+    applied to portrait artwork, which is the normal shape of box-front scans;
+    square/title-screen artwork is left untouched.
+    """
 
     mode: str
     padding: int = 0
     centering: tuple[float, float] = (0.5, 0.5)
     trim_uniform_border: bool = True
+    platform_chrome: str | None = None
 
 
-GBA_BANNER_LAYOUT = ArtworkLayout("cover", padding=4, centering=(0.5, 0.42))
-GB_LABEL_LAYOUT = ArtworkLayout("contain", padding=3)
-GBC_LABEL_LAYOUT = ArtworkLayout("contain", padding=3)
+# Nintendo's retail donor textures do not display a complete retail box front.
+# They use a compact game-art label inside the family-specific frame.  RomM
+# commonly supplies box-front artwork, so remove the platform-only chrome and
+# then crop to fill the donor's measured label viewport rather than shrinking
+# the complete portrait cover into it.
+GBA_BANNER_LAYOUT = ArtworkLayout(
+    "cover",
+    padding=3,
+    centering=(0.5, 0.5),
+    platform_chrome="gba_top",
+)
+GB_LABEL_LAYOUT = ArtworkLayout(
+    "cover",
+    padding=1,
+    centering=(0.52, 0.48),
+    platform_chrome="gb_left",
+)
+GBC_LABEL_LAYOUT = ArtworkLayout(
+    "cover",
+    padding=1,
+    centering=(0.54, 0.48),
+    platform_chrome="gbc_left",
+)
 ICON_LAYOUT = ArtworkLayout("cover", padding=1, centering=(0.5, 0.45))
 
 
@@ -34,7 +61,12 @@ def _edge_background(image: Image.Image) -> tuple[int, int, int]:
     return tuple(sum(pixel[channel] for pixel in pixels) // count for channel in range(3))
 
 
-def _uniform_border_bbox(image: Image.Image, *, threshold: int = 22, max_trim_ratio: float = 0.18) -> tuple[int, int, int, int]:
+def _uniform_border_bbox(
+    image: Image.Image,
+    *,
+    threshold: int = 22,
+    max_trim_ratio: float = 0.18,
+) -> tuple[int, int, int, int]:
     """Return a conservative crop for flat scanner/box-art margins.
 
     The reference colour comes from the four corners. Only pixels that differ
@@ -59,7 +91,10 @@ def _uniform_border_bbox(image: Image.Image, *, threshold: int = 22, max_trim_ra
     # generation unnecessarily expensive.
     scale = min(1.0, 320 / max(width, height))
     if scale < 1.0:
-        work = source.resize((max(1, round(width * scale)), max(1, round(height * scale))), Image.Resampling.BILINEAR)
+        work = source.resize(
+            (max(1, round(width * scale)), max(1, round(height * scale))),
+            Image.Resampling.BILINEAR,
+        )
     else:
         work = source
     work_width, work_height = work.size
@@ -97,6 +132,44 @@ def _uniform_border_bbox(image: Image.Image, *, threshold: int = 22, max_trim_ra
     return clamped
 
 
+def _strip_platform_chrome(image: Image.Image, kind: str | None) -> Image.Image:
+    """Remove box-only platform branding before adapting art to a VC label.
+
+    The supplied official donors show that Nintendo's VC textures contain game
+    artwork, not the full retail box-front chrome.  Typical RomM box scans use
+    a horizontal ``GAME BOY ADVANCE`` header or a vertical GB/GBC family strip.
+    Removing those areas before the final cover crop prevents the platform logo
+    from consuming a large part of the tiny 128x128/70x74 VC viewport.
+
+    This is deliberately conservative: only clearly portrait source images are
+    altered.  Square artwork, title screens and already-prepared labels pass
+    through unchanged.
+    """
+    if not kind:
+        return image
+    source = image.convert("RGBA")
+    width, height = source.size
+    if width < 16 or height < 16 or height / width < 1.12:
+        return source
+
+    if kind == "gba_top":
+        # Retail GBA covers reserve roughly the top eighth for the platform
+        # masthead.  The remaining art is then cropped to Nintendo's square VC
+        # label, which also naturally removes most bottom legal-copy space.
+        top = min(height - 1, max(1, round(height * 0.13)))
+        return source.crop((0, top, width, height))
+    if kind == "gb_left":
+        # Original Game Boy boxes commonly carry a narrow vertical GAME BOY
+        # family strip on the left edge.
+        left = min(width - 1, max(1, round(width * 0.12)))
+        return source.crop((left, 0, width, height))
+    if kind == "gbc_left":
+        # Game Boy Color boxes use a slightly wider black GAME BOY COLOR strip.
+        left = min(width - 1, max(1, round(width * 0.15)))
+        return source.crop((left, 0, width, height))
+    raise ValueError(f"Unsupported VC platform-chrome crop: {kind}")
+
+
 def prepare_artwork_for_viewport(
     artwork: Image.Image,
     size: tuple[int, int],
@@ -110,6 +183,7 @@ def prepare_artwork_for_viewport(
     inner_size = (max(1, width - padding * 2), max(1, height - padding * 2))
 
     source = artwork.convert("RGBA")
+    source = _strip_platform_chrome(source, layout.platform_chrome)
     if layout.trim_uniform_border:
         source = source.crop(_uniform_border_bbox(source))
 
