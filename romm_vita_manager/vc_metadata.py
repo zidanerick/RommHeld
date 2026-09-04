@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 
 
@@ -18,8 +19,41 @@ class VirtualConsoleMetadata:
     banner_title: str
 
 
+_MOJIBAKE_MARKERS = ("Ã", "Â", "â", "ð", "�")
+
+
+def _mojibake_score(value: str) -> int:
+    return sum(value.count(marker) for marker in _MOJIBAKE_MARKERS)
+
+
+def _repair_mojibake(value: str) -> str:
+    """Repair common UTF-8-as-Latin-1/CP1252 metadata corruption.
+
+    RomM metadata normally arrives as proper Unicode, but imported metadata can
+    already contain strings such as ``PokÃ©mon``. Only accept a round-trip when
+    it strictly reduces tell-tale mojibake markers, so legitimate non-ASCII
+    names are left alone.
+    """
+    best = value
+    best_score = _mojibake_score(value)
+    if best_score == 0:
+        return value
+    for encoding in ("latin-1", "cp1252"):
+        try:
+            candidate = value.encode(encoding).decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+        score = _mojibake_score(candidate)
+        if score < best_score:
+            best = candidate
+            best_score = score
+    return best
+
+
 def _clean(value: str | None, *, limit: int = 128) -> str:
-    return " ".join(str(value or "").replace("\x00", " ").split()).strip()[:limit]
+    text = str(value or "").replace("\x00", " ")
+    text = unicodedata.normalize("NFC", _repair_mojibake(text))
+    return " ".join(text.split()).strip()[:limit]
 
 
 def normalize_vc_metadata(
