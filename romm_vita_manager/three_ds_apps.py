@@ -16,6 +16,11 @@ class ThreeDSAppDefinition:
     install_policy: str
     platform_slugs: tuple[str, ...] = ()
     installed_title_may_exist_without_sd_marker: bool = False
+    marker_policy: str = "any"
+
+    def __post_init__(self) -> None:
+        if self.marker_policy not in {"any", "all"}:
+            raise ValueError(f"Unknown marker policy: {self.marker_policy}")
 
 
 @dataclass(frozen=True)
@@ -52,7 +57,7 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         "Homebrew Launcher environment",
         "foundation",
         "Homebrew entry environment. RommHeld only checks SD-side evidence and does not attempt to modify the console exploit chain.",
-        ("boot.3dsx", "3ds"),
+        ("boot.3dsx",),
         "https://3ds.hacks.guide/finalizing-setup.html",
         "guide_only",
     ),
@@ -122,12 +127,12 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         "twilight",
         "TWiLight Menu++",
         "runtime",
-        "Nintendo DS frontend used with nds-bootstrap on 3DS SD storage.",
+        "Nintendo DS frontend used with nds-bootstrap on 3DS SD storage. Both the TWiLight assets and nds-bootstrap are required for the RommHeld NDS route.",
         ("_nds/TWiLightMenu", "_nds/nds-bootstrap"),
         "https://github.com/DS-Homebrew/TWiLightMenu/releases",
         "prefer_universal_updater",
         ("nds",),
-        installed_title_may_exist_without_sd_marker=True,
+        marker_policy="all",
     ),
     ThreeDSAppDefinition(
         "retroarch",
@@ -148,7 +153,6 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
             "gamegear",
             "sms",
             "genesis",
-            "n64",
         ),
         installed_title_may_exist_without_sd_marker=True,
     ),
@@ -171,8 +175,8 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         "daedalusx64",
         "DaedalusX64",
         "runtime",
-        "Dedicated Nintendo 64 emulator. Its 3DS build documents ROM storage under /3ds/DaedalusX64/Roms/.",
-        ("3ds/DaedalusX64", "3ds/DaedalusX64/Roms"),
+        "Dedicated Nintendo 64 emulator. Its 3DS build documents ROM storage under /3ds/DaedalusX64/Roms/, but that content directory is not installation evidence.",
+        ("3ds/DaedalusX64/DaedalusX64.3dsx", "3ds/DaedalusX64.3dsx"),
         "https://github.com/masterfeizz/DaedalusX64-3DS/releases",
         "manual_bundle_or_updater",
         ("n64",),
@@ -198,7 +202,7 @@ RUNTIME_RECOMMENDATIONS: dict[str, tuple[str, ...]] = {
     "gba": ("open-agb-firm", "retroarch"),
     "nds": ("twilight",),
     "virtualboy": ("red-viper",),
-    "n64": ("daedalusx64", "retroarch"),
+    "n64": ("daedalusx64",),
 }
 
 
@@ -224,10 +228,17 @@ def detect_three_ds_app(root: Path, definition: ThreeDSAppDefinition) -> ThreeDS
     root = root.expanduser()
     if not root.is_dir():
         return ThreeDSAppStatus(definition, False, None)
-    for marker in definition.markers:
-        if _case_insensitive_exists(root, marker):
-            return ThreeDSAppStatus(definition, True, marker)
-    return ThreeDSAppStatus(definition, False, None)
+
+    matched = tuple(
+        marker for marker in definition.markers if _case_insensitive_exists(root, marker)
+    )
+    detected = (
+        len(matched) == len(definition.markers)
+        if definition.marker_policy == "all"
+        else bool(matched)
+    )
+    marker = "; ".join(matched) if detected and matched else None
+    return ThreeDSAppStatus(definition, detected, marker)
 
 
 def scan_three_ds_apps(root: Path) -> dict[str, ThreeDSAppStatus]:
