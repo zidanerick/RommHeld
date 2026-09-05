@@ -143,6 +143,21 @@ def _clean_patch_names(values) -> tuple[str, ...]:
     return tuple(sorted(cleaned, key=str.casefold))
 
 
+def _classic_save_data_size(exheader: bytes) -> int | None:
+    """Read SCI SystemInfo.SaveDataSize when a complete field is available."""
+    if len(exheader) < 0x1C8:
+        return None
+    return int.from_bytes(exheader[0x1C0:0x1C8], "little")
+
+
+def _format_byte_count(size: int) -> str:
+    if size >= 1024 * 1024 and size % (1024 * 1024) == 0:
+        return f"{size // (1024 * 1024)} MiB ({size} bytes)"
+    if size >= 1024 and size % 1024 == 0:
+        return f"{size // 1024} KiB ({size} bytes)"
+    return f"{size} bytes"
+
+
 def build_classic_runtime_profile(
     family: str,
     donor_info: dict,
@@ -166,6 +181,7 @@ def build_classic_runtime_profile(
     build_label = _clean_build_label(emulator_build)
     config_hash = _validated_optional_sha256(config_ini_sha256, "Classic VC config.ini")
     patch_names = _clean_patch_names(donor_patch_names)
+    save_data_size = _classic_save_data_size(exheader)
     profile_id = _profile_id(
         guidance.family,
         (code_hash, exheader_hash, rom_path, romfs_hash),
@@ -197,6 +213,8 @@ def build_classic_runtime_profile(
         profile["config_ini_sha256"] = config_hash
     if patch_names:
         profile["donor_patch_names"] = list(patch_names)
+    if save_data_size is not None:
+        profile["save_data_size"] = save_data_size
     return profile
 
 
@@ -358,6 +376,7 @@ def runtime_guidance_details(config: dict, family: str) -> tuple[str, ...]:
     build_label = _clean_build_label(str(profile.get("emulator_build", "")))
     config_hash = str(profile.get("config_ini_sha256", "")).strip().lower()
     patch_names = _profile_patch_names(profile)
+    save_data_size = profile.get("save_data_size")
     if profile_id:
         details.append(f"Runtime profile ID: {profile_id}")
     if donor_title_id:
@@ -366,6 +385,8 @@ def runtime_guidance_details(config: dict, family: str) -> tuple[str, ...]:
         details.append(f"Emulator build: {build_label}")
     if config_hash:
         details.append(f"config.ini SHA-256: {config_hash}")
+    if type(save_data_size) is int and save_data_size >= 0:
+        details.append(f"Donor 3DS SaveData size: {_format_byte_count(save_data_size)}")
     if patch_names:
         details.append("Donor game-specific patch files: " + ", ".join(patch_names))
     return tuple(details)
