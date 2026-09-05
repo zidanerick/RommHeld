@@ -530,13 +530,31 @@ class VitaSetupDialog(QDialog):
         self.activity.setText("Setup action failed.")
         QMessageBox.critical(self, "Vita setup failed", message)
 
+    def _worker_active(self) -> bool:
+        return self.worker is not None and self.worker.isRunning()
+
+    def _show_setup_action_in_progress(self) -> None:
+        QMessageBox.information(
+            self,
+            "Setup action in progress",
+            "Cancel the current package action or allow it to finish before closing this window.",
+        )
+
+    def accept(self) -> None:
+        if self._worker_active():
+            self._show_setup_action_in_progress()
+            return
+        super().accept()
+
+    def reject(self) -> None:
+        if self._worker_active():
+            self._show_setup_action_in_progress()
+            return
+        super().reject()
+
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self.worker is not None and self.worker.isRunning():
-            QMessageBox.information(
-                self,
-                "Setup action in progress",
-                "Cancel the current package action or allow it to finish before closing this window.",
-            )
+        if self._worker_active():
+            self._show_setup_action_in_progress()
             event.ignore()
             return
         super().closeEvent(event)
