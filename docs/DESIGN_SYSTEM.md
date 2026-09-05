@@ -104,12 +104,14 @@ Use manufacturer-family colours consistently across consoles. Do not invent a se
 
 ### Startup selector
 
-The startup experience selects two things:
+The selector is an onboarding and reconfiguration surface, not a mandatory launch screen. It selects two things:
 
 1. handheld workspace
 2. library source
 
 Handheld cards should be visual and immediately recognisable. Configuration controls should remain secondary to handheld selection.
+
+After a valid first setup, normal startup should open directly into the saved handheld workspace. The selector should reappear only when setup is incomplete/invalid or when the user explicitly chooses `Switch handheld`.
 
 ### Main shell
 
@@ -199,6 +201,8 @@ Primary actions need visible hover, pressed, disabled and keyboard-focus states.
 Fields should use neutral surfaces with a visible but understated border. Focus must be clearly visible.
 
 Do not use disabled inputs as labels. Use actual labels or read-only text when a value is informational.
+
+When a settings page owns service credentials or connection details, connection verification belongs on that same page. Do not require the user to reopen onboarding just to test settings they are already editing.
 
 ### Lists
 
