@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QRadioButton,
     QVBoxLayout,
@@ -25,11 +26,12 @@ from .design_tokens import DARK
 from .gba_vc_deploy import GbaVcDeployDialog
 from .library_sources import LibrarySource, get_library_source, save_library_source
 from .local_library import LocalLibraryWidget
+from .local_storage_ui import MountedStorageDialog
 from .management_shell import ManagementShell, WORKSPACE_PROFILES
 from .preferences import get_device_preference, preference_options, set_device_preference
 from .romm_api import normalize_romm_url
 from .romm_remote import RomMRemoteGame
-from .storage_validation import validate_storage
+from .storage_validation import validate_3ds_sd, validate_storage
 from .three_ds_library import ThreeDSLibraryWidget
 from .three_ds_manager import ThreeDSManagerDialog
 from .three_ds_readiness_ui import ThreeDSReadinessDialog
@@ -178,30 +180,49 @@ class WorkspaceDashboardWindow(QMainWindow):
             saved = self.config.get("devices", {}).get("3ds", {})
             host = str(saved.get("host", "")).strip()
             port = saved.get("port", 5000)
+            stored_root = str(saved.get("storage_root", "")).strip()
+            mounted_root = self._safe_3ds_storage_root(saved)
+            self.workspace_3ds_storage = QLabel(
+                str(mounted_root)
+                if mounted_root is not None
+                else "Unavailable"
+                if stored_root
+                else "Not configured"
+            )
+            self.workspace_3ds_storage.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            if stored_root:
+                self.workspace_3ds_storage.setToolTip(stored_root)
             self.workspace_3ds_status = QLabel("Configured" if host else "Not configured")
             self.workspace_3ds_endpoint = QLabel(
                 f"ftp://{host}:{port}" if host else "Not configured"
             )
             form = QFormLayout()
             form.setContentsMargins(0, 0, 0, 0)
+            form.addRow("Mounted SD", self.workspace_3ds_storage)
             form.addRow("FTP", self.workspace_3ds_status)
             form.addRow("Endpoint", self.workspace_3ds_endpoint)
             card.content.addLayout(form)
             card.content.addWidget(
                 self._secondary(
-                    "FTP handles filesystem transfers through ftpd. FBI Remote Install is offered when a deployment produces an installable CIA. Runtime readiness can also stage the verified ftpd 3DSX to a mounted 3DS SD card."
+                    "A mounted SD or microSD card is the direct, offline filesystem route and is useful for large transfers or initial setup. ftpd is the live-console wireless route. Nintendo 3DS systems do not expose a standard USB mass-storage mode, so RommHeld treats a card-reader mount as direct storage rather than calling it USB."
                 )
             )
             actions = QHBoxLayout()
             self.workspace_3ds_setup_action = AccentButton("Connection setup", accent)
             self.workspace_3ds_setup_action.clicked.connect(self.open_3ds_setup)
-            readiness = QPushButton("Runtime / FTP readiness")
+            storage = QPushButton("Mounted SD files")
+            storage.clicked.connect(self.open_3ds_storage)
+            readiness = QPushButton("Runtime readiness")
             readiness.clicked.connect(self.open_3ds_readiness)
             self.workspace_3ds_manage_action = AccentButton("Open 3DS manager", accent)
             self.workspace_3ds_manage_action.clicked.connect(self.open_3ds)
-            self.workspace_3ds_setup_action.set_emphasized(not bool(host))
-            self.workspace_3ds_manage_action.set_emphasized(bool(host))
+            route_ready = bool(host) or mounted_root is not None
+            self.workspace_3ds_setup_action.set_emphasized(not route_ready)
+            self.workspace_3ds_manage_action.set_emphasized(route_ready)
             actions.addWidget(self.workspace_3ds_setup_action)
+            actions.addWidget(storage)
             actions.addWidget(readiness)
             actions.addStretch()
             actions.addWidget(self.workspace_3ds_manage_action)
@@ -574,12 +595,23 @@ class WorkspaceDashboardWindow(QMainWindow):
             saved = self.config.get("devices", {}).get("3ds", {})
             host = str(saved.get("host", "")).strip()
             port = saved.get("port", 5000)
+            stored_root = str(saved.get("storage_root", "")).strip()
+            mounted_root = self._safe_3ds_storage_root(saved)
+            self.workspace_3ds_storage.setText(
+                str(mounted_root)
+                if mounted_root is not None
+                else "Unavailable"
+                if stored_root
+                else "Not configured"
+            )
+            self.workspace_3ds_storage.setToolTip(stored_root)
             self.workspace_3ds_status.setText("Configured" if host else "Not configured")
             self.workspace_3ds_endpoint.setText(
                 f"ftp://{host}:{port}" if host else "Not configured"
             )
-            self.workspace_3ds_setup_action.set_emphasized(not bool(host))
-            self.workspace_3ds_manage_action.set_emphasized(bool(host))
+            route_ready = bool(host) or mounted_root is not None
+            self.workspace_3ds_setup_action.set_emphasized(not route_ready)
+            self.workspace_3ds_manage_action.set_emphasized(route_ready)
         else:
             root = str(self.config.get("ds_sd_root", "")).strip()
             self.ds_root.setText(root if root else "No SD root selected")
@@ -599,7 +631,17 @@ class WorkspaceDashboardWindow(QMainWindow):
             vita_text = "Connected" if self._safe_vita_mounts() else "Not detected"
         saved = self.config.get("devices", {}).get("3ds", {})
         host = str(saved.get("host", "")).strip()
-        three_ds_text = "FTP configured" if host else "Not configured"
+        mounted_root = self._safe_3ds_storage_root(saved)
+        stored_root = str(saved.get("storage_root", "")).strip()
+        three_ds_text = (
+            "SD mounted"
+            if mounted_root is not None
+            else "FTP configured"
+            if host
+            else "SD unavailable"
+            if stored_root
+            else "Not configured"
+        )
         ds_root = str(self.config.get("ds_sd_root", "")).strip()
         ds_text = "SD selected" if ds_root else "Not configured"
         self.shell.set_device_statuses(vita_text, three_ds_text, ds_text)
@@ -610,6 +652,20 @@ class WorkspaceDashboardWindow(QMainWindow):
             return find_vita_mounts()
         except OSError:
             return []
+
+    @staticmethod
+    def _safe_3ds_storage_root(saved: dict) -> Path | None:
+        raw = str(saved.get("storage_root", "")).strip()
+        if not raw:
+            return None
+        root = Path(raw).expanduser()
+        try:
+            validation = validate_3ds_sd(root)
+        except (OSError, ValueError):
+            return None
+        if validation.confidence not in {"medium", "high"}:
+            return None
+        return root.resolve()
 
     def change_workspace(self) -> None:
         if self._settings_test_running():
@@ -661,6 +717,11 @@ class WorkspaceDashboardWindow(QMainWindow):
         self.refresh_device_page()
         self.refresh_games()
 
+    def open_3ds_storage(self) -> None:
+        MountedStorageDialog(self._reload_config(), "3ds", "Nintendo 3DS", self).exec()
+        self.config = self._reload_config()
+        self.refresh_device_page()
+
     def open_3ds(
         self,
         game: RomMRemoteGame | None = None,
@@ -707,15 +768,48 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.config = self._reload_config()
             self.refresh_device_page()
 
-    def open_3ds_readiness(self) -> None:
+    def _choose_3ds_storage_root(self) -> Path | None:
+        saved = self._reload_config().get("devices", {}).get("3ds", {})
+        start = str(saved.get("storage_root", "")).strip()
         path = QFileDialog.getExistingDirectory(
             self,
             "Select mounted Nintendo 3DS SD-card root",
+            start,
         )
         if not path:
+            return None
+        root = Path(path).expanduser()
+        try:
+            validation = validate_3ds_sd(root)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Invalid 3DS SD card", str(exc))
+            return None
+        if validation.confidence not in {"medium", "high"}:
+            QMessageBox.warning(
+                self,
+                "3DS SD card not recognised",
+                "The selected directory does not contain enough Nintendo 3DS SD-card markers. Select the card root that contains files such as boot.firm, boot.3dsx, luma/, or gm9/.",
+            )
+            return None
+        cfg = self._reload_config()
+        devices = dict(cfg.get("devices", {}))
+        device = dict(devices.get("3ds", {}))
+        device["storage_root"] = str(root.resolve())
+        devices["3ds"] = device
+        cfg["devices"] = devices
+        save_config(cfg)
+        self.config = cfg
+        return root.resolve()
+
+    def open_3ds_readiness(self) -> None:
+        saved = self._reload_config().get("devices", {}).get("3ds", {})
+        root = self._safe_3ds_storage_root(saved)
+        if root is None:
+            root = self._choose_3ds_storage_root()
+        if root is None:
             return
         ThreeDSReadinessDialog(
-            Path(path),
+            root,
             needs_ftp=True,
             needs_cia_install=False,
             parent=self,
