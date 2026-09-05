@@ -120,6 +120,8 @@ class SendFileDialog(QDialog):
         self.vita = vita
         self.worker: SendFileWorker | VitaFtpSendWorker | None = None
         self.overwrite = False
+        self._pending_overwrite_retry = False
+        self._settled_status: tuple[str, str] | None = None
         self.config = load_config()
         saved_ftp = self.config.get("devices", {}).get("vita_ftp", {})
 
@@ -177,10 +179,10 @@ class SendFileDialog(QDialog):
         self.source_edit = QLineEdit()
         self.source_edit.setPlaceholderText("Choose a local file")
         self.source_edit.textChanged.connect(self._selection_changed)
-        source_button = QPushButton("Choose…")
-        source_button.clicked.connect(self.choose_source)
+        self.source_button = QPushButton("Choose…")
+        self.source_button.clicked.connect(self.choose_source)
         source_row.addWidget(self.source_edit, 1)
-        source_row.addWidget(source_button)
+        source_row.addWidget(self.source_button)
         source_card.content.addLayout(source_row)
 
         destination_card = SurfaceCard()
@@ -220,9 +222,9 @@ class SendFileDialog(QDialog):
 
         close_row = QHBoxLayout()
         close_row.addStretch(1)
-        close = QPushButton("Done")
-        close.clicked.connect(self.accept)
-        close_row.addWidget(close)
+        self.done_button = QPushButton("Done")
+        self.done_button.clicked.connect(self.accept)
+        close_row.addWidget(self.done_button)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
@@ -299,6 +301,14 @@ class SendFileDialog(QDialog):
         cfg["devices"] = devices
         save_config(cfg)
         self.config = cfg
+
+    def _set_transfer_inputs_enabled(self, enabled: bool) -> None:
+        self.transport_combo.setEnabled(enabled)
+        self.ftp_host_edit.setEnabled(enabled)
+        self.ftp_port_edit.setEnabled(enabled)
+        self.source_edit.setEnabled(enabled)
+        self.source_button.setEnabled(enabled)
+        self.destination_edit.setEnabled(enabled)
 
     def _selection_changed(self) -> None:
         if self.worker is not None and self.worker.isRunning():
@@ -388,6 +398,9 @@ class SendFileDialog(QDialog):
                 self.worker = SendFileWorker(source, destination, overwrite=self.overwrite)
                 status_text = f"Copying {source.name} to {destination_text} through VitaShell USB…"
 
+            self._settled_status = None
+            self._set_transfer_inputs_enabled(False)
+            self.done_button.setEnabled(False)
             self.send_button.setEnabled(False)
             self.cancel_button.setEnabled(True)
             self.progress.setVisible(True)
@@ -401,9 +414,14 @@ class SendFileDialog(QDialog):
             )
             self.worker.completed.connect(self.transfer_finished)
             self.worker.failed.connect(self.transfer_failed)
+            self.worker.finished.connect(self._worker_finished)
             self.worker.start()
         except Exception as exc:
+            self.worker = None
             self.overwrite = False
+            self._pending_overwrite_retry = False
+            self._set_transfer_inputs_enabled(True)
+            self.done_button.setEnabled(True)
             self._selection_changed()
             QMessageBox.warning(self, "Unable to send file", str(exc))
 
@@ -428,10 +446,15 @@ class SendFileDialog(QDialog):
             )
             if answer == QMessageBox.StandardButton.Yes:
                 self.overwrite = True
-                self.start_transfer()
+                self._pending_overwrite_retry = True
+                self.status.setText("Preparing verified replacement…")
             else:
                 self.overwrite = False
-                self._selection_changed()
+                self._pending_overwrite_retry = False
+                self._settled_status = (
+                    "Ready",
+                    "Overwrite cancelled. The existing destination was preserved.",
+                )
             return
 
         message = {
@@ -439,12 +462,12 @@ class SendFileDialog(QDialog):
             "skipped": "Destination already contains the same-size file.",
             "cancelled": "Transfer cancelled. Any existing destination was preserved.",
         }.get(result, result)
+        status_value = "Complete" if result in {"copied", "skipped"} else "Cancelled"
         self.status.setText(message)
-        self.transfer_status.set_value(
-            "Complete" if result in {"copied", "skipped"} else "Cancelled"
-        )
+        self.transfer_status.set_value(status_value)
+        self._settled_status = (status_value, message)
         self.overwrite = False
-        self._selection_changed()
+        self._pending_overwrite_retry = False
         if result in {"copied", "skipped"}:
             QMessageBox.information(self, "Send File", message)
 
@@ -452,10 +475,30 @@ class SendFileDialog(QDialog):
         self.cancel_button.setEnabled(False)
         self.progress.setVisible(False)
         self.transfer_status.set_value("Failed")
-        self.status.setText("Transfer failed. Any existing destination was preserved.")
+        failure_message = "Transfer failed. Any existing destination was preserved."
+        self.status.setText(failure_message)
+        self._settled_status = ("Failed", failure_message)
         self.overwrite = False
-        self._selection_changed()
+        self._pending_overwrite_retry = False
         QMessageBox.critical(self, "Transfer failed", message)
+
+    def _worker_finished(self) -> None:
+        retry = self._pending_overwrite_retry
+        self._pending_overwrite_retry = False
+        self.worker = None
+
+        if retry:
+            self.start_transfer()
+            return
+
+        self._set_transfer_inputs_enabled(True)
+        self.done_button.setEnabled(True)
+        self._selection_changed()
+        if self._settled_status is not None:
+            status_value, message = self._settled_status
+            self.transfer_status.set_value(status_value)
+            self.status.setText(message)
+            self._settled_status = None
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self.worker is not None and self.worker.isRunning():
