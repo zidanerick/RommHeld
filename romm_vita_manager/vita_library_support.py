@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
 
+from .mappings import ROMM_TO_RETROFLOW
 from .models import Game
 from .transfers import copy_file_chunked
 
@@ -94,7 +95,10 @@ def destination_for_game(
             "unknown",
         )
 
-    folder = mappings.get(key)
+    if key in mappings:
+        folder = mappings[key]
+    else:
+        folder = ROMM_TO_RETROFLOW.get(key)
     if folder:
         return (
             f"RetroFlow / {folder}",
