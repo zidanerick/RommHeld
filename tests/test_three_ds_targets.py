@@ -28,10 +28,14 @@ def test_famicom_and_fds_remain_retroarch_only():
         assert [target.key for target in available_targets(slug)] == ["retroarch"]
 
 
-def test_dedicated_runtime_platforms_are_exposed_without_forcing_retroarch():
+def test_dedicated_runtime_platforms_keep_dedicated_defaults_without_forcing_exclusivity():
     assert [target.key for target in available_targets("nds")] == ["twilight"]
-    assert [target.key for target in available_targets("virtualboy")] == ["red_viper"]
+    assert [target.key for target in available_targets("virtualboy")] == [
+        "red_viper",
+        "retroarch",
+    ]
     assert [target.key for target in available_targets("n64")] == ["daedalusx64"]
+    assert "virtualboy" in RETROARCH_TARGET_PLATFORM_SLUGS
     assert "n64" not in RETROARCH_TARGET_PLATFORM_SLUGS
     for slug in ("nds", "virtualboy", "n64"):
         assert slug in THREE_DS_PLATFORM_SLUGS
@@ -57,7 +61,18 @@ def test_runtime_preference_chooses_dedicated_routes_by_default():
 
 
 def test_retroachievements_preference_uses_only_verified_current_3ds_core_routes():
-    for slug in ("gba", "gb", "gbc", "nes", "gamegear", "sms", "genesis", "sega32", "segacd"):
+    for slug in (
+        "gba",
+        "gb",
+        "gbc",
+        "nes",
+        "gamegear",
+        "sms",
+        "genesis",
+        "sega32",
+        "segacd",
+        "virtualboy",
+    ):
         assert slug in RETROACHIEVEMENTS_RETROARCH_PLATFORM_SLUGS
         assert preferred_target_key(slug, "retroachievements") == "retroarch"
 
@@ -65,7 +80,10 @@ def test_retroachievements_preference_uses_only_verified_current_3ds_core_routes
     assert preferred_target_key("snes", "retroachievements") == "vc_cia"
     assert preferred_target_key("n64", "retroachievements") == "daedalusx64"
     assert preferred_target_key("nds", "retroachievements") == "twilight"
-    assert preferred_target_key("virtualboy", "retroachievements") == "red_viper"
+
+
+def test_native_preference_keeps_red_viper_for_virtual_boy():
+    assert preferred_target_key("virtualboy", "native") == "red_viper"
 
 
 def test_native_preference_prefers_official_vc_when_no_dedicated_native_route_exists():
@@ -85,6 +103,7 @@ def test_default_destinations_are_stable_and_explicit():
     assert default_destination("vc_cia", "gba", "Metroid Fusion.gba") == "/cias/Metroid Fusion.cia"
     assert default_destination("twilight", "nds", "Mario Kart DS.nds") == "/roms/nds/Mario Kart DS.nds"
     assert default_destination("red_viper", "virtualboy", "Wario Land.vb") == "/roms/virtualboy/Wario Land.vb"
+    assert default_destination("retroarch", "virtualboy", "Wario Land.vb") == "/roms/virtualboy/Wario Land.vb"
     assert default_destination("daedalusx64", "n64", "Mario 64.z64") == "/3ds/DaedalusX64/Roms/Mario 64.z64"
     assert default_destination("retroarch", "gba", "Metroid Fusion.gba") == "/roms/gba/Metroid Fusion.gba"
     assert default_destination("vc_cia", "gbc", "Oracle of Seasons.gbc") == "/cias/Oracle of Seasons.cia"
