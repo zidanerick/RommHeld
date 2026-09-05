@@ -210,7 +210,7 @@ class ThreeDSFilesystemDeployDialog(QDialog):
             )
             return
 
-        preflight = evaluate_target_runtime(root, self.target_key)
+        preflight = evaluate_target_runtime(root, self.target_key, self.platform_slug)
         if preflight is None:
             self.runtime_status.set_value("Not required")
             self.runtime_detail.setText("No separate runtime check is required for this target.")
@@ -220,7 +220,7 @@ class ThreeDSFilesystemDeployDialog(QDialog):
         elif preflight.state == "confirm_on_console":
             self.runtime_status.set_value("Confirm on console")
         else:
-            self.runtime_status.set_value("Runtime missing")
+            self.runtime_status.set_value("Needs setup")
         self.runtime_detail.setText(preflight.note)
 
     def _selected_transport(self) -> str:
