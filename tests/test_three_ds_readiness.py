@@ -3,6 +3,7 @@ from pathlib import Path
 from romm_vita_manager.three_ds_readiness import (
     build_readiness_requirements,
     evaluate_readiness,
+    evaluate_target_runtime,
 )
 
 
@@ -114,3 +115,28 @@ def test_report_is_ready_when_required_sd_evidence_is_present(tmp_path: Path):
     assert report.missing_required == ()
     assert report.unconfirmed_required == ()
     assert report.state == "ready"
+
+
+def test_target_runtime_preflight_distinguishes_detected_missing_and_console_confirmation(tmp_path: Path):
+    missing = evaluate_target_runtime(tmp_path, "open_agb_firm")
+    assert missing is not None
+    assert missing.app_key == "open-agb-firm"
+    assert missing.state == "missing"
+    assert "will not be launchable" in missing.note
+
+    payloads = tmp_path / "luma" / "payloads"
+    payloads.mkdir(parents=True)
+    (payloads / "open_agb_firm.firm").write_bytes(b"firm")
+    detected = evaluate_target_runtime(tmp_path, "open_agb_firm")
+    assert detected is not None
+    assert detected.state == "detected"
+    assert "detected from the mounted 3DS SD card" in detected.note
+
+    confirm = evaluate_target_runtime(tmp_path, "red_viper")
+    assert confirm is not None
+    assert confirm.state == "confirm_on_console"
+    assert "confirm it on the console" in confirm.note
+
+
+def test_target_runtime_preflight_is_not_invented_for_existing_cia_copy(tmp_path: Path):
+    assert evaluate_target_runtime(tmp_path, "native_3ds_cia") is None
