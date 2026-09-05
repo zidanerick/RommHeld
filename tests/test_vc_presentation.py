@@ -19,24 +19,25 @@ def test_remaining_vc_profiles_match_supplied_retail_donor_textures() -> None:
     gamegear = presentation.presentation_profile("gamegear")
 
     assert nes.artwork_texture == "COMMON1"
+    assert nes.badge_texture == "COMMON2"
+    assert nes.show_release_year
     assert snes.artwork_texture == "COMMON1"
-    assert gamegear.artwork_texture == "COMMON2"
-    assert nes.badge_texture is None
     assert snes.badge_texture is None
-    assert gamegear.badge_texture is None
+    assert gamegear.artwork_texture == "COMMON2"
+    assert gamegear.badge_texture == "TitlePlate"
+    assert gamegear.show_release_year
     assert nes.icon_mode == "framed"
     assert snes.icon_mode == "framed"
     assert gamegear.icon_mode == "full"
 
 
-def test_profiles_without_separate_vc_badge_do_not_touch_donor_banner() -> None:
-    for family in ("nes", "snes", "gamegear"):
-        assert presentation.prepare_official_vc_badge(
-            b"not-even-parsed",
-            "Synthetic Game",
-            family,
-            release_year=1994,
-        ) is None
+def test_snes_profile_has_no_separate_vc_badge() -> None:
+    assert presentation.prepare_official_vc_badge(
+        b"not-even-parsed",
+        "Synthetic Game",
+        "snes",
+        release_year=1994,
+    ) is None
 
 
 def test_rgb565_texture_decoder_handles_tiled_primary_mip() -> None:
@@ -123,6 +124,46 @@ def test_official_badge_retains_left_vc_chrome_and_replaces_title(monkeypatch):
     assert result.crop((0, 0, 90, 64)).tobytes() == donor.crop((0, 0, 90, 64)).tobytes()
     assert result.crop((100, 5, 250, 59)).tobytes() != donor.crop((100, 5, 250, 59)).tobytes()
     assert result.crop((100, 5, 250, 59)).getchannel("L").getextrema()[0] < 80
+
+
+def test_nes_badge_uses_localized_common2_template(monkeypatch) -> None:
+    donor = Image.new("LA", (256, 64), (220, 255))
+    ImageDraw.Draw(donor).rectangle((0, 0, 94, 63), fill=(90, 255))
+    seen: list[str] = []
+
+    def texture(_banner: bytes, name: str) -> Image.Image:
+        seen.append(name)
+        return donor.copy()
+
+    monkeypatch.setattr(presentation, "_donor_texture_image", texture)
+    badge = presentation.prepare_official_vc_badge(
+        b"synthetic-donor",
+        "Ghostbusters",
+        "nes",
+        release_year=1988,
+    )
+    assert badge is not None
+    assert seen == ["COMMON2"]
+
+
+def test_gamegear_badge_uses_titleplate_template(monkeypatch) -> None:
+    donor = Image.new("LA", (256, 64), (220, 255))
+    ImageDraw.Draw(donor).rectangle((0, 0, 94, 63), fill=(90, 255))
+    seen: list[str] = []
+
+    def texture(_banner: bytes, name: str) -> Image.Image:
+        seen.append(name)
+        return donor.copy()
+
+    monkeypatch.setattr(presentation, "_donor_texture_image", texture)
+    badge = presentation.prepare_official_vc_badge(
+        b"synthetic-donor",
+        "Sonic the Hedgehog 2",
+        "gamegear",
+        release_year=1992,
+    )
+    assert badge is not None
+    assert seen == ["TitlePlate"]
 
 
 def _synthetic_donor_icon(frame_colour=(20, 20, 20), interior_colour=(180, 30, 30)) -> tuple[bytes, Image.Image]:
