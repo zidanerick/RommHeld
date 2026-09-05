@@ -161,14 +161,16 @@ class WorkspaceDashboardWindow(QMainWindow):
             actions = QHBoxLayout()
             refresh = QPushButton("Refresh")
             refresh.clicked.connect(self.refresh_device_page)
-            send = QPushButton("Send file / configure FTP")
-            send.clicked.connect(self.open_vita_send_file)
-            setup = AccentButton("Vita setup", accent)
-            setup.clicked.connect(self.open_vita_setup)
+            self.workspace_vita_send_action = AccentButton("Send file / configure FTP", accent)
+            self.workspace_vita_send_action.clicked.connect(self.open_vita_send_file)
+            self.workspace_vita_setup_action = AccentButton("Vita setup", accent)
+            self.workspace_vita_setup_action.clicked.connect(self.open_vita_setup)
+            self.workspace_vita_send_action.set_emphasized(not bool(ftp_host))
+            self.workspace_vita_setup_action.set_emphasized(bool(ftp_host))
             actions.addWidget(refresh)
-            actions.addWidget(send)
+            actions.addWidget(self.workspace_vita_send_action)
             actions.addStretch()
-            actions.addWidget(setup)
+            actions.addWidget(self.workspace_vita_setup_action)
             card.content.addLayout(actions)
 
         elif self.workspace_key == "3ds":
@@ -190,16 +192,18 @@ class WorkspaceDashboardWindow(QMainWindow):
                 )
             )
             actions = QHBoxLayout()
-            setup = QPushButton("Connection setup")
-            setup.clicked.connect(self.open_3ds_setup)
+            self.workspace_3ds_setup_action = AccentButton("Connection setup", accent)
+            self.workspace_3ds_setup_action.clicked.connect(self.open_3ds_setup)
             readiness = QPushButton("Runtime / FTP readiness")
             readiness.clicked.connect(self.open_3ds_readiness)
-            manage = AccentButton("Open 3DS manager", accent)
-            manage.clicked.connect(self.open_3ds)
-            actions.addWidget(setup)
+            self.workspace_3ds_manage_action = AccentButton("Open 3DS manager", accent)
+            self.workspace_3ds_manage_action.clicked.connect(self.open_3ds)
+            self.workspace_3ds_setup_action.set_emphasized(not bool(host))
+            self.workspace_3ds_manage_action.set_emphasized(bool(host))
+            actions.addWidget(self.workspace_3ds_setup_action)
             actions.addWidget(readiness)
             actions.addStretch()
-            actions.addWidget(manage)
+            actions.addWidget(self.workspace_3ds_manage_action)
             card.content.addLayout(actions)
 
         else:
@@ -218,13 +222,15 @@ class WorkspaceDashboardWindow(QMainWindow):
                 )
             )
             actions = QHBoxLayout()
-            browse = QPushButton("Choose SD card")
-            browse.clicked.connect(self.choose_ds_root)
-            validate = AccentButton("Validate storage", accent)
-            validate.clicked.connect(self.validate_ds_root)
-            actions.addWidget(browse)
+            self.ds_browse_action = AccentButton("Choose SD card", accent)
+            self.ds_browse_action.clicked.connect(self.choose_ds_root)
+            self.ds_validate_action = AccentButton("Validate storage", accent)
+            self.ds_validate_action.clicked.connect(self.validate_ds_root)
+            self.ds_browse_action.set_emphasized(not bool(configured))
+            self.ds_validate_action.set_emphasized(bool(configured))
+            actions.addWidget(self.ds_browse_action)
             actions.addStretch()
-            actions.addWidget(validate)
+            actions.addWidget(self.ds_validate_action)
             card.content.addLayout(actions)
 
         layout.addWidget(card)
@@ -540,6 +546,9 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.workspace_vita_ftp.setText(
                 f"ftp://{ftp_host}:{ftp_port}" if ftp_host else "Not configured"
             )
+            route_ready = self.vita is not None or bool(ftp_host)
+            self.workspace_vita_send_action.set_emphasized(not route_ready)
+            self.workspace_vita_setup_action.set_emphasized(route_ready)
         elif self.workspace_key == "3ds":
             saved = self.config.get("devices", {}).get("3ds", {})
             host = str(saved.get("host", "")).strip()
@@ -548,9 +557,13 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.workspace_3ds_endpoint.setText(
                 f"ftp://{host}:{port}" if host else "Not configured"
             )
+            self.workspace_3ds_setup_action.set_emphasized(not bool(host))
+            self.workspace_3ds_manage_action.set_emphasized(bool(host))
         else:
             root = str(self.config.get("ds_sd_root", "")).strip()
             self.ds_root.setText(root if root else "No SD root selected")
+            self.ds_browse_action.set_emphasized(not bool(root))
+            self.ds_validate_action.set_emphasized(bool(root))
 
         if self.workspace_key == "vita":
             saved_ftp = self.config.get("devices", {}).get("vita_ftp", {})
@@ -601,6 +614,8 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.config["ds_sd_root"] = path
             save_config(self.config)
             self.ds_root.setText(path)
+            self.ds_browse_action.set_emphasized(False)
+            self.ds_validate_action.set_emphasized(True)
             self.validate_ds_root()
 
     def validate_ds_root(self) -> None:
