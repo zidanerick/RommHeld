@@ -30,6 +30,7 @@ from .design_tokens import DARK, brand_for_platform
 from .platform_services import temp_dir
 from .storage_detection import detect_3ds_sd_candidates
 from .storage_validation import validate_3ds_sd
+from .three_ds_apps import APP_BY_KEY, detect_three_ds_app
 from .three_ds_readiness_ui import ThreeDSReadinessDialog
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 
@@ -104,6 +105,11 @@ def _case_insensitive_exists(root: Path, marker: str) -> bool:
 
 
 def component_presence(root: Path, component: SetupComponent) -> tuple[bool, str | None]:
+    definition = APP_BY_KEY.get(component.key)
+    if definition is not None:
+        status = detect_three_ds_app(root, definition)
+        return status.detected, status.marker
+
     for marker in component.markers:
         if _case_insensitive_exists(root, marker):
             return True, marker
