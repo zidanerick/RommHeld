@@ -1,4 +1,4 @@
-from romm_vita_manager.ui_components import status_tone
+from romm_vita_manager.design_tokens import status_tone
 
 
 def test_status_tone_marks_successful_states() -> None:
