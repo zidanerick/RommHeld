@@ -134,8 +134,10 @@ def _validated_optional_sha256(value: str, label: str) -> str:
 def _clean_patch_names(values) -> tuple[str, ...]:
     cleaned: set[str] = set()
     for value in values:
-        name = str(value).replace("\\", "/").rsplit("/", 1)[-1].strip()
-        if not name or not name.casefold().endswith(".patch"):
+        name = str(value).strip()
+        if not name or "/" in name or "\\" in name:
+            continue
+        if not name.casefold().endswith(".patch"):
             continue
         cleaned.add(name[:120])
     return tuple(sorted(cleaned, key=str.casefold))
