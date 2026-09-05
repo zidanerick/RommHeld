@@ -27,20 +27,61 @@ class VcPresentationProfile:
     badge_texture: str | None
     show_release_year: bool
     icon_mode: str = "framed"
+    badge_size: tuple[int, int] | None = None
+    badge_texture_alternates: tuple[str, ...] = ()
 
 
 _PROFILES = {
-    "gb": VcPresentationProfile("gb", "COMMON1", (28, 20, 101, 87), "COMMON2", True),
-    "gbc": VcPresentationProfile("gbc", "COMMON1", (30, 20, 100, 94), "COMMON2", True),
-    "gba": VcPresentationProfile("gba", "COMMON1", None, "COMMON2", False),
-    # Renegade keeps its 3D NES/game scene in common, but the visible 256x64
-    # Virtual Console title plaque is COMMON2 in the populated language scenes.
-    "nes": VcPresentationProfile("nes", "COMMON1", None, "COMMON2", True),
-    "snes": VcPresentationProfile("snes", "COMMON1", None, None, False),
+    "gb": VcPresentationProfile(
+        "gb", "COMMON1", (28, 20, 101, 87), "COMMON2", True,
+        badge_size=(256, 64),
+    ),
+    "gbc": VcPresentationProfile(
+        "gbc", "COMMON1", (30, 20, 100, 94), "COMMON2", True,
+        badge_size=(256, 64),
+    ),
+    "gba": VcPresentationProfile(
+        "gba", "COMMON1", None, "COMMON2", False,
+        badge_size=(256, 64),
+    ),
+    # Renegade's common CGFX also contains an unrelated all-white 8x8 L4
+    # texture named COMMON2. The visible title plaque is the 256x64 LA8
+    # COMMON2 present in the populated language scenes. badge_size is therefore
+    # part of the donor contract, not merely a rendering hint.
+    "nes": VcPresentationProfile(
+        "nes", "COMMON1", None, "COMMON2", True,
+        badge_size=(256, 64),
+    ),
+    # Mario's Super Picross names each localized 256x64 VC plaque after its
+    # locale instead of using COMMON2. Patch every known plate from the supplied
+    # European retail donor while retaining all other localized scene assets.
+    "snes": VcPresentationProfile(
+        "snes",
+        "COMMON1",
+        None,
+        "EUR_EN2",
+        True,
+        badge_size=(256, 64),
+        badge_texture_alternates=(
+            "EUR_FR2",
+            "EUR_GE2",
+            "EUR_IT2",
+            "EUR_SP2",
+            "EUR_DU2",
+            "EUR_PO2",
+            "EUR_RU2",
+        ),
+    ),
     # Sonic 2 keeps COMMON3 as the Game Gear shell. Localized scenes use
     # TitlePlate for the lower VC/title plaque and may repeat COMMON2 artwork.
     "gamegear": VcPresentationProfile(
-        "gamegear", "COMMON2", None, "TitlePlate", True, icon_mode="full"
+        "gamegear",
+        "COMMON2",
+        None,
+        "TitlePlate",
+        True,
+        icon_mode="full",
+        badge_size=(256, 64),
     ),
 }
 
@@ -51,6 +92,15 @@ def presentation_profile(family: str) -> VcPresentationProfile:
         return _PROFILES[key]
     except KeyError:
         raise ValueError(f"No Virtual Console presentation profile for {family!r}.") from None
+
+
+def badge_texture_names(profile: VcPresentationProfile) -> tuple[str, ...]:
+    """Return every donor texture name that represents this family's title plaque."""
+    names: list[str] = []
+    if profile.badge_texture:
+        names.append(profile.badge_texture)
+    names.extend(profile.badge_texture_alternates)
+    return tuple(dict.fromkeys(name for name in names if name))
 
 
 def _load_image(source: "ImageSource") -> Image.Image:
@@ -176,15 +226,58 @@ def _texture_image_from_cgfx(scene: bytes, name: str) -> Image.Image:
     )
 
 
-def _donor_texture_image(donor_banner: bytes, name: str) -> Image.Image:
-    """Decode a texture from common, falling back to localized donor scenes."""
+def _donor_texture_image(
+    donor_banner: bytes,
+    name: str,
+    *,
+    expected_size: tuple[int, int] | None = None,
+) -> Image.Image:
+    """Decode the first matching donor texture with the required dimensions.
+
+    Some Nintendo banners reuse a texture name for unrelated material. Renegade,
+    for example, has both an all-white 8x8 L4 ``COMMON2`` in the common scene
+    and the visible 256x64 LA8 ``COMMON2`` title plaque in language scenes.
+    Size matching prevents the dummy texture from being mistaken for the plaque.
+    """
     last_error: Exception | None = None
+    wrong_sizes: list[tuple[int, int]] = []
     for scene in _banner_cgfx_slots(donor_banner):
         try:
-            return _texture_image_from_cgfx(scene, name)
+            image = _texture_image_from_cgfx(scene, name)
         except Exception as exc:
             last_error = exc
-    raise ValueError(f"Donor banner has no usable texture named {name!r}.") from last_error
+            continue
+        if expected_size is not None and image.size != expected_size:
+            wrong_sizes.append(image.size)
+            continue
+        return image
+    detail = f" with size {expected_size[0]}x{expected_size[1]}" if expected_size else ""
+    if wrong_sizes:
+        detail += f" (same-name donor textures had sizes {sorted(set(wrong_sizes))})"
+    raise ValueError(f"Donor banner has no usable texture named {name!r}{detail}.") from last_error
+
+
+def _donor_badge_texture_image(
+    donor_banner: bytes,
+    profile: VcPresentationProfile,
+) -> Image.Image:
+    names = badge_texture_names(profile)
+    if not names:
+        raise ValueError(f"{profile.family.upper()} presentation has no title-plaque texture contract.")
+    last_error: Exception | None = None
+    for name in names:
+        try:
+            return _donor_texture_image(
+                donor_banner,
+                name,
+                expected_size=profile.badge_size,
+            )
+        except ValueError as exc:
+            last_error = exc
+    raise ValueError(
+        f"{profile.family.upper()} donor banner has no usable retail title plaque "
+        f"from {names!r}."
+    ) from last_error
 
 
 def _png(image: Image.Image) -> bytes:
@@ -288,10 +381,10 @@ def prepare_official_vc_badge(
     release_year: int | None = None,
 ) -> bytes | None:
     profile = presentation_profile(family)
-    if profile.badge_texture is None:
+    if not badge_texture_names(profile):
         return None
 
-    badge = _clear_badge_title_panel(_donor_texture_image(donor_banner, profile.badge_texture))
+    badge = _clear_badge_title_panel(_donor_badge_texture_image(donor_banner, profile))
     width, height = badge.size
     draw = ImageDraw.Draw(badge)
     content_left = round(width * 0.385)
