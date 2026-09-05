@@ -8,6 +8,8 @@ LIBRARY_PATH = ROOT / "romm_vita_manager" / "three_ds_library.py"
 DEPLOY_PATH = ROOT / "romm_vita_manager" / "three_ds_filesystem_deploy.py"
 DASHBOARD_PATH = ROOT / "romm_vita_manager" / "workspace_dashboard.py"
 SETUP_PATH = ROOT / "romm_vita_manager" / "three_ds_setup.py"
+GBA_DEPLOY_PATH = ROOT / "romm_vita_manager" / "gba_vc_deploy.py"
+CLASSIC_DEPLOY_PATH = ROOT / "romm_vita_manager" / "classic_vc_deploy.py"
 
 
 def test_3ds_filesystem_dialog_exposes_mounted_sd_and_ftpd_routes():
@@ -53,3 +55,24 @@ def test_3ds_filesystem_dialog_preserves_transfer_result_after_worker_cleanup():
     assert '"Transfer cancelled. The existing destination was preserved."' in source
     assert "self.status.setText(prefix + message)" in source
     assert "self._transport_changed(update_activity=False)" in source
+
+
+def test_generated_cia_workflows_offer_sd_copy_without_claiming_installation():
+    for path in (GBA_DEPLOY_PATH, CLASSIC_DEPLOY_PATH):
+        source = path.read_text(encoding="utf-8")
+        assert "Mounted SD card · Copy CIA" in source
+        assert "ftpd · Copy CIA" in source
+        assert "FBI Remote Install · Install directly" in source
+        assert "configured_3ds_storage_root" in source
+        assert "ThreeDSMountedStorageBackend" in source
+        assert 'self.install_method == "sd"' in source
+
+
+def test_generated_cia_sd_copy_remains_post_install_manual():
+    gba = GBA_DEPLOY_PATH.read_text(encoding="utf-8")
+    classic = CLASSIC_DEPLOY_PATH.read_text(encoding="utf-8")
+
+    assert "Install copied CIAs later with FBI" in gba
+    assert "return it to the console, then install the CIA with FBI" in gba
+    assert "return it to the console, then install the CIA with FBI" in classic
+    assert "Install it later with FBI" in classic
