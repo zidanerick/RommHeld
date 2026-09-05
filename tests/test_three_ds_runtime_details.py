@@ -113,5 +113,6 @@ def test_snes_profile_exists_but_is_not_retroachievements_recommended():
         "snes9x2005",
         "snes9x2005_plus",
         "snes9x2010",
+        "chimerasnes",
     )
     assert not profile.retroachievements_recommended
