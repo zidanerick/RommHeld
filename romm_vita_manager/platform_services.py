@@ -3,13 +3,27 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QStandardPaths
+from PySide6.QtCore import QCoreApplication, QStandardPaths
 from PySide6.QtCore import QStorageInfo
 
 APP_NAME = "RommHeld"
 
 
+def _ensure_application_identity() -> None:
+    """Keep app-scoped Qt paths stable before and after QApplication exists.
+
+    Several modules resolve config/cache paths during import, before the GUI
+    launcher constructs QApplication. QStandardPaths uses applicationName for
+    app-scoped locations, and Qt otherwise derives that name from the current
+    executable once an application object exists. Reassert the RommHeld
+    identity before every lookup so import order cannot move config/cache data.
+    """
+    if QCoreApplication.applicationName() != APP_NAME:
+        QCoreApplication.setApplicationName(APP_NAME)
+
+
 def _qt_location(location: QStandardPaths.StandardLocation, fallback: Path) -> Path:
+    _ensure_application_identity()
     value = QStandardPaths.writableLocation(location)
     return Path(value) if value else fallback
 
@@ -33,6 +47,7 @@ def config_path() -> Path:
 
 
 def temp_dir() -> Path:
+    _ensure_application_identity()
     value = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.TempLocation)
     return Path(value) / APP_NAME if value else cache_dir() / "tmp"
 
