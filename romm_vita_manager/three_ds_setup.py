@@ -26,6 +26,7 @@ from .design_tokens import DARK, brand_for_platform
 from .platform_services import temp_dir
 from .storage_detection import detect_3ds_sd_candidates
 from .storage_validation import validate_3ds_sd
+from .three_ds_readiness_ui import ThreeDSReadinessDialog
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 
 
@@ -289,10 +290,10 @@ class ThreeDSSetupDialog(QDialog):
         fbi_card.content.addLayout(url_row)
 
         runtime_card = SurfaceCard()
-        runtime_card.content.addWidget(self._card_title("Optional runtime checks"))
+        runtime_card.content.addWidget(self._card_title("Runtime and homebrew checks"))
         runtime_card.content.addWidget(
             self._secondary(
-                "These are SD-side signals for common 3DS runtimes and homebrew. They are useful diagnostics, not a requirement for basic FTP transfers."
+                "The quick list below shows common SD-side signals. Open Readiness & Runtimes for required/recommended status, dedicated emulator checks, safe 3DSX staging, and supported runtime configuration."
             )
         )
         self.component_list = QListWidget()
@@ -304,9 +305,12 @@ class ThreeDSSetupDialog(QDialog):
         refresh_components.clicked.connect(self.refresh_components)
         upstream_button = QPushButton("Open selected release")
         upstream_button.clicked.connect(self.open_upstream)
+        manage_runtimes = AccentButton("Readiness & Runtimes", NINTENDO_RED)
+        manage_runtimes.clicked.connect(self.open_readiness)
         component_buttons.addWidget(refresh_components)
         component_buttons.addWidget(upstream_button)
         component_buttons.addStretch(1)
+        component_buttons.addWidget(manage_runtimes)
         runtime_card.content.addLayout(component_buttons)
 
         close_row = QHBoxLayout()
@@ -448,6 +452,27 @@ class ThreeDSSetupDialog(QDialog):
             item.setToolTip(component.description)
             item.setData(Qt.ItemDataRole.UserRole, component.upstream_url)
             self.component_list.addItem(item)
+
+    def open_readiness(self) -> None:
+        raw = self.root_edit.text().strip()
+        if not raw:
+            QMessageBox.information(
+                self,
+                "Select the 3DS SD card",
+                "Choose or detect the mounted Nintendo 3DS SD-card root first.",
+            )
+            return
+        root = Path(raw).expanduser()
+        if not root.is_dir():
+            QMessageBox.warning(
+                self,
+                "3DS SD card unavailable",
+                f"The selected SD-card root is not available: {root}",
+            )
+            return
+        ThreeDSReadinessDialog(root, needs_ftp=True, parent=self).exec()
+        self.validate_sd()
+        self.refresh_components()
 
     def open_ftpd_upstream(self) -> None:
         if is_web_url(FTPD_RELEASE_URL):
