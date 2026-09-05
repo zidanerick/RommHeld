@@ -9,6 +9,7 @@ from romm_vita_manager.vc_runtime_profiles import (
     configured_runtime_profile,
     gba_runtime_profile_matches,
     guidance_for_family,
+    runtime_guidance_summary,
 )
 
 
@@ -33,6 +34,29 @@ def test_nes_and_snes_guidance_keep_hardware_limits_explicit():
     assert "later standard retail" in nes.recommendation
     assert snes.classification == "experimental"
     assert "preset" in snes.recommendation
+
+
+def test_runtime_guidance_summary_reports_policy_before_profile_exists():
+    summary = runtime_guidance_summary({}, "gb")
+    assert summary.startswith("Donor guidance:")
+    assert "standard late retail Game Boy VC donor" in summary
+    assert "Pokemon" in summary
+
+
+def test_runtime_guidance_summary_reports_cached_profile_status_and_id():
+    config = {
+        "classic_vc": {
+            "nes": {
+                "runtime_profile": {
+                    "classification": "hardware-retest-required",
+                    "profile_id": "abc123def456",
+                }
+            }
+        }
+    }
+    summary = runtime_guidance_summary(config, "nes")
+    assert summary.startswith("Cached profile: hardware retest required • abc123def456.")
+    assert "later standard retail NES VC donor" in summary
 
 
 def test_classic_runtime_profile_is_deterministic_and_sensitive_to_runtime_code():
