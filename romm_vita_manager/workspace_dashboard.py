@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 
 from .send_file_dialog import SendFileDialog
 from .classic_vc_deploy import ClassicVcDeployDialog
-from .config import load_config, save_config
+from .config import load_config, reset_config, save_config
 from .console_selector import PlatformSelectorDialog, RomMConnectionWorker
 from .design_tokens import DARK
 from .gba_vc_deploy import GbaVcDeployDialog
@@ -353,6 +353,20 @@ class WorkspaceDashboardWindow(QMainWindow):
         save_row.addWidget(self.settings_save_button)
         source_card.content.addLayout(save_row)
 
+        reset_card = SurfaceCard()
+        reset_card.content.addWidget(self._card_title("Application setup"))
+        reset_card.content.addWidget(
+            self._secondary(
+                "Reset saved handheld, library, device connection/storage and runtime-preference settings and return to first-run setup. ROMs, files on devices, package caches, Virtual Console donor caches and generated Title ID allocations are kept."
+            )
+        )
+        reset_row = QHBoxLayout()
+        reset_row.addStretch()
+        reset_button = QPushButton("Reset RommHeld setup")
+        reset_button.clicked.connect(self._reset_application_setup)
+        reset_row.addWidget(reset_button)
+        reset_card.content.addLayout(reset_row)
+
         layout.addWidget(source_card)
         layout.addWidget(self._runtime_preference_box())
         layout.addWidget(
@@ -360,6 +374,7 @@ class WorkspaceDashboardWindow(QMainWindow):
                 "Credentials are currently stored in local application configuration until secure credential-store migration is implemented."
             )
         )
+        layout.addWidget(reset_card)
         layout.addStretch(1)
 
         self.settings_local_radio.toggled.connect(self._settings_source_visibility)
@@ -427,6 +442,41 @@ class WorkspaceDashboardWindow(QMainWindow):
                     "neutral",
                     "Test the RomM connection before saving if these credentials changed.",
                 )
+
+    def _reset_application_setup(self) -> None:
+        if self._settings_test_running():
+            self.statusBar().showMessage(
+                "Finish the RomM connection test before resetting setup.", 4000
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Reset RommHeld setup",
+            "Reset saved handheld, library, device connection/storage and runtime-preference settings?\n\n"
+            "ROMs, files on devices, package caches, Virtual Console donor caches and generated Title ID allocations will not be deleted.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.config = reset_config()
+        except OSError as exc:
+            QMessageBox.critical(self, "Unable to reset RommHeld", str(exc))
+            return
+
+        dialog = PlatformSelectorDialog(self.config, self)
+        if dialog.exec() != dialog.DialogCode.Accepted:
+            self.close()
+            return
+        config = self._reload_config()
+        key = str(config.get("active_console", ""))
+        if key not in WORKSPACE_PROFILES:
+            self.close()
+            return
+        self.workspace_key = key
+        self._rebuild_workspace_sections()
+        self.statusBar().showMessage("RommHeld setup reset.", 3000)
 
     def _test_settings_romm(self) -> None:
         if self._settings_test_running():
