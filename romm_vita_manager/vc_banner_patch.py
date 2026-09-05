@@ -32,6 +32,42 @@ def _encode_rgb565_tiled(image: Image.Image, width: int, height: int) -> bytes:
     return bytes(out)
 
 
+def _encode_l4_tiled(image: Image.Image, width: int, height: int) -> bytes:
+    """Encode a grayscale image into Nintendo/PICA200 tiled L4.
+
+    CGFX texture format 0x0A stores two 4-bit luminance texels per byte.
+    After the normal 8x8 PICA200 swizzle, the first texel occupies the low
+    nibble and the second occupies the high nibble.  Retail Renegade uses this
+    format for localized ``COMMON2`` title-plaque textures, so treating every
+    plaque as LA8/RGB565 made otherwise-valid NES builds fail on the desktop.
+    """
+    try:
+        from agbcia.formats.pica_texture import tile_offset
+    except ImportError as exc:
+        raise RuntimeError("Virtual Console donor banner patching requires agbcia.") from exc
+
+    if width <= 0 or height <= 0 or (width * height) % 2:
+        raise ValueError(f"L4 texture dimensions must contain an even number of texels, got {width}x{height}.")
+    source = image.convert("L")
+    if source.size != (width, height):
+        source = source.resize((width, height), Image.Resampling.LANCZOS)
+
+    out = bytearray(width * height // 2)
+    pixels = source.load()
+    for y in range(height):
+        for x in range(width):
+            texel = tile_offset(x, y, width)
+            # L4 reconstructs a nibble as n*0x11. Quantize to the nearest
+            # representable luminance rather than simply truncating.
+            nibble = min(0x0F, (int(pixels[x, y]) + 8) // 17)
+            byte_index = texel >> 1
+            if texel & 1:
+                out[byte_index] = (out[byte_index] & 0x0F) | (nibble << 4)
+            else:
+                out[byte_index] = (out[byte_index] & 0xF0) | nibble
+    return bytes(out)
+
+
 def _encode_texture_mips(image: Image.Image, texture) -> bytes:
     try:
         from agbcia.formats import pica_texture
@@ -52,6 +88,8 @@ def _encode_texture_mips(image: Image.Image, texture) -> bytes:
         elif texture.hw_format == 5:  # LA8
             la = resized.convert("LA")
             chunks.append(pica_texture.encode_la8(la.tobytes(), width, height))
+        elif texture.hw_format == 10:  # L4
+            chunks.append(_encode_l4_tiled(resized, width, height))
         else:
             raise ValueError(
                 f"Unsupported game-facing donor texture format {texture.hw_format} "
