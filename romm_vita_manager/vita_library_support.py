@@ -33,6 +33,21 @@ def adrenaline_game_folder_name(game: Game) -> str:
     return sanitize_name(game.name)
 
 
+def validate_game_source(game: Game) -> None:
+    """Reject a library item whose source changed after the last scan."""
+    try:
+        current_size = game.path.stat().st_size
+    except OSError as exc:
+        raise IOError(
+            f"Source is no longer available for {game.name}. Refresh the library and retry."
+        ) from exc
+    if current_size != game.size:
+        raise IOError(
+            f"Source changed since the library scan for {game.name}: "
+            f"expected {game.size} bytes, found {current_size}. Refresh the library and retry."
+        )
+
+
 def destination_for_game(
     vita: Path,
     game: Game,
@@ -165,6 +180,8 @@ class CopyWorker(QThread):
     def run(self) -> None:
         copied = skipped = cancelled = 0
         try:
+            for game, *_ in self.jobs:
+                validate_game_source(game)
             total = sum(game.size for game, *_ in self.jobs) or 1
             completed = 0
             for game, destination, mode, label in self.jobs:
@@ -228,4 +245,5 @@ __all__ = [
     "game_status",
     "human_size",
     "sanitize_name",
+    "validate_game_source",
 ]
