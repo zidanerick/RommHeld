@@ -141,6 +141,7 @@ def install() -> None:
         publisher: str = "",
         release_year: int | None = None,
         title_version: int = 0,
+        title_id_override: bytes | None = None,
     ) -> bytes:
         family = runtime.family.lower()
         if family not in vc._CLASSIC_FAMILIES:
@@ -158,7 +159,18 @@ def install() -> None:
             payload = payload_builder(rom, family, runtime.rom_path)
         else:
             payload = vc.prepare_classic_rom(rom, family)
-        title_id = vc.classic_title_id_for_romm_id(romm_id, family)
+        if title_id_override is None:
+            title_id = vc.classic_title_id_for_romm_id(romm_id, family)
+        else:
+            title_id = bytes(title_id_override)
+            if (
+                len(title_id) != 8
+                or title_id[:4] != bytes.fromhex("00040000")
+                or title_id[-1] != 0
+            ):
+                raise ValueError(
+                    "Explicit classic VC title ID must be an 8-byte normal application ID with variation 00."
+                )
         product_code = vc._product_code(family, romm_id)
         exheader = vc._patch_exheader(runtime.exheader, title_id, product_code)
 
