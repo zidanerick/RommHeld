@@ -21,6 +21,7 @@ from .config import save_config
 from .design_tokens import DARK, brand_for_platform
 from .file_transfer import required_transfer_space, transfer_file
 from .local_storage import resolve_destination, resolve_storage_root, storage_summary
+from .storage_validation import validate_3ds_sd
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 
 
@@ -95,11 +96,12 @@ class MountedStorageDialog(QDialog):
 
         storage_card = SurfaceCard()
         storage_card.content.addWidget(self._card_title("1 · Select removable storage"))
-        storage_card.content.addWidget(
-            self._secondary(
-                "Select the mounted SD card or removable-storage root. The validated root is remembered for this device."
-            )
+        storage_help = (
+            "Select the Nintendo 3DS SD or microSD root mounted through a card reader. RommHeld requires medium or high-confidence 3DS markers before enabling writes."
+            if self.device_key == "3ds"
+            else "Select the mounted SD card or removable-storage root. The validated root is remembered for this device."
         )
+        storage_card.content.addWidget(self._secondary(storage_help))
         root_row = QHBoxLayout()
         root_row.setSpacing(8)
         self.root_edit = QLineEdit(str(saved.get("storage_root", "")))
@@ -207,13 +209,24 @@ class MountedStorageDialog(QDialog):
         label.setStyleSheet(f"color:{DARK.text_secondary};background:transparent;")
         return label
 
+    def _validate_device_root(self, root: Path) -> str:
+        if self.device_key != "3ds":
+            return ""
+        validation = validate_3ds_sd(root)
+        if validation.confidence not in {"medium", "high"}:
+            raise ValueError(
+                "Selected directory does not have enough Nintendo 3DS SD-card markers. Choose the card root that contains files such as boot.firm, boot.3dsx, luma/, or gm9/."
+            )
+        return f"{validation.kind} · {validation.confidence} confidence"
+
     def _selection_changed(self) -> None:
         if self.worker is not None and self.worker.isRunning():
             return
         source = Path(self.local_edit.text()).expanduser()
         root_ready = False
         try:
-            resolve_storage_root(self.root_edit.text())
+            root = resolve_storage_root(self.root_edit.text())
+            self._validate_device_root(root)
             root_ready = True
         except Exception:
             pass
@@ -246,14 +259,16 @@ class MountedStorageDialog(QDialog):
     def refresh_storage(self) -> None:
         try:
             root = resolve_storage_root(self.root_edit.text())
+            validation = self._validate_device_root(root)
             total, free = storage_summary(root)
+            prefix = f"{root} · {validation}" if validation else str(root)
             if total is not None and free is not None:
                 self.storage_status.setText(
-                    f"{root} · {_human_size(free)} free of {_human_size(total)}"
+                    f"{prefix} · {_human_size(free)} free of {_human_size(total)}"
                 )
                 self.storage_pill.set_value(f"{_human_size(free)} free")
             else:
-                self.storage_status.setText(f"{root} · free space unavailable")
+                self.storage_status.setText(f"{prefix} · free space unavailable")
                 self.storage_pill.set_value("Mounted")
 
             cfg = dict(self.config)
@@ -273,6 +288,7 @@ class MountedStorageDialog(QDialog):
     def start_transfer(self) -> None:
         try:
             root = resolve_storage_root(self.root_edit.text())
+            self._validate_device_root(root)
             source = Path(self.local_edit.text()).expanduser()
             if not source.is_file():
                 raise FileNotFoundError("Choose an existing local file.")
