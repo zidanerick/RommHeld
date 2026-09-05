@@ -28,3 +28,17 @@ def test_send_file_dialog_cannot_accept_while_transfer_thread_is_active():
     assert "self.done_button.setEnabled(True)" in source
     assert "self._set_transfer_inputs_enabled(False)" in source
     assert "self._set_transfer_inputs_enabled(True)" in source
+
+
+def test_send_file_dialog_blocks_all_dismissal_paths_during_transfer():
+    source = source_text()
+
+    assert "def _worker_active(self) -> bool:" in source
+    assert "return self.worker is not None and self.worker.isRunning()" in source
+    assert "def accept(self) -> None:" in source
+    assert "def reject(self) -> None:" in source
+    assert "def closeEvent(self, event: QCloseEvent) -> None:" in source
+    assert source.count("if self._worker_active():") >= 3
+    assert "super().accept()" in source
+    assert "super().reject()" in source
+    assert "super().closeEvent(event)" in source
