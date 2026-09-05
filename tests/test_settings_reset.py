@@ -43,9 +43,12 @@ def test_settings_exposes_confirmed_application_setup_reset() -> None:
         encoding="utf-8"
     )
 
-    assert 'reset_button = QPushButton("Reset RommHeld setup")' in source
+    assert 'reset_button = QPushButton("Reset setup")' in source
     assert "reset_button.clicked.connect(self._reset_application_setup)" in source
     assert "def _reset_application_setup(self) -> None:" in source
+    assert 'confirm.addButton("Reset setup", QMessageBox.ButtonRole.DestructiveRole)' in source
+    assert 'confirm.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)' in source
+    assert "confirm.clickedButton() is not reset_button" in source
     assert "self.config = reset_config()" in source
     assert "PlatformSelectorDialog(self.config, self)" in source
-    assert "Virtual Console donor caches and generated Title ID allocations will not be deleted." in source
+    assert "Virtual Console donor caches and generated Title ID allocations will be kept." in source
