@@ -30,24 +30,17 @@ class VcPresentationProfile:
 
 
 _PROFILES = {
-    # Rectangles/textures were measured from the user-supplied retail European
-    # donors. Everything outside a measured inner label is retained from the
-    # donor. No Nintendo binary/texture is embedded in RommHeld.
     "gb": VcPresentationProfile("gb", "COMMON1", (28, 20, 101, 87), "COMMON2", True),
     "gbc": VcPresentationProfile("gbc", "COMMON1", (30, 20, 100, 94), "COMMON2", True),
-    # GBA's square game texture occupies all of COMMON1; cartridge/box geometry
-    # lives in the donor's CGFX scene. Its donor uses COMMON2 for the VC plaque.
     "gba": VcPresentationProfile("gba", "COMMON1", None, "COMMON2", False),
-    # Renegade's NES donor uses COMMON1 as its game/title-screen texture. The
-    # remaining COMMON textures are scene/system materials and stay untouched.
-    "nes": VcPresentationProfile("nes", "COMMON1", None, None, False),
-    # Mario's Super Picross similarly uses COMMON1 as its title artwork. SNES is
-    # still New-3DS-only at the runtime layer; this profile does not enable it.
+    # Renegade keeps its 3D NES/game scene in common, but the visible 256x64
+    # Virtual Console title plaque is COMMON2 in the populated language scenes.
+    "nes": VcPresentationProfile("nes", "COMMON1", None, "COMMON2", True),
     "snes": VcPresentationProfile("snes", "COMMON1", None, None, False),
-    # Sonic 2's Game Gear donor is different: COMMON2 is the game image and
-    # COMMON3 is the Game Gear hardware-shell atlas. Its SMDH is full-art too.
+    # Sonic 2 keeps COMMON3 as the Game Gear shell. Localized scenes use
+    # TitlePlate for the lower VC/title plaque and may repeat COMMON2 artwork.
     "gamegear": VcPresentationProfile(
-        "gamegear", "COMMON2", None, None, False, icon_mode="full"
+        "gamegear", "COMMON2", None, "TitlePlate", True, icon_mode="full"
     ),
 }
 
@@ -96,7 +89,6 @@ def _decode_rgba8(raw: bytes, width: int, height: int) -> Image.Image:
 
 
 def _decode_rgb565(raw: bytes, width: int, height: int) -> Image.Image:
-    """Decode a PICA RGB565 donor texture's highest-resolution mip."""
     required = width * height * 2
     if len(raw) < required:
         raise ValueError("Donor RGB565 texture is truncated.")
@@ -127,28 +119,54 @@ def _decode_la8(raw: bytes, width: int, height: int) -> Image.Image:
     return Image.frombytes("LA", (width, height), bytes(out))
 
 
-def _donor_texture_image(donor_banner: bytes, name: str) -> Image.Image:
-    """Decode one game-facing texture from the user's cached retail banner."""
+def _banner_cgfx_slots(donor_banner: bytes) -> list[bytes]:
+    """Return every populated donor CBMD language scene, common first."""
     try:
-        from agbcia.formats import cbmd, cgfx, lz11
+        from agbcia.formats import lz11
     except ImportError as exc:
         raise RuntimeError("Donor-derived Virtual Console presentation requires agbcia.") from exc
+    if len(donor_banner) < 0x88 or donor_banner[:4] != b"CBMD":
+        raise ValueError("Virtual Console donor banner is not a valid CBMD container.")
+    scenes: list[bytes] = []
+    for index in range(14):
+        offset = int.from_bytes(donor_banner[0x08 + index * 4 : 0x0C + index * 4], "little")
+        if offset:
+            if offset >= len(donor_banner):
+                raise ValueError("Virtual Console donor banner has an invalid language-scene offset.")
+            scenes.append(lz11.decompress(donor_banner[offset:]))
+    if not scenes:
+        raise ValueError("Virtual Console donor banner has no CGFX presentation scenes.")
+    return scenes
 
-    common = lz11.decompress(cbmd.extract_common_cgfx(donor_banner))
-    texture = cgfx.find_texture(common, name)
-    raw = common[
-        texture.raw_buffer_offset : texture.raw_buffer_offset + texture.raw_buffer_length
-    ]
-    if texture.hw_format == 0:  # PICA RGBA8
+
+def _texture_image_from_cgfx(scene: bytes, name: str) -> Image.Image:
+    try:
+        from agbcia.formats import cgfx
+    except ImportError as exc:
+        raise RuntimeError("Donor-derived Virtual Console presentation requires agbcia.") from exc
+    texture = cgfx.find_texture(scene, name)
+    raw = scene[texture.raw_buffer_offset : texture.raw_buffer_offset + texture.raw_buffer_length]
+    if texture.hw_format == 0:
         return _decode_rgba8(raw, texture.width, texture.height)
-    if texture.hw_format == 3:  # PICA RGB565 (NES / Game Gear supplied donors)
+    if texture.hw_format == 3:
         return _decode_rgb565(raw, texture.width, texture.height)
-    if texture.hw_format == 5:  # PICA LA8
+    if texture.hw_format == 5:
         return _decode_la8(raw, texture.width, texture.height)
     raise ValueError(
         f"Unsupported donor texture format for {name}: {texture.hw_format} "
         f"({texture.width}x{texture.height})."
     )
+
+
+def _donor_texture_image(donor_banner: bytes, name: str) -> Image.Image:
+    """Decode a texture from common, falling back to localized donor scenes."""
+    last_error: Exception | None = None
+    for scene in _banner_cgfx_slots(donor_banner):
+        try:
+            return _texture_image_from_cgfx(scene, name)
+        except Exception as exc:
+            last_error = exc
+    raise ValueError(f"Donor banner has no usable texture named {name!r}.") from last_error
 
 
 def _png(image: Image.Image) -> bytes:
@@ -162,24 +180,18 @@ def prepare_official_vc_front_artwork(
     artwork: "ImageSource",
     family: str,
 ) -> bytes:
-    """Build the family-specific game texture while retaining donor scene chrome."""
     profile = presentation_profile(family)
     source = _load_image(artwork).convert("RGBA")
     donor = _donor_texture_image(donor_banner, profile.artwork_texture).convert("RGBA")
     layout = banner_layout_for_family(profile.family)
 
     if profile.front_label_rect is None:
-        replacement = prepare_artwork_for_viewport(source, donor.size, layout)
-        return _png(replacement)
+        return _png(prepare_artwork_for_viewport(source, donor.size, layout))
 
     left, top, right, bottom = profile.front_label_rect
     if not (0 <= left < right <= donor.width and 0 <= top < bottom <= donor.height):
         raise ValueError("Virtual Console donor label rectangle is outside its artwork texture.")
-    replacement = prepare_artwork_for_viewport(
-        source,
-        (right - left, bottom - top),
-        layout,
-    )
+    replacement = prepare_artwork_for_viewport(source, (right - left, bottom - top), layout)
     result = donor.copy()
     result.alpha_composite(replacement, (left, top))
     return _png(result)
@@ -231,7 +243,6 @@ def _wrap_lines(
 
 
 def _clear_badge_title_panel(image: Image.Image) -> Image.Image:
-    """Remove donor-specific text while retaining its exact badge chrome."""
     badge = image.convert("LA").copy()
     width, height = badge.size
     left = max(1, round(width * 0.375))
@@ -258,14 +269,11 @@ def prepare_official_vc_badge(
     *,
     release_year: int | None = None,
 ) -> bytes | None:
-    """Rebuild a donor VC plaque, or return None for families without one."""
     profile = presentation_profile(family)
     if profile.badge_texture is None:
         return None
 
-    badge = _clear_badge_title_panel(
-        _donor_texture_image(donor_banner, profile.badge_texture)
-    )
+    badge = _clear_badge_title_panel(_donor_texture_image(donor_banner, profile.badge_texture))
     width, height = badge.size
     draw = ImageDraw.Draw(badge)
     content_left = round(width * 0.385)
@@ -273,11 +281,7 @@ def prepare_official_vc_badge(
     content_width = content_right - content_left
 
     clean_title = " ".join(str(title).replace("\x00", " ").split()).strip() or "Untitled Game"
-    show_release = (
-        profile.show_release_year
-        and release_year is not None
-        and 1900 <= release_year <= 2200
-    )
+    show_release = profile.show_release_year and release_year is not None and 1900 <= release_year <= 2200
 
     chosen_font = _font(15)
     chosen_lines = [clean_title]
@@ -285,8 +289,6 @@ def prepare_official_vc_badge(
     for size in range(16, 9, -1):
         candidate_font = _font(size)
         lines = _wrap_lines(draw, clean_title, candidate_font, content_width, 2)
-        if len(lines) > 2:
-            continue
         boxes = [draw.textbbox((0, 0), line, font=candidate_font) for line in lines]
         total = sum(box[3] - box[1] for box in boxes) + max(0, len(lines) - 1)
         if all(box[2] - box[0] <= content_width for box in boxes) and total <= title_height_limit:
@@ -321,13 +323,6 @@ def prepare_official_vc_icon_artwork(
     artwork: "ImageSource",
     family: str | None = None,
 ) -> bytes:
-    """Build a family-appropriate SMDH source image from donor conventions.
-
-    GB/GBC/GBA/NES/SNES retain the donor's four-pixel outer icon chrome and
-    replace its interior. The supplied Game Gear donor uses full-art icons, so
-    that family intentionally replaces all 48x48 pixels. ``family=None`` keeps
-    backward compatibility with the pre-profile framed behavior.
-    """
     try:
         from agbcia.formats import smdh as smdh_format
     except ImportError as exc:
@@ -355,11 +350,7 @@ def prepare_official_vc_icon_artwork(
     interior_size = frame.width - inset * 2
     if interior_size <= 0:
         raise ValueError("Donor SMDH icon is too small for its retail frame.")
-    interior = prepare_artwork_for_viewport(
-        source,
-        (interior_size, interior_size),
-        ICON_LAYOUT,
-    )
+    interior = prepare_artwork_for_viewport(source, (interior_size, interior_size), ICON_LAYOUT)
     result = frame.copy()
     result.alpha_composite(interior, (inset, inset))
     return _png(result)
