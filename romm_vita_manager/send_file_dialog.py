@@ -24,7 +24,7 @@ from .config import load_config, save_config
 from .design_tokens import DARK, brand_for_platform
 from .file_transfer import required_transfer_space, transfer_file
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
-from .vita import free_space
+from .vita import free_space, is_vita_mount
 from .vita_ftp import VitaFtpBackend, VitaFtpSettings
 from .vita_paths import vita_target
 
@@ -117,7 +117,8 @@ class SendFileDialog(QDialog):
 
     def __init__(self, vita: Path | None, parent=None):
         super().__init__(parent)
-        self.vita = vita
+        self.vita = vita if vita is not None and is_vita_mount(vita) else None
+        vita = self.vita
         self.worker: SendFileWorker | VitaFtpSendWorker | None = None
         self.overwrite = False
         self._pending_overwrite_retry = False
@@ -379,10 +380,15 @@ class SendFileDialog(QDialog):
                 )
                 status_text = f"Uploading {source.name} to {destination_text} through VitaShell FTP…"
             else:
+                if self.vita is None or not is_vita_mount(self.vita):
+                    self.vita = None
+                    raise RuntimeError(
+                        "The VitaShell USB mount is no longer available. Reconnect the Vita or choose VitaShell FTP."
+                    )
                 destination = self.selected_destination()
                 available = None
                 try:
-                    available = free_space(self.vita) if self.vita else None
+                    available = free_space(self.vita)
                 except OSError:
                     pass
                 needed = required_transfer_space(
