@@ -1,5 +1,6 @@
 from romm_vita_manager.three_ds_targets import (
     THREE_DS_PLATFORM_SLUGS,
+    RETROACHIEVEMENTS_RETROARCH_PLATFORM_SLUGS,
     RETROARCH_TARGET_PLATFORM_SLUGS,
     available_targets,
     compatible_platform,
@@ -47,8 +48,13 @@ def test_runtime_preference_chooses_dedicated_routes_by_default():
     assert preferred_target_key("3ds") == "native_3ds_cia"
 
 
-def test_retroachievements_preference_uses_retroarch_only_when_exposed():
-    assert preferred_target_key("gba", "retroachievements") == "retroarch"
+def test_retroachievements_preference_uses_only_verified_current_3ds_core_routes():
+    for slug in ("gba", "gb", "gbc", "nes", "gamegear", "sms", "genesis", "sega32", "segacd"):
+        assert slug in RETROACHIEVEMENTS_RETROARCH_PLATFORM_SLUGS
+        assert preferred_target_key(slug, "retroachievements") == "retroarch"
+
+    assert "snes" not in RETROACHIEVEMENTS_RETROARCH_PLATFORM_SLUGS
+    assert preferred_target_key("snes", "retroachievements") == "vc_cia"
     assert preferred_target_key("n64", "retroachievements") == "daedalusx64"
     assert preferred_target_key("nds", "retroachievements") == "twilight"
     assert preferred_target_key("virtualboy", "retroachievements") == "red_viper"
