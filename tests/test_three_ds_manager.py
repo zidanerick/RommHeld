@@ -69,3 +69,12 @@ def test_manager_locks_selection_during_transfer():
     source = MANAGER_PATH.read_text(encoding="utf-8")
 
     assert "self.game_list.setEnabled(not ftp_busy and not library_busy)" in source
+
+
+def test_manager_propagates_cancel_to_romm_download_and_handles_interrupt_cleanly():
+    source = MANAGER_PATH.read_text(encoding="utf-8")
+
+    assert "cancel_event=self.cancel_event" in source
+    assert "progress=lambda done, _total: self.progress.emit(done)" in source
+    assert "except InterruptedError:" in source
+    assert 'self.completed.emit("cancelled")' in source
