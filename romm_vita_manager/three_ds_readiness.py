@@ -158,12 +158,16 @@ def build_readiness_requirements(
             "required",
             f"The selected {target_key} deployment route requires this runtime.",
         )
-        if target_key == "red_viper":
+        if target_key in {"red_viper", "daedalusx64"}:
             _append_requirement(
                 result,
                 "dsp-firmware",
                 "recommended",
-                "Red Viper documents DSP firmware as a troubleshooting prerequisite on modded 3DS systems.",
+                (
+                    "Red Viper documents DSP firmware as a troubleshooting prerequisite on modded 3DS systems."
+                    if target_key == "red_viper"
+                    else "DaedalusX64's upstream 3DS release recommends a dumped DSP firmware when game launch freezes."
+                ),
             )
 
     if include_utilities:
