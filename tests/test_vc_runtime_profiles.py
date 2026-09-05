@@ -87,6 +87,26 @@ def test_runtime_guidance_surfaces_emulator_build_and_safe_profile_details():
     assert f"config.ini SHA-256: {config_hash}" in details
 
 
+def test_runtime_guidance_flags_donor_specific_patch_data_without_reclassifying_runtime():
+    profile = build_classic_runtime_profile(
+        "gbc",
+        {"title_id": "0004000001234500"},
+        code=b"code",
+        exheader=b"exheader",
+        romfs_template=b"romfs",
+        rom_path="/rom/game.gbc",
+        donor_patch_names=("/rom/ignored.patch", "pokemon.patch", "POKEMON.PATCH"),
+    )
+    config = {"classic_vc": {"gbc": {"runtime_profile": profile}}}
+
+    assert profile["classification"] == "profile-unverified"
+    assert profile["donor_patch_names"] == ["pokemon.patch", "POKEMON.PATCH"]
+    summary = runtime_guidance_summary(config, "gbc")
+    assert "Donor-specific .patch data was detected and is stripped before reuse." in summary
+    details = runtime_guidance_details(config, "gbc")
+    assert "Donor game-specific patch files: pokemon.patch, POKEMON.PATCH" in details
+
+
 def test_classic_runtime_profile_is_deterministic_and_sensitive_to_runtime_code():
     kwargs = {
         "family": "nes",
