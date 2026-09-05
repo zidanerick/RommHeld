@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QPixmap
@@ -17,6 +18,9 @@ from PySide6.QtWidgets import (
 
 from .design_tokens import DARK, SIDEBAR_WIDTH, brand_for_platform
 from .platform_assets import get_platform_assets
+
+
+BRAND_ASSET = Path(__file__).resolve().parent.parent / "assets" / "branding" / "rommheld.svg"
 
 
 @dataclass(frozen=True)
@@ -54,12 +58,7 @@ WORKSPACE_PROFILES = {
 
 
 class ManagementShell(QWidget):
-    """Stable single-window shell with console branding and sidebar navigation.
-
-    The public section API intentionally matches the previous tab shell so the
-    device and library features can move into the new design without rewriting
-    their business logic.
-    """
+    """Stable single-window shell with console branding and sidebar navigation."""
 
     navigation_requested = Signal(str)
     change_handheld_requested = Signal()
@@ -89,6 +88,7 @@ class ManagementShell(QWidget):
         brand_row.setSpacing(9)
         self.brand_mark = QLabel("RH")
         self.brand_mark.setObjectName("brandMark")
+        self.brand_mark.setProperty("asset", False)
         self.brand_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.brand_mark.setFixedSize(34, 34)
         brand_row.addWidget(self.brand_mark)
@@ -187,7 +187,28 @@ class ManagementShell(QWidget):
         content_layout.addWidget(self.stack, 1)
         root.addWidget(self.content_root, 1)
 
+        self._load_brand_mark()
         self._load_logo()
+
+    def _load_brand_mark(self) -> None:
+        pixmap = QPixmap(str(BRAND_ASSET)) if BRAND_ASSET.is_file() else QPixmap()
+        if pixmap.isNull() or pixmap.height() <= 0:
+            self.brand_mark.setText("RH")
+            self.brand_mark.setProperty("asset", False)
+        else:
+            side = min(pixmap.height(), pixmap.width())
+            icon = pixmap.copy(0, 0, side, side).scaled(
+                32,
+                32,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.brand_mark.setText("")
+            self.brand_mark.setPixmap(icon)
+            self.brand_mark.setProperty("asset", True)
+        self.brand_mark.style().unpolish(self.brand_mark)
+        self.brand_mark.style().polish(self.brand_mark)
+        self.brand_mark.update()
 
     def _make_device_status(self, label: str, key: str) -> QWidget:
         container = QFrame()
@@ -342,12 +363,16 @@ class ManagementShell(QWidget):
             background:{DARK.sidebar};
             border-right:1px solid #252528;
         }}
-        QLabel#brandMark {{
+        QLabel#brandMark[asset="false"] {{
             background:{p.accent};
             color:#ffffff;
             border-radius:9px;
             font-size:11px;
             font-weight:800;
+        }}
+        QLabel#brandMark[asset="true"] {{
+            background:transparent;
+            border:none;
         }}
         QLabel#appName {{ color:{DARK.text_primary}; font-size:16px; font-weight:700; }}
         QLabel#appSubtitle {{ color:{DARK.text_tertiary}; font-size:9px; }}
