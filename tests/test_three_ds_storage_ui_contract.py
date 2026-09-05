@@ -56,8 +56,8 @@ def test_3ds_ui_describes_direct_card_access_without_claiming_console_usb_storag
     setup = SETUP_PATH.read_text(encoding="utf-8")
     deploy = DEPLOY_PATH.read_text(encoding="utf-8")
 
-    assert "Nintendo 3DS systems do not expose a standard USB mass-storage mode" in dashboard
-    assert "Mounted SD" in dashboard
+    assert "Mounted SD is the fastest offline route" in dashboard
+    assert "ftpd is the live-console wireless route" in dashboard
     assert "direct/offline file access" in setup
     assert "card reader" in setup
     assert "card reader" in deploy
@@ -98,7 +98,7 @@ def test_generated_cia_sd_copy_remains_post_install_manual():
     gba = GBA_DEPLOY_PATH.read_text(encoding="utf-8")
     classic = CLASSIC_DEPLOY_PATH.read_text(encoding="utf-8")
 
-    assert "Install copied CIAs later with FBI" in gba
-    assert "return it to the console, then install the CIA with FBI" in gba
-    assert "return it to the console, then install the CIA with FBI" in classic
-    assert "Install it later with FBI" in classic
+    for source in (gba, classic):
+        assert "Copy complete" in source
+        assert "Open FBI on the 3DS" in source
+        assert "does not install the CIA" in source
