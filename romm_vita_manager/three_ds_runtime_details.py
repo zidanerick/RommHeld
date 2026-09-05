@@ -225,6 +225,11 @@ RETROARCH_CORE_PROFILES: dict[str, RetroArchCoreProfile] = {
             ),
         ),
     ),
+    "virtualboy": RetroArchCoreProfile(
+        "virtualboy",
+        ("mednafen_vb",),
+        ("mednafen_vb",),
+    ),
 }
 
 
