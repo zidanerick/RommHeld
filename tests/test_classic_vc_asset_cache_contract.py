@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 import romm_vita_manager.classic_vc_assets as assets
+from romm_vita_manager.classic_vc import build_romfs
 from romm_vita_manager.vc_runtime_profiles import build_classic_runtime_profile
 
 
@@ -34,6 +35,22 @@ def _cache_config(tmp_path: Path, family: str, version: int, *, ncch_logo: bool 
         path.write_bytes(b"L" * 0x2000)
         entry["ncch_logo_path"] = str(path)
     return {"classic_vc": {family: entry}}
+
+
+def test_runtime_profile_metadata_extracts_buildtime_and_config_fingerprint() -> None:
+    config_ini = b"[CGB]\nWidth=320\n"
+    romfs = build_romfs(
+        {
+            "/buildtime.txt": b"  2016-02-03\x00 04:05:06\n",
+            "/config.ini": config_ini,
+            "/rom/TEST.000": b"",
+        }
+    )
+
+    build_label, config_hash = assets._runtime_profile_metadata(romfs)
+
+    assert build_label == "2016-02-03 04:05:06"
+    assert config_hash == hashlib.sha256(config_ini).hexdigest()
 
 
 def test_v4_gbc_cache_remains_usable_without_forcing_working_family_reprepare(
