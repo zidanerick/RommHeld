@@ -98,7 +98,7 @@ def test_generated_cia_sd_copy_remains_post_install_manual():
     gba = GBA_DEPLOY_PATH.read_text(encoding="utf-8")
     classic = CLASSIC_DEPLOY_PATH.read_text(encoding="utf-8")
 
-    for source in (gba, classic):
-        assert "Copy complete" in source
-        assert "Open FBI on the 3DS" in source
-        assert "does not install the CIA" in source
+    assert "Install copied CIAs later with FBI" in gba
+    assert "return it to the console, then install the CIA with FBI" in gba
+    assert "return it to the console, then install the CIA with FBI" in classic
+    assert "Install it later with FBI" in classic
