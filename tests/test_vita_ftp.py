@@ -194,10 +194,15 @@ def make_backend(ftp_factory=FakeVitaFTP) -> VitaFtpBackend:
 
 
 def test_vita_ftp_paths_are_constrained_to_ux0():
+    assert normalize_vita_ftp_path("ux0:") == "/ux0:"
     assert normalize_vita_ftp_path("ux0:/data/game.bin") == "/ux0:/data/game.bin"
+    assert join_vita_ftp_path("/ux0:", "ux0:") == "/ux0:"
+    assert join_vita_ftp_path("/ux0:", "ux0:/") == "/ux0:"
     assert join_vita_ftp_path("/ux0:", "data/game.bin") == "/ux0:/data/game.bin"
     with pytest.raises(ValueError):
         join_vita_ftp_path("/ux0:", "uma0:/game.bin")
+    with pytest.raises(ValueError):
+        join_vita_ftp_path("/ux0:", "uma0:")
     with pytest.raises(ValueError):
         join_vita_ftp_path("/ux0:", "../game.bin")
 
