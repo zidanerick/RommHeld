@@ -243,7 +243,13 @@ class VitaSetupDialog(QDialog):
             name.setStyleSheet(
                 f"color:{DARK.text_primary};font-weight:700;background:transparent;"
             )
-            state = "Detected" if installed.get(emulator.key) else "Not detected"
+            state = (
+                "Not checked"
+                if vita is None
+                else "Detected"
+                if installed.get(emulator.key)
+                else "Not detected"
+            )
             detail = QLabel(f"{state} · {emulator.achievement_role}")
             detail.setWordWrap(True)
             detail.setStyleSheet(
