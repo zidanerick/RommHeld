@@ -1,8 +1,11 @@
+import pytest
+
 from romm_vita_manager.three_ds_targets import (
     THREE_DS_PLATFORM_SLUGS,
     RETROACHIEVEMENTS_RETROARCH_PLATFORM_SLUGS,
     RETROARCH_TARGET_PLATFORM_SLUGS,
     available_targets,
+    available_targets_for_file,
     compatible_platform,
     default_destination,
     preferred_target_key,
@@ -35,9 +38,14 @@ def test_dedicated_runtime_platforms_are_exposed_without_forcing_retroarch():
         assert compatible_platform(slug)
 
 
-def test_3ds_exposes_existing_cia_target():
+def test_3ds_exposes_existing_cia_target_only_for_cia_payloads():
     assert compatible_platform("3ds")
     assert [target.key for target in available_targets("3ds")] == ["native_3ds_cia"]
+    assert [target.key for target in available_targets_for_file("3ds", "Homebrew.cia")] == [
+        "native_3ds_cia"
+    ]
+    assert available_targets_for_file("3ds", "Cartridge.3ds") == ()
+    assert available_targets_for_file("3ds", "Homebrew.3dsx") == ()
 
 
 def test_runtime_preference_chooses_dedicated_routes_by_default():
@@ -83,4 +91,11 @@ def test_default_destinations_are_stable_and_explicit():
     assert default_destination("vc_cia", "nes", "Renegade.nes") == "/cias/Renegade.cia"
     assert default_destination("vc_cia", "gamegear", "Sonic.gg") == "/cias/Sonic.cia"
     assert default_destination("vc_cia", "snes", "Super Metroid.sfc") == "/cias/Super Metroid.cia"
-    assert default_destination("native_3ds_cia", "3ds", "Metroid.3ds") == "/cias/Metroid.cia"
+    assert default_destination("native_3ds_cia", "3ds", "Homebrew.cia") == "/cias/Homebrew.cia"
+
+
+def test_existing_3ds_cia_destination_refuses_non_cia_payloads():
+    with pytest.raises(ValueError, match="requires a .cia source file"):
+        default_destination("native_3ds_cia", "3ds", "Cartridge.3ds")
+    with pytest.raises(ValueError, match="requires a .cia source file"):
+        default_destination("native_3ds_cia", "3ds", "Homebrew.3dsx")
