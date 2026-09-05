@@ -5,6 +5,12 @@ from PIL import Image
 from .vc_presentation import presentation_profile
 
 
+_CBMD_HEADER_SIZE = 0x88
+_CBMD_SLOT_COUNT = 14
+_CBMD_SLOT_TABLE = 0x08
+_CBMD_CWAV_OFFSET = 0x84
+
+
 def _encode_rgb565_tiled(image: Image.Image, width: int, height: int) -> bytes:
     """Encode row-major RGB artwork into the PICA200 tiled RGB565 format."""
     try:
@@ -72,6 +78,87 @@ def _patch_image(cgfx_bytes: bytes, texture_name: str, image_source) -> bytes:
     return cgfx.patch_texture(cgfx_bytes, texture, encoded)
 
 
+def _patch_image_if_present(cgfx_bytes: bytes, texture_name: str, image_source) -> tuple[bytes, bool]:
+    try:
+        from agbcia.exceptions import InvalidAssetError
+        from agbcia.formats import cgfx
+    except ImportError as exc:
+        raise RuntimeError("Virtual Console donor banner patching requires agbcia.") from exc
+    try:
+        cgfx.find_texture(cgfx_bytes, texture_name)
+    except InvalidAssetError:
+        return cgfx_bytes, False
+    return _patch_image(cgfx_bytes, texture_name, image_source), True
+
+
+def _donor_slots(donor_banner: bytes) -> list[tuple[int, bytes]]:
+    try:
+        from agbcia.formats import lz11
+    except ImportError as exc:
+        raise RuntimeError("Virtual Console donor banner patching requires agbcia.") from exc
+    if len(donor_banner) < _CBMD_HEADER_SIZE or donor_banner[:4] != b"CBMD":
+        raise ValueError("Virtual Console donor banner is not a valid CBMD container.")
+    result: list[tuple[int, bytes]] = []
+    for slot in range(_CBMD_SLOT_COUNT):
+        field = _CBMD_SLOT_TABLE + slot * 4
+        offset = int.from_bytes(donor_banner[field : field + 4], "little")
+        if offset:
+            if offset >= len(donor_banner):
+                raise ValueError("Virtual Console donor banner has an invalid CGFX slot offset.")
+            result.append((slot, lz11.decompress(donor_banner[offset:])))
+    if not result:
+        raise ValueError("Virtual Console donor banner has no populated CGFX scenes.")
+    return result
+
+
+def _rebuild_cbmd_preserving_slots(
+    donor_banner: bytes,
+    scenes: list[tuple[int, bytes]],
+) -> bytes:
+    """Rebuild a donor CBMD without discarding language scenes or CWAV audio."""
+    try:
+        from agbcia.formats import lz11
+    except ImportError as exc:
+        raise RuntimeError("Virtual Console donor banner patching requires agbcia.") from exc
+
+    header = bytearray(donor_banner[:_CBMD_HEADER_SIZE])
+    header[_CBMD_SLOT_TABLE : _CBMD_SLOT_TABLE + _CBMD_SLOT_COUNT * 4] = bytes(
+        _CBMD_SLOT_COUNT * 4
+    )
+    header[_CBMD_CWAV_OFFSET : _CBMD_CWAV_OFFSET + 4] = bytes(4)
+    body = bytearray()
+
+    for slot, scene in sorted(scenes):
+        absolute = _CBMD_HEADER_SIZE + len(body)
+        field = _CBMD_SLOT_TABLE + slot * 4
+        header[field : field + 4] = absolute.to_bytes(4, "little")
+        body += lz11.compress(scene)
+
+    donor_cwav_offset = int.from_bytes(
+        donor_banner[_CBMD_CWAV_OFFSET : _CBMD_CWAV_OFFSET + 4], "little"
+    )
+    if donor_cwav_offset:
+        if not (_CBMD_HEADER_SIZE <= donor_cwav_offset <= len(donor_banner)):
+            raise ValueError("Virtual Console donor banner has an invalid CWAV offset.")
+        while (_CBMD_HEADER_SIZE + len(body)) % 0x10:
+            body.append(0)
+        new_cwav_offset = _CBMD_HEADER_SIZE + len(body)
+        header[_CBMD_CWAV_OFFSET : _CBMD_CWAV_OFFSET + 4] = new_cwav_offset.to_bytes(
+            4, "little"
+        )
+        body += donor_banner[donor_cwav_offset:]
+
+    rebuilt = bytes(header) + bytes(body)
+    # Every original populated slot must remain populated. This guards against
+    # the exact regression that produced a blank NES information plaque: the
+    # first implementation rebuilt only CBMD's common scene.
+    for slot, _ in scenes:
+        field = _CBMD_SLOT_TABLE + slot * 4
+        if int.from_bytes(rebuilt[field : field + 4], "little") == 0:
+            raise ValueError(f"Rebuilt VC banner lost donor language slot {slot}.")
+    return rebuilt
+
+
 def patch_official_vc_banner(
     donor_banner: bytes,
     front_artwork,
@@ -79,34 +166,44 @@ def patch_official_vc_banner(
     *,
     badge_image=None,
 ) -> bytes:
-    """Patch only the game-specific textures in a locally supplied VC banner.
+    """Patch game-facing textures while preserving the full retail CBMD.
 
-    This is intentionally profile-driven rather than agbcia's GBA-specific
-    ``patch_donor_banner`` helper. NES uses RGB565 COMMON1, SNES uses RGBA8
-    COMMON1, and Game Gear uses RGB565 COMMON2 while COMMON3 is its hardware
-    shell. All mesh, animation, material and unrelated system textures remain
-    byte-identical in the decompressed donor CGFX.
+    Nintendo's banner layout is family-specific. NES keeps its VC/title plaque
+    only in language CGFX slots; Game Gear uses ``TitlePlate`` there and repeats
+    its game artwork in some localized scenes. GB/GBC also ship localized badge
+    scenes. Rebuilding only the common scene silently discarded those assets,
+    producing the blank white NES panel seen on hardware. We now patch every
+    donor scene in place and preserve its original language-slot topology and
+    CWAV audio.
     """
-    try:
-        from agbcia.formats import cbmd, lz11
-    except ImportError as exc:
-        raise RuntimeError("Virtual Console donor banner patching requires agbcia.") from exc
-
     profile = presentation_profile(family)
-    compressed = cbmd.extract_common_cgfx(donor_banner)
-    donor_cgfx = lz11.decompress(compressed)
-    patched = _patch_image(donor_cgfx, profile.artwork_texture, front_artwork)
-
-    if profile.badge_texture is not None:
-        if badge_image is None:
-            raise ValueError(
-                f"{family.upper()} donor presentation requires a generated title badge."
-            )
-        patched = _patch_image(patched, profile.badge_texture, badge_image)
-    elif badge_image is not None:
+    if profile.badge_texture is not None and badge_image is None:
+        raise ValueError(f"{family.upper()} donor presentation requires a generated title badge.")
+    if profile.badge_texture is None and badge_image is not None:
         raise ValueError(f"{family.upper()} donor presentation has no separate badge texture.")
 
-    # Rebuild only the CBMD container around the patched donor scene. agbcia's
-    # builder LZ11-compresses the CGFX and supplies the standard silent banner
-    # CWAV, matching RommHeld's existing donor-backed VC behavior.
-    return cbmd.build(cgfx=patched, cwav=None)
+    patched_scenes: list[tuple[int, bytes]] = []
+    artwork_hits = 0
+    badge_hits = 0
+    for slot, scene in _donor_slots(donor_banner):
+        patched, hit = _patch_image_if_present(scene, profile.artwork_texture, front_artwork)
+        artwork_hits += int(hit)
+        if profile.badge_texture is not None:
+            patched, hit = _patch_image_if_present(
+                patched,
+                profile.badge_texture,
+                badge_image,
+            )
+            badge_hits += int(hit)
+        patched_scenes.append((slot, patched))
+
+    if artwork_hits == 0:
+        raise ValueError(
+            f"{family.upper()} donor banner has no {profile.artwork_texture!r} artwork texture."
+        )
+    if profile.badge_texture is not None and badge_hits == 0:
+        raise ValueError(
+            f"{family.upper()} donor banner has no {profile.badge_texture!r} title-plaque texture."
+        )
+
+    return _rebuild_cbmd_preserving_slots(donor_banner, patched_scenes)
