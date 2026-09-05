@@ -104,12 +104,32 @@ class TwilightRuntimeStatus:
         return "No coherent TWiLight Menu++ / nds-bootstrap runtime was found."
 
 
+# Core IDs are limited to routes present in libretro-super's current
+# recipes/nintendo/3ds build recipe. This keeps SD-side readiness evidence tied
+# to cores that are actually produced for Nintendo 3DS rather than to generic
+# Libretro metadata or historical package definitions.
 RETROARCH_CORE_PROFILES: dict[str, RetroArchCoreProfile] = {
     "gba": RetroArchCoreProfile("gba", ("mgba", "gpsp"), ("mgba",)),
-    "gb": RetroArchCoreProfile("gb", ("gambatte", "mgba", "gearboy"), ("gambatte", "mgba", "gearboy")),
-    "gbc": RetroArchCoreProfile("gbc", ("gambatte", "mgba", "gearboy"), ("gambatte", "mgba", "gearboy")),
-    "nes": RetroArchCoreProfile("nes", ("fceumm", "quicknes", "nestopia"), ("fceumm", "quicknes")),
-    "famicom": RetroArchCoreProfile("famicom", ("fceumm", "quicknes", "nestopia"), ("fceumm", "quicknes")),
+    "gb": RetroArchCoreProfile(
+        "gb",
+        ("gambatte", "mgba", "tgbdual", "doublecherrygb"),
+        ("gambatte", "mgba"),
+    ),
+    "gbc": RetroArchCoreProfile(
+        "gbc",
+        ("gambatte", "mgba", "tgbdual", "doublecherrygb"),
+        ("gambatte", "mgba"),
+    ),
+    "nes": RetroArchCoreProfile(
+        "nes",
+        ("fceumm", "quicknes", "nestopia"),
+        ("fceumm", "quicknes"),
+    ),
+    "famicom": RetroArchCoreProfile(
+        "famicom",
+        ("fceumm", "quicknes", "nestopia"),
+        ("fceumm", "quicknes"),
+    ),
     "fds": RetroArchCoreProfile(
         "fds",
         ("fceumm",),
@@ -124,12 +144,24 @@ RETROARCH_CORE_PROFILES: dict[str, RetroArchCoreProfile] = {
     ),
     "snes": RetroArchCoreProfile(
         "snes",
-        ("snes9x2002", "snes9x2005", "snes9x2005_plus", "snes9x2010"),
+        ("snes9x2002", "snes9x2005", "snes9x2005_plus", "snes9x2010", "chimerasnes"),
         (),
     ),
-    "gamegear": RetroArchCoreProfile("gamegear", ("genesis_plus_gx", "gearsystem"), ("genesis_plus_gx",)),
-    "sms": RetroArchCoreProfile("sms", ("genesis_plus_gx", "picodrive", "smsplus", "gearsystem"), ("genesis_plus_gx", "picodrive", "smsplus")),
-    "genesis": RetroArchCoreProfile("genesis", ("genesis_plus_gx", "picodrive", "clownmdemu"), ("genesis_plus_gx", "picodrive", "clownmdemu")),
+    "gamegear": RetroArchCoreProfile(
+        "gamegear",
+        ("genesis_plus_gx", "smsplus"),
+        ("genesis_plus_gx",),
+    ),
+    "sms": RetroArchCoreProfile(
+        "sms",
+        ("genesis_plus_gx", "picodrive", "smsplus"),
+        ("genesis_plus_gx", "picodrive", "smsplus"),
+    ),
+    "genesis": RetroArchCoreProfile(
+        "genesis",
+        ("genesis_plus_gx", "picodrive", "clownmdemu"),
+        ("genesis_plus_gx", "picodrive", "clownmdemu"),
+    ),
     "sega32": RetroArchCoreProfile("sega32", ("picodrive",), ("picodrive",)),
     "segacd": RetroArchCoreProfile(
         "segacd",
@@ -140,6 +172,56 @@ RETROARCH_CORE_PROFILES: dict[str, RetroArchCoreProfile] = {
                 "segacd-bios",
                 ("bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin"),
                 "a Sega/Mega CD BIOS matching the game's region",
+            ),
+        ),
+    ),
+    "msx": RetroArchCoreProfile("msx", ("bluemsx", "fmsx")),
+    "msx2": RetroArchCoreProfile("msx2", ("bluemsx", "fmsx")),
+    "atari5200": RetroArchCoreProfile(
+        "atari5200",
+        ("atari800",),
+        (),
+        (
+            FirmwareRequirement(
+                "atari-5200-bios",
+                ("5200.rom",),
+                "Atari 5200 BIOS (5200.rom)",
+            ),
+        ),
+    ),
+    "atari7800": RetroArchCoreProfile("atari7800", ("prosystem",)),
+    "lynx": RetroArchCoreProfile("lynx", ("handy",)),
+    "vectrex": RetroArchCoreProfile("vectrex", ("vecx",)),
+    "colecovision": RetroArchCoreProfile("colecovision", ("bluemsx",)),
+    "c64": RetroArchCoreProfile("c64", ("vice_x64", "vice_x64sc", "frodo")),
+    "dos": RetroArchCoreProfile("dos", ("dosbox_svn",)),
+    "wonderswan": RetroArchCoreProfile("wonderswan", ("mednafen_wswan",)),
+    "wonderswan-color": RetroArchCoreProfile(
+        "wonderswan-color",
+        ("mednafen_wswan",),
+    ),
+    "neogeomvs": RetroArchCoreProfile(
+        "neogeomvs",
+        ("fbalpha2012_neogeo", "fbneo"),
+    ),
+    "neo-geo-pocket": RetroArchCoreProfile(
+        "neo-geo-pocket",
+        ("mednafen_ngp", "race"),
+    ),
+    "neo-geo-pocket-color": RetroArchCoreProfile(
+        "neo-geo-pocket-color",
+        ("mednafen_ngp", "race"),
+    ),
+    "zxs": RetroArchCoreProfile("zxs", ("fuse",)),
+    "turbografx-cd": RetroArchCoreProfile(
+        "turbografx-cd",
+        ("mednafen_pce_fast",),
+        (),
+        (
+            FirmwareRequirement(
+                "pce-cd-bios",
+                ("syscard3.pce", "syscard2.pce", "syscard1.pce", "gexpress.pce"),
+                "a PC Engine/TurboGrafx-CD System Card BIOS",
             ),
         ),
     ),
