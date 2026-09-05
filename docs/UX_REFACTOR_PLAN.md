@@ -305,8 +305,13 @@ Current regression areas include:
 - RomM connection verification and test/save emphasis in Settings
 - direct configured startup bypassing onboarding
 - shared keyboard-focus styling
+- Vita Library transfer lifecycle guards across workspace-changing actions
+- offscreen Qt runtime construction/navigation for the real shell and local-library widgets
+- compact-layout bounds with long Vita library content and USB status-filter transitions
+- stable RommHeld `QStandardPaths` identity before and after `QApplication` creation
+- guarded migration of recognizable pre-identity RommHeld configuration
 
-CI is headless and does not provide the full desktop graphics environment, so the UX regression tests inspect source/architecture contracts without claiming that Qt widgets have rendered correctly. Runtime Qt validation remains a desktop responsibility.
+CI remains headless, but it now installs the minimal EGL runtime needed for PySide6 and runs an offscreen Qt smoke layer. That layer constructs the real `ManagementShell` and `LocalLibraryWidget`, applies the shared application theme, exercises navigation, compact layout bounds with long content, selection/action state and USB status-filter transitions. This catches runtime widget-construction and state/layout regressions that source-contract tests cannot. It still does not validate native desktop compositor/theme/font rendering, DPI behavior, platform-specific window management or real-device interaction; those remain desktop and hardware responsibilities.
 
 ## Remaining validation
 
@@ -320,7 +325,7 @@ CI is headless and does not provide the full desktop graphics environment, so th
 - switch handheld workspaces repeatedly
 - quit while artwork/library workers are active
 - confirm Library, Device and Settings render correctly at target desktop scales/themes
-- verify local-library action/footer layout with long game names and paths
+- verify local-library action/footer layout with long game names and paths under a native desktop session
 - verify friendly platform labels and the reduced library filter row at realistic widths
 - verify semantic status tones and keyboard focus remain readable in the target desktop theme
 - verify Device and Settings primary-action emphasis changes are visually obvious but not excessive
