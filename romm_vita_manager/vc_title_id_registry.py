@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import threading
+from collections.abc import Iterable
 
 from .config import load_config, save_config
 
@@ -81,42 +82,76 @@ def _allocations(config: dict) -> dict[str, str]:
     }
 
 
+def preferred_title_id(family: str, romm_id: int) -> bytes:
+    """Return the deterministic preferred ID without reading or writing config."""
+    if romm_id < 0:
+        raise ValueError("RomM ROM ID must be non-negative.")
+    key = family.lower()
+    if key == _GBA_FAMILY:
+        digest = hashlib.sha256(str(romm_id).encode("ascii")).digest()
+        unique = int.from_bytes(digest[:2], "big") & 0x0FFF
+        return bytes.fromhex(f"0004000000F{unique:03X}00")
+    if key not in _CLASSIC_FAMILIES:
+        raise ValueError(f"Unsupported Virtual Console title-ID family: {family}")
+    digest = hashlib.sha256(f"{key}:{romm_id}".encode("ascii")).digest()
+    unique_id = _CLASSIC_UID_BASE | (int.from_bytes(digest[:2], "big") & 0x00FFFF)
+    return bytes.fromhex(f"00040000{(unique_id << 8):08X}")
+
+
+def configured_title_id(config: dict, family: str, romm_id: int) -> bytes | None:
+    """Return a valid unique persisted assignment without mutating config."""
+    key = family.lower()
+    pool = _pool(key)
+    allocations = _allocations(config)
+    identity = _allocation_key(config, key, romm_id)
+    raw = allocations.get(identity)
+    if not raw:
+        return None
+    try:
+        value = bytes.fromhex(raw)
+    except ValueError:
+        return None
+    if not _is_valid_for_pool(value, pool):
+        return None
+    if any(other_key != identity and other_value == raw for other_key, other_value in allocations.items()):
+        return None
+    return value
+
+
+def displayed_title_id(config: dict, family: str, romm_id: int) -> bytes:
+    """Return the current assignment or preferred candidate without persisting it."""
+    return configured_title_id(config, family, romm_id) or preferred_title_id(family, romm_id)
+
+
 def allocate_registered_title_id(
     config: dict,
     family: str,
     romm_id: int,
-    preferred: bytes,
+    preferred: bytes | None = None,
+    *,
+    reserved_title_ids: Iterable[bytes] = (),
 ) -> tuple[dict, bytes]:
-    """Allocate a stable collision-free RommHeld title ID inside the family pool.
+    """Allocate a stable RommHeld title ID inside the family pool.
 
-    The existing deterministic title ID remains the preferred slot, preserving
-    previously generated IDs in the normal case. If another RommHeld title has
-    already claimed that slot, allocation probes forward until it finds a free
-    slot and persists that assignment. The registry is scoped by RomM source so
-    numeric ROM IDs from different servers do not silently identify each other.
+    The registry guarantees uniqueness against other RommHeld assignments and
+    any explicitly supplied reserved IDs. It cannot by itself prove that an ID
+    is absent from an arbitrary console's installed-title database; callers that
+    can inventory a target should pass those IDs through ``reserved_title_ids``.
     """
     if romm_id < 0:
         raise ValueError("RomM ROM ID must be non-negative.")
     key = family.lower()
     pool = _pool(key)
+    preferred = preferred if preferred is not None else preferred_title_id(key, romm_id)
     if not _is_valid_for_pool(preferred, pool):
         raise ValueError("Preferred Virtual Console title ID is invalid for this family.")
 
+    existing = configured_title_id(config, key, romm_id)
+    if existing is not None:
+        return config, existing
+
     allocations = _allocations(config)
     identity = _allocation_key(config, key, romm_id)
-    existing_hex = allocations.get(identity)
-    if existing_hex:
-        try:
-            existing = bytes.fromhex(existing_hex)
-        except ValueError:
-            existing = b""
-        duplicate = any(
-            other_key != identity and other_value == existing_hex
-            for other_key, other_value in allocations.items()
-        )
-        if _is_valid_for_pool(existing, pool) and not duplicate:
-            return config, existing
-
     used: set[bytes] = set()
     for other_key, raw in allocations.items():
         if other_key == identity:
@@ -124,6 +159,14 @@ def allocate_registered_title_id(
         try:
             value = bytes.fromhex(raw)
         except ValueError:
+            continue
+        if _is_valid_for_pool(value, pool):
+            used.add(value)
+
+    for raw in reserved_title_ids:
+        try:
+            value = bytes(raw)
+        except (TypeError, ValueError):
             continue
         if _is_valid_for_pool(value, pool):
             used.add(value)
@@ -149,18 +192,36 @@ def allocate_registered_title_id(
     return updated, selected
 
 
-def persistent_title_id(family: str, romm_id: int, preferred: bytes) -> bytes:
-    """Resolve and persist a title ID using the user's current RomM source."""
+def persist_registered_title_id(
+    family: str,
+    romm_id: int,
+    preferred: bytes | None = None,
+    *,
+    reserved_title_ids: Iterable[bytes] = (),
+) -> tuple[dict, bytes]:
+    """Atomically resolve and persist a deployment-time title-ID assignment."""
     with _LOCK:
         config = load_config()
-        updated, title_id = allocate_registered_title_id(config, family, romm_id, preferred)
+        updated, title_id = allocate_registered_title_id(
+            config,
+            family,
+            romm_id,
+            preferred,
+            reserved_title_ids=reserved_title_ids,
+        )
         if updated != config:
             save_config(updated)
-        return title_id
+        return updated, title_id
+
+
+def persistent_title_id(family: str, romm_id: int, preferred: bytes) -> bytes:
+    """Compatibility wrapper for the temporary automatic-allocation hook."""
+    _, title_id = persist_registered_title_id(family, romm_id, preferred)
+    return title_id
 
 
 def install() -> None:
-    """Add persistent collision handling without changing existing VC call sites."""
+    """Temporary compatibility hook; deployment code should allocate explicitly."""
     global _INSTALLED
     if _INSTALLED:
         return
