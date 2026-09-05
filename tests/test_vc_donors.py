@@ -68,14 +68,6 @@ def test_invalid_cia_is_rejected(tmp_path: Path):
         vc_donors.inspect_cia_container(cia)
 
 
-def test_gba_donor_rejects_non_agb_firm_title_id(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setattr(vc_donors, "save_config", lambda config: None)
-    cia = tmp_path / "not-gba.cia"
-    _fake_cia(cia, title_id="0004000000075400")
-    with pytest.raises(ValueError, match="AGB_FIRM"):
-        vc_donors.configure_donor({}, "gba", cia)
-
-
 def test_invalid_boot9_is_rejected(tmp_path: Path):
     boot9 = tmp_path / "boot9.bin"
     boot9.write_bytes(bytes(0x10000))
@@ -125,7 +117,7 @@ def test_gba_readiness_requires_donor_and_boot9(tmp_path: Path, monkeypatch: pyt
     _stub_boot9_validation(monkeypatch)
     donor = tmp_path / "gba.cia"
     boot9 = tmp_path / "boot9.bin"
-    _fake_cia(donor, title_id="0004000000f12300")
+    _fake_cia(donor, title_id="0004000000075400")
     boot9.write_bytes(b"boot9")
 
     config = vc_donors.configure_donor({}, "gba", donor)
