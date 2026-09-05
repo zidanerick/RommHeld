@@ -17,12 +17,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .config import load_config
 from .design_tokens import DARK, brand_for_platform
 from .library_sources import get_library_source
 from .mappings import platform_label
 from .models import Game
 from .romm import scan_games
 from .ui_components import AccentButton, SurfaceCard
+from .vita_ftp import VitaFtpSettings
+from .vita_ftp_library import VitaFtpCopyWorker, ftp_destination_target
 from .vita_library_support import CopyWorker, destination_for_game, game_status, human_size
 
 
@@ -51,7 +54,7 @@ class LocalLibraryWidget(QWidget):
         self.mappings = dict(config.get("platform_mappings", {}))
         self.games: list[Game] = []
         self.filtered_games: list[Game] = []
-        self.worker: CopyWorker | None = None
+        self.worker: CopyWorker | VitaFtpCopyWorker | None = None
         self._library_root: Path | None = None
 
         self.search = QLineEdit()
@@ -65,6 +68,12 @@ class LocalLibraryWidget(QWidget):
         )
         self.view_mode = QComboBox()
         self.view_mode.addItems(["List", "Tiles"])
+        self.vita_transport = QComboBox()
+        self.vita_transport.addItem("VitaShell USB", "usb")
+        self.vita_transport.addItem("VitaShell FTP", "ftp")
+        saved_ftp = load_config().get("devices", {}).get("vita_ftp", {})
+        if vita is None and str(saved_ftp.get("host", "")).strip():
+            self.vita_transport.setCurrentIndex(1)
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.setToolTip("Rescan the configured local library")
 
@@ -74,6 +83,7 @@ class LocalLibraryWidget(QWidget):
         controls.addWidget(self.platforms)
         controls.addWidget(self.status_filter)
         controls.addWidget(self.view_mode)
+        controls.addWidget(self.vita_transport)
         controls.addWidget(self.refresh_button)
 
         self.source_label = QLabel()
@@ -131,11 +141,13 @@ class LocalLibraryWidget(QWidget):
         self.platforms.currentIndexChanged.connect(self._apply_filters)
         self.status_filter.currentIndexChanged.connect(self._apply_filters)
         self.view_mode.currentIndexChanged.connect(self.apply_view_mode)
+        self.vita_transport.currentIndexChanged.connect(self._transport_changed)
         self.game_list.itemSelectionChanged.connect(self.update_summary)
         self.copy_button.clicked.connect(self.copy_selected)
         self.cancel_button.clicked.connect(self.cancel_copy)
 
         self.set_target(target_key, vita)
+        self._transport_changed(refresh=False)
         self.refresh_library()
 
     def set_config(self, config: dict) -> None:
@@ -146,7 +158,8 @@ class LocalLibraryWidget(QWidget):
         self.target_key = target_key
         self.vita = vita
         is_vita = target_key == "vita"
-        self.status_filter.setEnabled(is_vita)
+        self.vita_transport.setVisible(is_vita)
+        self.status_filter.setEnabled(is_vita and not self._using_ftp())
         self.status_filter.setVisible(is_vita)
         self.copy_button.setVisible(is_vita)
         if not is_vita:
@@ -157,6 +170,51 @@ class LocalLibraryWidget(QWidget):
         self.vita = vita
         if self.target_key == "vita":
             self._apply_filters()
+
+    def _using_ftp(self) -> bool:
+        return self.target_key == "vita" and self.vita_transport.currentData() == "ftp"
+
+    def _ftp_settings(self) -> VitaFtpSettings:
+        saved = load_config().get("devices", {}).get("vita_ftp", {})
+        host = str(saved.get("host", "")).strip()
+        if not host:
+            raise ValueError(
+                "VitaShell FTP is not configured. Open Tools → Send file, choose VitaShell FTP, and enter the IP address and port shown by VitaShell."
+            )
+        try:
+            port = int(saved.get("port", 1337))
+            if not 1 <= port <= 65535:
+                raise ValueError
+        except (TypeError, ValueError) as exc:
+            raise ValueError("The saved VitaShell FTP port is invalid.") from exc
+        return VitaFtpSettings(host=host, port=port)
+
+    def _ftp_ready(self) -> bool:
+        try:
+            self._ftp_settings()
+            return True
+        except ValueError:
+            return False
+
+    def _transport_changed(self, _index: int | None = None, *, refresh: bool = True) -> None:
+        if self.target_key != "vita":
+            return
+        using_ftp = self._using_ftp()
+        if using_ftp and self.status_filter.currentIndex() != 0:
+            self.status_filter.blockSignals(True)
+            self.status_filter.setCurrentIndex(0)
+            self.status_filter.blockSignals(False)
+        self.status_filter.setEnabled(not using_ftp)
+        self.status_filter.setToolTip(
+            "Install state is checked during FTP transfer because VitaShell FTP does not expose a cheap bulk-status query."
+            if using_ftp
+            else "Filter by files detected on the mounted Vita filesystem."
+        )
+        self.copy_button.setText("Copy via VitaShell FTP" if using_ftp else "Copy to Vita")
+        if refresh:
+            self._apply_filters()
+        else:
+            self.update_summary()
 
     def refresh_library(self) -> None:
         """Rescan the configured source, then render the current filters."""
@@ -223,7 +281,11 @@ class LocalLibraryWidget(QWidget):
         self.game_list.clear()
         for game in self.filtered_games:
             state, detail = self._game_status(game)
-            status = STATUS_LABELS.get(state, state.title())
+            status = (
+                "Checked during FTP transfer"
+                if self._using_ftp()
+                else STATUS_LABELS.get(state, state.title())
+            )
             item = QListWidgetItem(
                 f"{game.name}\n"
                 f"{platform_label(game.source_platform)} • {human_size(game.size)} • {status}"
@@ -256,12 +318,21 @@ class LocalLibraryWidget(QWidget):
         shown = len(self.filtered_games)
         total = len(self.games)
         count = f"{shown} of {total} games" if shown != total else f"{total} games"
-        self.source_label.setText(f"Local library • {count} • {target_label}")
+        transport = (
+            " • VitaShell FTP"
+            if self._using_ftp()
+            else " • VitaShell USB"
+            if self.target_key == "vita"
+            else ""
+        )
+        self.source_label.setText(f"Local library • {count} • {target_label}{transport}")
         self.source_label.setToolTip(str(self._library_root))
 
     def _game_status(self, game: Game) -> tuple[str, str]:
         if self.target_key != "vita":
             return "UNKNOWN", "Destination is managed from the Device workflow"
+        if self._using_ftp():
+            return "UNKNOWN", "VitaShell FTP checks the remote file when transfer starts"
         try:
             return game_status(self.vita, game, self.mappings)
         except Exception:
@@ -292,9 +363,10 @@ class LocalLibraryWidget(QWidget):
         total = sum(game.size for game in selected)
         is_vita = self.target_key == "vita"
         worker_running = self.worker is not None and self.worker.isRunning()
+        transport_ready = self._ftp_ready() if self._using_ftp() else self.vita is not None
         self.copy_button.setVisible(is_vita)
         self.copy_button.setEnabled(
-            is_vita and self.vita is not None and bool(selected) and not worker_running
+            is_vita and transport_ready and bool(selected) and not worker_running
         )
         self.selection_label.setText(
             f"{len(selected)} selected • {human_size(total)}" if selected else "No games selected"
@@ -303,10 +375,17 @@ class LocalLibraryWidget(QWidget):
 
         if len(selected) != 1:
             if selected and is_vita:
-                if self.vita is None:
-                    self.destination_label.setText("Connect the Vita to copy the selected games.")
+                if not transport_ready:
+                    self.destination_label.setText(
+                        "Configure VitaShell FTP in Tools → Send file."
+                        if self._using_ftp()
+                        else "Connect the Vita through VitaShell USB to copy the selected games."
+                    )
                 else:
-                    self.destination_label.setText(f"Ready to copy {len(selected)} games to the Vita.")
+                    method = "VitaShell FTP" if self._using_ftp() else "VitaShell USB"
+                    self.destination_label.setText(
+                        f"Ready to copy {len(selected)} games through {method}."
+                    )
             elif selected:
                 self.destination_label.setText("Destination is chosen from the Device workflow.")
             else:
@@ -317,12 +396,21 @@ class LocalLibraryWidget(QWidget):
         if not is_vita:
             self.destination_label.setText("Destination is chosen from the Device workflow.")
             return
-        if self.vita is None:
-            self.destination_label.setText("Connect the Vita to copy this game.")
+        if not transport_ready:
+            self.destination_label.setText(
+                "Configure VitaShell FTP in Tools → Send file."
+                if self._using_ftp()
+                else "Connect the Vita through VitaShell USB to copy this game."
+            )
             return
-        label, path, _mode = destination_for_game(self.vita, game, self.mappings)
-        self.destination_label.setText(f"Copies to {label}")
-        self.destination_label.setToolTip(str(path))
+        if self._using_ftp():
+            label, target, _mode = ftp_destination_target(game, self.mappings)
+            self.destination_label.setText(f"Copies to {label}")
+            self.destination_label.setToolTip(target or "Destination review required")
+        else:
+            label, path, _mode = destination_for_game(self.vita, game, self.mappings)
+            self.destination_label.setText(f"Copies to {label}")
+            self.destination_label.setToolTip(str(path))
 
     def copy_selected(self) -> None:
         if self.target_key != "vita":
@@ -334,17 +422,80 @@ class LocalLibraryWidget(QWidget):
             return
         if self.worker is not None and self.worker.isRunning():
             return
-        if self.vita is None:
-            QMessageBox.warning(
-                self,
-                "Vita not connected",
-                "Connect the Vita in VitaShell USB mode first.",
-            )
-            return
 
         selected = self.selected_games()
         if not selected:
             QMessageBox.information(self, "Nothing selected", "Select one or more games first.")
+            return
+
+        if self._using_ftp():
+            self._copy_selected_ftp(selected)
+        else:
+            self._copy_selected_usb(selected)
+
+    def _copy_selected_ftp(self, selected: list[Game]) -> None:
+        try:
+            settings = self._ftp_settings()
+        except ValueError as exc:
+            QMessageBox.warning(self, "VitaShell FTP not configured", str(exc))
+            return
+
+        jobs = []
+        review: list[str] = []
+        for game in selected:
+            label, destination, mode = ftp_destination_target(game, self.mappings)
+            if mode == "unknown" or not destination:
+                review.append(f"{game.name} ({game.source_platform})")
+                continue
+            jobs.append((game, destination, label))
+
+        if review:
+            QMessageBox.warning(
+                self,
+                "Destination review required",
+                "These games could not be mapped safely and were not queued:\n\n"
+                + "\n".join(review[:20])
+                + ("\n…" if len(review) > 20 else ""),
+            )
+        if not jobs:
+            QMessageBox.information(
+                self,
+                "Nothing to copy",
+                "No selected games have a safe Vita destination.",
+            )
+            return
+
+        total = sum(game.size for game, *_rest in jobs)
+        if (
+            QMessageBox.question(
+                self,
+                "Confirm FTP copy",
+                f"Process {len(jobs)} game(s), {human_size(total)}, through VitaShell FTP?\n\n"
+                "Existing same-size files will be skipped. Different-size files are replaced only after the new upload verifies successfully. "
+                "VitaShell FTP does not report reliable free-space information, so capacity cannot be pre-checked on this route.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+
+        self._set_transfer_running(True)
+        self.progress.setValue(0)
+        self.worker = VitaFtpCopyWorker(settings, jobs)
+        self.worker.progress.connect(self._on_progress)
+        self.worker.finished_ok.connect(self._copy_finished)
+        self.worker.failed.connect(self._copy_failed)
+        self.worker.finished.connect(self._worker_finished)
+        self.worker.start()
+
+    def _copy_selected_usb(self, selected: list[Game]) -> None:
+        if self.vita is None:
+            QMessageBox.warning(
+                self,
+                "Vita not connected",
+                "Connect the Vita through VitaShell USB first, or select VitaShell FTP.",
+            )
             return
 
         jobs = []
@@ -432,8 +583,11 @@ class LocalLibraryWidget(QWidget):
         self.refresh_button.setEnabled(not running)
         self.search.setEnabled(not running)
         self.platforms.setEnabled(not running)
-        self.status_filter.setEnabled(not running and self.target_key == "vita")
+        self.status_filter.setEnabled(
+            not running and self.target_key == "vita" and not self._using_ftp()
+        )
         self.view_mode.setEnabled(not running)
+        self.vita_transport.setEnabled(not running)
         self.game_list.setEnabled(not running)
         self.progress.setVisible(running)
         self.transfer_status.setVisible(running)
