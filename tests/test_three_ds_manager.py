@@ -68,6 +68,16 @@ def test_manager_preflights_remote_destination_before_romm_download():
     assert 'self.completed.emit("different")' in source
 
 
+def test_manager_downloads_first_when_romm_size_is_unknown():
+    source = MANAGER_PATH.read_text(encoding="utf-8")
+
+    unknown_size = source.index("if expected_size <= 0:")
+    resolve_source = source.index("source = self._resolve_source()", unknown_size)
+    actual_size = source.index("expected_size = source.stat().st_size", resolve_source)
+    remote_size = source.index("remote_size = self.backend.remote_size(self.destination)")
+    assert unknown_size < resolve_source < actual_size < remote_size
+
+
 def test_manager_requires_explicit_safe_replacement():
     source = MANAGER_PATH.read_text(encoding="utf-8")
 
