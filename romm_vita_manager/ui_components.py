@@ -7,6 +7,79 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLay
 from .design_tokens import DARK
 
 
+_STATUS_ERROR_TERMS = (
+    "failed",
+    "failure",
+    "error",
+    "invalid",
+    "missing",
+)
+_STATUS_MUTED_TERMS = (
+    "not configured",
+    "not mounted",
+    "not detected",
+    "not selected",
+    "not checked",
+    "unavailable",
+)
+_STATUS_WARNING_TERMS = (
+    "needs ",
+    "required",
+    "waiting",
+    "checking",
+    "cancelling",
+    "transferring",
+    "preparing",
+    "confirm",
+    "action required",
+    "overwrite needed",
+    "endpoint required",
+)
+_STATUS_SUCCESS_TERMS = (
+    "ready",
+    "connected",
+    "mounted",
+    "detected",
+    "configured",
+    "complete",
+    "completed",
+    "copied",
+    "validated",
+)
+
+
+def status_tone(value: str) -> str:
+    """Return a restrained semantic tone for common workflow-status text.
+
+    Absence states such as ``Not mounted`` remain muted rather than being
+    presented as failures. Explicit failure language wins over all other
+    matches, and warning/busy states are kept distinct from successful states.
+    """
+
+    text = value.strip().casefold()
+    if not text:
+        return "neutral"
+    if any(term in text for term in _STATUS_ERROR_TERMS):
+        return "error"
+    if any(term in text for term in _STATUS_MUTED_TERMS):
+        return "muted"
+    if any(term in text for term in _STATUS_WARNING_TERMS):
+        return "warning"
+    if any(term in text for term in _STATUS_SUCCESS_TERMS):
+        return "success"
+    return "neutral"
+
+
+def _status_tone_color(tone: str) -> str:
+    return {
+        "success": DARK.success,
+        "warning": DARK.warning,
+        "error": DARK.error,
+        "muted": DARK.text_tertiary,
+        "neutral": DARK.text_primary,
+    }.get(tone, DARK.text_primary)
+
+
 class SectionHeader(QWidget):
     def __init__(self, title: str, subtitle: str = "", parent: QWidget | None = None):
         super().__init__(parent)
@@ -58,13 +131,17 @@ class StatusPill(QFrame):
         row.setSpacing(5)
         self.label = QLabel(label)
         self.label.setProperty("secondary", True)
-        self.value = QLabel(value)
-        self.value.setStyleSheet("font-weight:600;background:transparent;")
+        self.value = QLabel()
         row.addWidget(self.label)
         row.addWidget(self.value)
+        self.set_value(value)
 
-    def set_value(self, value: str) -> None:
+    def set_value(self, value: str, tone: str | None = None) -> None:
         self.value.setText(value)
+        resolved_tone = tone or status_tone(value)
+        self.value.setStyleSheet(
+            f"color:{_status_tone_color(resolved_tone)};font-weight:600;background:transparent;"
+        )
 
 
 class AccentButton(QPushButton):
@@ -109,4 +186,4 @@ class AccentButton(QPushButton):
         )
 
 
-__all__ = ["AccentButton", "SectionHeader", "StatusPill", "SurfaceCard"]
+__all__ = ["AccentButton", "SectionHeader", "StatusPill", "SurfaceCard", "status_tone"]
