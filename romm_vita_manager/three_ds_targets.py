@@ -124,6 +124,18 @@ VC_IMPLEMENTED_PLATFORM_SLUGS = frozenset(
 )
 NATIVE_PLATFORM_SLUGS = frozenset({"gba"})
 
+# These are target-selection defaults, not claims that every title works best
+# with one runtime. They keep the common dedicated/native path distinct from an
+# explicit RetroAchievements preference while still allowing the user to choose
+# another exposed target per title.
+DEDICATED_COMPATIBILITY_TARGETS = {
+    "gba": "open_agb_firm",
+    "nds": "twilight",
+    "virtualboy": "red_viper",
+    "n64": "daedalusx64",
+    "3ds": "native_3ds_cia",
+}
+
 
 def compatible_platform(slug: str) -> bool:
     return slug.lower() in THREE_DS_PLATFORM_SLUGS
@@ -150,6 +162,32 @@ def available_targets(slug: str) -> tuple[DeploymentTarget, ...]:
     if key in VC_IMPLEMENTED_PLATFORM_SLUGS:
         targets.append(VC_CIA)
     return tuple(targets)
+
+
+def preferred_target_key(slug: str, preference: str = "compatibility") -> str | None:
+    """Return a preferred target without inventing unsupported runtime routes."""
+    key = slug.lower()
+    targets = available_targets(key)
+    if not targets:
+        return None
+    target_keys = {target.key for target in targets}
+
+    if preference == "retroachievements" and "retroarch" in target_keys:
+        return "retroarch"
+
+    if preference == "native":
+        dedicated = DEDICATED_COMPATIBILITY_TARGETS.get(key)
+        if dedicated in target_keys:
+            return dedicated
+        if "vc_cia" in target_keys:
+            return "vc_cia"
+
+    dedicated = DEDICATED_COMPATIBILITY_TARGETS.get(key)
+    if dedicated in target_keys:
+        return dedicated
+    if "retroarch" in target_keys:
+        return "retroarch"
+    return targets[0].key
 
 
 def default_destination(target_key: str, platform_slug: str, filename: str) -> str:
