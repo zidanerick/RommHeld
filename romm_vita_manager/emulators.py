@@ -41,8 +41,8 @@ EMULATORS = (
         "retroarch",
         "RetroArch",
         "Retro emulator platform and libretro cores.",
-        ("retroarch",),
-        ("data/retroarch",),
+        ("retrovita", "retroarch"),
+        ("app/RETROVITA", "app/RETROARCH"),
         ("retroarch", "retroarch-data"),
         "Preferred route for supported RetroAchievements systems",
         "RetroArch's Vita build needs both the VPK and data package.",
@@ -81,11 +81,11 @@ EMULATORS = (
         "dsvita",
         "DSVita",
         "Nintendo DS emulator.",
-        ("dsvita",),
-        ("data/dsvita",),
+        ("dsvita000", "dsvita"),
+        ("app/DSVITA000",),
         ("dsvita",),
         "Not a RetroAchievements-first route",
-        "Additional data or configuration may be needed depending on the build.",
+        "Requires libshacccg.suprx and kubridge >= 0.3.1; ROMs use ux0:/data/dsvita/.",
     ),
     EmulatorDefinition(
         "fake-08",
@@ -119,6 +119,6 @@ def detect_emulators(vita: Path) -> dict[str, bool]:
             for name in names
             for pattern in emulator.app_patterns
         )
-        data_match = any((vita / rel).exists() for rel in emulator.detection_paths)
-        result[emulator.key] = app_match or data_match
+        path_match = any((vita / rel).exists() for rel in emulator.detection_paths)
+        result[emulator.key] = app_match or path_match
     return result
