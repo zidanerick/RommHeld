@@ -69,10 +69,11 @@ RETROARCH = DeploymentTarget(
 )
 
 # Platforms for which the current official 3DS RetroArch recipe builds a
-# usable core route that RommHeld intentionally exposes. Dedicated runtimes are
-# tracked separately below. N64 is intentionally absent: the current 3DS
-# recipe does not build a Mupen64Plus/ParaLLEl N64 core. Amiga and ScummVM are
-# also absent from that recipe and must not be advertised as RetroArch routes.
+# usable core route that RommHeld intentionally exposes. Dedicated runtimes can
+# coexist with RetroArch when both are real current routes, as for Virtual Boy.
+# N64 is intentionally absent: the current 3DS recipe does not build a
+# Mupen64Plus/ParaLLEl N64 core. Amiga and ScummVM are also absent from that
+# recipe and must not be advertised as RetroArch routes.
 RETROARCH_TARGET_PLATFORM_SLUGS = frozenset(
     {
         "gba",
@@ -103,13 +104,14 @@ RETROARCH_TARGET_PLATFORM_SLUGS = frozenset(
         "neo-geo-pocket-color",
         "zxs",
         "turbografx-cd",
+        "virtualboy",
     }
 )
 
 # Conservative current 3DS RetroArch routes where the official 3DS core bundle
-# contains a core that Libretro currently documents with memory-monitoring
-# support suitable for achievement integration. Keep this narrower than the
-# general RetroArch platform set when capability is not independently verified.
+# contains a core that RetroAchievements currently supports for memory-based
+# achievements. Keep this narrower than the general RetroArch platform set when
+# capability is not independently verified.
 RETROACHIEVEMENTS_RETROARCH_PLATFORM_SLUGS = frozenset(
     {
         "gba",        # mGBA
@@ -123,6 +125,7 @@ RETROACHIEVEMENTS_RETROARCH_PLATFORM_SLUGS = frozenset(
         "genesis",    # Genesis Plus GX / PicoDrive / ClownMDEmu
         "sega32",     # PicoDrive
         "segacd",     # Genesis Plus GX / PicoDrive
+        "virtualboy", # Beetle VB / mednafen_vb
     }
 )
 
@@ -133,7 +136,7 @@ THREE_DS_PLATFORM_SLUGS = RETROARCH_TARGET_PLATFORM_SLUGS | DIRECT_RUNTIME_PLATF
 # as the general set of platforms visible in the 3DS workspace, even though the
 # name implied RetroArch. Keep that code working while target selection itself
 # uses RETROARCH_TARGET_PLATFORM_SLUGS and therefore does not invent a
-# RetroArch route for dedicated-only platforms such as NDS, Virtual Boy, or N64.
+# RetroArch route for dedicated-only platforms such as NDS or N64.
 RETROARCH_PLATFORM_SLUGS = THREE_DS_PLATFORM_SLUGS
 
 # Every slug listed here has a concrete family-specific package builder and
