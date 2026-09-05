@@ -166,6 +166,7 @@ def application_stylesheet() -> str:
     }}
 
     QRadioButton, QCheckBox {{
+        background: transparent;
         spacing: 7px;
         color: {p.text_primary};
     }}
