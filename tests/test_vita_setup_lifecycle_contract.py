@@ -31,3 +31,17 @@ def test_vita_setup_exposes_cancel_and_keeps_dialog_alive_during_worker():
     assert "self.done_button.setEnabled(False)" in source
     assert "self.done_button.setEnabled(True)" in source
     assert "Cancel the current package action or allow it to finish before closing this window." in source
+
+
+def test_vita_setup_blocks_all_dismissal_paths_during_worker():
+    source = source_text()
+
+    assert "def _worker_active(self) -> bool:" in source
+    assert "return self.worker is not None and self.worker.isRunning()" in source
+    assert "def accept(self) -> None:" in source
+    assert "def reject(self) -> None:" in source
+    assert "def closeEvent(self, event: QCloseEvent) -> None:" in source
+    assert source.count("if self._worker_active():") >= 3
+    assert "super().accept()" in source
+    assert "super().reject()" in source
+    assert "super().closeEvent(event)" in source
