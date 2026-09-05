@@ -10,6 +10,7 @@ from typing import Callable
 from uuid import uuid4
 
 ProgressCallback = Callable[[int], None]
+_VOLUME_PATH_RE = re.compile(r"^/?[A-Za-z0-9_]+:(?:/|$)")
 
 
 @dataclass(frozen=True)
@@ -28,8 +29,8 @@ def normalize_vita_ftp_path(path: str) -> str:
     raw = path.strip().replace("\\", "/")
     if not raw:
         return "/"
-    if re.match(r"^[A-Za-z0-9_]+:/", raw):
-        raw = "/" + raw
+    if _VOLUME_PATH_RE.match(raw):
+        raw = "/" + raw.lstrip("/")
     parts = [part for part in PurePosixPath(raw).parts if part not in {".", "", "/"}]
     if any(part == ".." for part in parts):
         raise ValueError(f"Vita FTP path traversal is not allowed: {path}")
@@ -43,7 +44,7 @@ def join_vita_ftp_path(root: str, child: str) -> str:
     child_raw = child.strip().replace("\\", "/")
     if not child_raw:
         return root_path
-    if re.match(r"^/?[A-Za-z0-9_]+:/", child_raw) or child_raw.startswith("/"):
+    if _VOLUME_PATH_RE.match(child_raw) or child_raw.startswith("/"):
         target = normalize_vita_ftp_path(child_raw)
     else:
         target = normalize_vita_ftp_path(posixpath.join(root_path, child_raw))
