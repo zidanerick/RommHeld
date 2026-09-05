@@ -122,12 +122,30 @@ class FailFinalRenameVitaFTP(FakeVitaFTP):
         return super().voidcmd(command)
 
 
+class BadFinalSizeVitaFTP(FakeVitaFTP):
+    corrupt_final_size = False
+
+    def sendcmd(self, command):
+        if command == "SIZE /ux0:/data/game.bin" and type(self).corrupt_final_size:
+            return "213: 1"
+        return super().sendcmd(command)
+
+    def voidcmd(self, command):
+        result = super().voidcmd(command)
+        if command == "RNTO /ux0:/data/game.bin":
+            type(self).corrupt_final_size = True
+        if command == "DELE /ux0:/data/game.bin":
+            type(self).corrupt_final_size = False
+        return result
+
+
 @pytest.fixture(autouse=True)
 def reset_fake():
     FakeVitaFTP.files = {}
     FakeVitaFTP.dirs = {"/", "/ux0:"}
     FakeVitaFTP.last_instance = None
     FailFinalRenameVitaFTP.fail_final_rename = True
+    BadFinalSizeVitaFTP.corrupt_final_size = False
 
 
 def make_backend(ftp_factory=FakeVitaFTP) -> VitaFtpBackend:
@@ -228,6 +246,19 @@ def test_failed_final_rename_restores_existing_destination(tmp_path: Path):
         backend.upload(source, "data/game.bin", overwrite=True)
 
     assert FakeVitaFTP.files["/ux0:/data/game.bin"] == b"old"
+    assert not any(".rommheld-" in path for path in FakeVitaFTP.files)
+
+
+def test_failed_final_verification_removes_new_bad_destination(tmp_path: Path):
+    source = tmp_path / "game.bin"
+    source.write_bytes(b"new-content")
+    FakeVitaFTP.dirs.add("/ux0:/data")
+    backend = make_backend(BadFinalSizeVitaFTP)
+
+    with pytest.raises(IOError, match="final|expected"):
+        backend.upload(source, "data/game.bin")
+
+    assert "/ux0:/data/game.bin" not in FakeVitaFTP.files
     assert not any(".rommheld-" in path for path in FakeVitaFTP.files)
 
 
