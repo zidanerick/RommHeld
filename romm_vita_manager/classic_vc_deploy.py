@@ -29,6 +29,7 @@ from .firewall import FirewallError, FirewallRule, allow_temporary, remove_tempo
 from .hshop_catalog import HShopVcRelease, find_official_vc_release
 from .romm_remote import RomMRemoteGame, download_artwork, download_rom
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
+from .three_ds_storage import ThreeDSMountedStorageBackend, configured_3ds_storage_root
 from .three_ds_targets import default_destination
 from .ui_components import AccentButton, SurfaceCard
 from .vc_donors import configured_boot9_path, configured_donor_path
@@ -133,7 +134,13 @@ class ClassicVcDeployWorker(QThread):
             handle.close()
             self.temp_rom = Path(handle.name)
             self.status_changed.emit(f"Downloading {self.game.name} from RomM…")
-            download_rom(url, token, self.game, self.temp_rom)
+            download_rom(
+                url,
+                token,
+                self.game,
+                self.temp_rom,
+                cancel_event=self.cancel_event,
+            )
             self._check_cancelled()
 
             self.status_changed.emit("Fetching RomM artwork…")
@@ -189,6 +196,25 @@ class ClassicVcDeployWorker(QThread):
                     self._check_cancelled()
                     self.progress.emit(100)
                     self.completed.emit("fbi", self.destination)
+                    return
+
+                if self.install_method == "sd":
+                    root = configured_3ds_storage_root(self.config)
+                    if root is None:
+                        raise ValueError(
+                            "No validated Nintendo 3DS SD card is mounted. Configure Mounted SD on the Device page first."
+                        )
+                    self.status_changed.emit("Copying CIA to the mounted Nintendo 3DS SD card…")
+                    storage = ThreeDSMountedStorageBackend(root)
+                    result, _ = storage.upload(
+                        cia_path,
+                        self.destination,
+                        cancel_event=self.cancel_event,
+                        progress=self._progress,
+                    )
+                    self._check_cancelled()
+                    self.progress.emit(100)
+                    self.completed.emit(result, self.destination)
                     return
 
                 self.status_changed.emit("Connecting to Nintendo 3DS FTP…")
@@ -325,7 +351,7 @@ class ClassicVcDeployDialog(QDialog):
             self.runtime_status.setText("Runtime/presentation cache is not prepared yet.")
 
         configuration = SurfaceCard()
-        configuration.content.addWidget(QLabel("Installation"))
+        configuration.content.addWidget(QLabel("Delivery"))
         self.display_title_edit = QLineEdit(game.name)
         self.display_title_edit.setReadOnly(True)
         self.publisher_edit = QLineEdit(game.publisher)
@@ -343,17 +369,22 @@ class ClassicVcDeployDialog(QDialog):
         self.three_ds_ip_edit.setPlaceholderText("3DS IP shown by FBI")
         self.three_ds_ip_edit.editingFinished.connect(self._save_3ds_ip)
         self.install_method = QComboBox()
-        self.install_method.addItem("FBI Remote Install", "fbi")
-        self.install_method.addItem("3DS FTP (copy CIA)", "ftp")
+        self.install_method.addItem("FBI Remote Install · Install directly", "fbi")
+        self.install_method.addItem("Mounted SD card · Copy CIA", "sd")
+        self.install_method.addItem("ftpd · Copy CIA", "ftp")
         self.install_method.currentIndexChanged.connect(self._install_method_changed)
         form = QFormLayout()
-        form.addRow("Install with", self.install_method)
+        form.addRow("Delivery method", self.install_method)
         form.addRow("3DS IP", self.three_ds_ip_edit)
         form.addRow("Display title", self.display_title_edit)
         form.addRow("Publisher", self.publisher_edit)
         form.addRow("Title ID", self.title_id_edit)
         form.addRow("Destination", self.destination_edit)
         configuration.content.addLayout(form)
+        self.delivery_hint = QLabel()
+        self.delivery_hint.setWordWrap(True)
+        self.delivery_hint.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
+        configuration.content.addWidget(self.delivery_hint)
 
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
@@ -444,9 +475,21 @@ class ClassicVcDeployDialog(QDialog):
             webbrowser.open(self.official_release.url)
 
     def _install_method_changed(self) -> None:
-        fbi = self.install_method.currentData() == "fbi"
+        method = str(self.install_method.currentData() or "")
+        fbi = method == "fbi"
         self.three_ds_ip_edit.setEnabled(fbi)
-        self.destination_edit.setEnabled(not fbi)
+        if fbi:
+            self.delivery_hint.setText(
+                "FBI Remote Install sends the generated CIA directly to FBI for installation."
+            )
+        elif method == "sd":
+            self.delivery_hint.setText(
+                "Copies the generated CIA to the validated mounted 3DS SD card. Eject the card cleanly, return it to the console, then install the CIA with FBI."
+            )
+        else:
+            self.delivery_hint.setText(
+                "ftpd copies the generated CIA to the configured 3DS destination while the console is running. Install the copied CIA afterward with FBI."
+            )
 
     def _save_3ds_ip(self) -> None:
         value = self.three_ds_ip_edit.text().strip()
@@ -467,6 +510,17 @@ class ClassicVcDeployDialog(QDialog):
         if configured_classic_runtime(self.config, self.family) is None:
             self.status.setText("Prepare the donor Virtual Console runtime first.")
             return
+        method = str(self.install_method.currentData() or "")
+        saved = self.config.get("devices", {}).get("3ds", {})
+        if method == "ftp" and not str(saved.get("host", "")).strip():
+            self.status.setText("Configure the Nintendo 3DS ftpd endpoint on the Device page first.")
+            return
+        if method == "sd" and configured_3ds_storage_root(self.config) is None:
+            self.status.setText("Mount and validate the Nintendo 3DS SD card from the Device page first.")
+            return
+        if method == "fbi" and not self.three_ds_ip_edit.text().strip():
+            self.status.setText("Enter the 3DS IP address shown by FBI Remote Install first.")
+            return
         self.deploy.setEnabled(False)
         self.progress.setValue(0)
         self.status.setText("Preparing deployment…")
@@ -475,7 +529,7 @@ class ClassicVcDeployDialog(QDialog):
             self.game,
             self.family,
             self.destination_edit.text().strip(),
-            str(self.install_method.currentData()),
+            method,
             self.three_ds_ip_edit.text().strip(),
             self.display_title_edit.text().strip(),
             self.publisher_edit.text().strip(),
@@ -492,7 +546,7 @@ class ClassicVcDeployDialog(QDialog):
         if result == "fbi":
             self.status.setText("FBI finished receiving/installing the generated Virtual Console CIA.")
         else:
-            self.status.setText(f"Uploaded to {destination}: {result}")
+            self.status.setText(f"CIA copied to {destination}: {result}. Install it later with FBI.")
 
     def _failed(self, message: str) -> None:
         self.status.setText(message)
