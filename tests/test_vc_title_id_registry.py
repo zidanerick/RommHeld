@@ -114,6 +114,7 @@ def test_persist_registered_title_id_is_the_explicit_write_boundary(monkeypatch)
     config = {"library_source": {"romm_url": "https://romm.example"}}
     monkeypatch.setattr(registry, "load_config", lambda: config)
     monkeypatch.setattr(registry, "save_config", lambda value: saved.append(value))
+    monkeypatch.setattr(registry, "configured_mounted_sd_title_ids", lambda value: frozenset())
 
     displayed = registry.displayed_title_id(config, "gba", 99)
     assert saved == []
@@ -122,3 +123,36 @@ def test_persist_registered_title_id_is_the_explicit_write_boundary(monkeypatch)
     assert persisted == displayed
     assert saved == [updated]
     assert registry.configured_title_id(updated, "gba", 99) == persisted
+
+
+def test_persist_first_assignment_avoids_mounted_sd_title_ids(monkeypatch):
+    saved = []
+    config = {}
+    monkeypatch.setattr(registry, "load_config", lambda: config)
+    monkeypatch.setattr(registry, "save_config", lambda value: saved.append(value))
+    monkeypatch.setattr(
+        registry,
+        "configured_mounted_sd_title_ids",
+        lambda value: frozenset({_gba(0x222), _gba(0x223)}),
+    )
+
+    updated, persisted = registry.persist_registered_title_id("gba", 7, preferred=_gba(0x222))
+
+    assert persisted == _gba(0x224)
+    assert saved == [updated]
+
+
+def test_persist_existing_assignment_does_not_rescan_or_reallocate(monkeypatch):
+    config, first = registry.allocate_registered_title_id({}, "gba", 7, _gba(0x222))
+    monkeypatch.setattr(registry, "load_config", lambda: config)
+    monkeypatch.setattr(registry, "save_config", lambda value: (_ for _ in ()).throw(AssertionError("unexpected save")))
+    monkeypatch.setattr(
+        registry,
+        "configured_mounted_sd_title_ids",
+        lambda value: (_ for _ in ()).throw(AssertionError("unexpected inventory scan")),
+    )
+
+    same_config, persisted = registry.persist_registered_title_id("gba", 7, preferred=_gba(0x222))
+
+    assert same_config == config
+    assert persisted == first
