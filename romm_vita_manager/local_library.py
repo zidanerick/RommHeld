@@ -56,6 +56,7 @@ class LocalLibraryWidget(QWidget):
         self.filtered_games: list[Game] = []
         self.worker: CopyWorker | VitaFtpCopyWorker | None = None
         self._library_root: Path | None = None
+        self._status_cache: dict[Path, tuple[str, str]] = {}
 
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search games")
@@ -64,7 +65,13 @@ class LocalLibraryWidget(QWidget):
         self.platforms.addItem("All platforms")
         self.status_filter = QComboBox()
         self.status_filter.addItems(
-            ["All games", "Not installed", "Installed", "Different", "Unknown"]
+            [
+                "All games",
+                "Ready to copy",
+                "Installed",
+                "Update available",
+                "Destination unavailable",
+            ]
         )
         self.view_mode = QComboBox()
         self.view_mode.addItems(["List", "Tiles"])
@@ -77,14 +84,18 @@ class LocalLibraryWidget(QWidget):
         self.refresh_button = QPushButton("Refresh")
         self.refresh_button.setToolTip("Rescan the configured local library")
 
-        controls = QHBoxLayout()
-        controls.setSpacing(8)
-        controls.addWidget(self.search, 1)
-        controls.addWidget(self.platforms)
-        controls.addWidget(self.status_filter)
-        controls.addWidget(self.view_mode)
-        controls.addWidget(self.vita_transport)
-        controls.addWidget(self.refresh_button)
+        search_row = QHBoxLayout()
+        search_row.setSpacing(8)
+        search_row.addWidget(self.search, 1)
+        search_row.addWidget(self.refresh_button)
+
+        filters = QHBoxLayout()
+        filters.setSpacing(8)
+        filters.addWidget(self.platforms)
+        filters.addWidget(self.status_filter)
+        filters.addWidget(self.view_mode)
+        filters.addWidget(self.vita_transport)
+        filters.addStretch(1)
 
         self.source_label = QLabel()
         self.source_label.setWordWrap(True)
@@ -115,7 +126,8 @@ class LocalLibraryWidget(QWidget):
         self.cancel_button.setVisible(False)
 
         card = SurfaceCard()
-        card.content.addLayout(controls)
+        card.content.addLayout(search_row)
+        card.content.addLayout(filters)
         card.content.addWidget(self.source_label)
         card.content.addWidget(self.game_list, 1)
 
@@ -153,8 +165,11 @@ class LocalLibraryWidget(QWidget):
     def set_config(self, config: dict) -> None:
         self.config = dict(config)
         self.mappings = dict(config.get("platform_mappings", {}))
+        self._status_cache.clear()
 
     def set_target(self, target_key: str, vita: Path | None = None) -> None:
+        if self.target_key != target_key or self.vita != vita:
+            self._status_cache.clear()
         self.target_key = target_key
         self.vita = vita
         is_vita = target_key == "vita"
@@ -167,6 +182,8 @@ class LocalLibraryWidget(QWidget):
         self._apply_filters()
 
     def set_vita(self, vita: Path | None) -> None:
+        if self.vita != vita:
+            self._status_cache.clear()
         self.vita = vita
         if self.target_key == "vita":
             self._apply_filters()
@@ -199,6 +216,7 @@ class LocalLibraryWidget(QWidget):
     def _transport_changed(self, _index: int | None = None, *, refresh: bool = True) -> None:
         if self.target_key != "vita":
             return
+        self._status_cache.clear()
         using_ftp = self._using_ftp()
         if using_ftp and self.status_filter.currentIndex() != 0:
             self.status_filter.blockSignals(True)
@@ -218,6 +236,7 @@ class LocalLibraryWidget(QWidget):
 
     def refresh_library(self) -> None:
         """Rescan the configured source, then render the current filters."""
+        self._status_cache.clear()
         source = get_library_source(self.config)
         if source.mode != "local":
             self._library_root = None
@@ -262,15 +281,16 @@ class LocalLibraryWidget(QWidget):
                 continue
             if platform != "All platforms" and game.source_platform != platform:
                 continue
-            state, _detail = self._game_status(game)
-            if wanted == "Not installed" and state != "NEW":
-                continue
-            if wanted == "Installed" and state != "INSTALLED":
-                continue
-            if wanted == "Different" and state != "DIFFERENT":
-                continue
-            if wanted == "Unknown" and state != "UNKNOWN":
-                continue
+            if wanted != "All games":
+                state, _detail = self._game_status(game)
+                if wanted == "Ready to copy" and state != "NEW":
+                    continue
+                if wanted == "Installed" and state != "INSTALLED":
+                    continue
+                if wanted == "Update available" and state != "DIFFERENT":
+                    continue
+                if wanted == "Destination unavailable" and state != "UNKNOWN":
+                    continue
             filtered.append(game)
         self.filtered_games = filtered
         self._render_games()
@@ -281,15 +301,10 @@ class LocalLibraryWidget(QWidget):
         self.game_list.clear()
         for game in self.filtered_games:
             state, detail = self._game_status(game)
-            status = (
-                "Checked during FTP transfer"
-                if self._using_ftp()
-                else STATUS_LABELS.get(state, state.title())
-            )
-            item = QListWidgetItem(
-                f"{game.name}\n"
-                f"{platform_label(game.source_platform)} • {human_size(game.size)} • {status}"
-            )
+            metadata = f"{platform_label(game.source_platform)} • {human_size(game.size)}"
+            if self.target_key == "vita" and not self._using_ftp():
+                metadata += f" • {STATUS_LABELS.get(state, state.title())}"
+            item = QListWidgetItem(f"{game.name}\n{metadata}")
             item.setData(Qt.ItemDataRole.UserRole, game)
             item.setToolTip(detail)
             self.game_list.addItem(item)
@@ -305,11 +320,11 @@ class LocalLibraryWidget(QWidget):
     def _empty_message(self) -> str:
         if not self.games:
             if self._library_root is None:
-                return "No local library is active."
+                return "No local library is active. Choose a local source in Settings."
             if not self._library_root.is_dir():
-                return "The configured local library folder is unavailable."
-            return "No games were found in this local library."
-        return "No games match the current search and filters."
+                return "The local library folder is unavailable. Reconnect it or choose another source in Settings."
+            return "No games were found in this local library. Check the folder or choose another source in Settings."
+        return "No games match the current search and filters. Clear the search or adjust the filters."
 
     def _update_source_summary(self) -> None:
         if self._library_root is None:
@@ -333,10 +348,15 @@ class LocalLibraryWidget(QWidget):
             return "UNKNOWN", "Destination is managed from the Device workflow"
         if self._using_ftp():
             return "UNKNOWN", "VitaShell FTP checks the remote file when transfer starts"
+        cached = self._status_cache.get(game.path)
+        if cached is not None:
+            return cached
         try:
-            return game_status(self.vita, game, self.mappings)
+            result = game_status(self.vita, game, self.mappings)
         except Exception:
-            return "UNKNOWN", "Unable to inspect the current Vita destination"
+            result = ("UNKNOWN", "Unable to inspect the current Vita destination")
+        self._status_cache[game.path] = result
+        return result
 
     def apply_view_mode(self) -> None:
         if self.view_mode.currentText() == "Tiles":
@@ -605,6 +625,7 @@ class LocalLibraryWidget(QWidget):
 
     def _copy_finished(self, copied: int, skipped: int, cancelled: int) -> None:
         self._set_transfer_running(False)
+        self._status_cache.clear()
         self._apply_filters()
         self.transfer_status.setVisible(True)
         if cancelled:
