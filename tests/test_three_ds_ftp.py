@@ -8,6 +8,7 @@ import pytest
 from romm_vita_manager.three_ds_ftp import (
     ThreeDSFtpBackend,
     ThreeDSFtpSettings,
+    describe_connection_error,
     join_remote_path,
     normalize_remote_path,
 )
@@ -20,6 +21,7 @@ class FakeFTP:
     def __init__(self, *args, **kwargs):
         self.cwd_path = "/"
         self.logged_in = False
+        self.closed = False
 
     def connect(self, host, port, timeout=None):
         self.host = host
@@ -96,7 +98,7 @@ class FakeFTP:
         pass
 
     def close(self):
-        pass
+        self.closed = True
 
 
 class NoRestFTP(FakeFTP):
@@ -106,10 +108,22 @@ class NoRestFTP(FakeFTP):
         return super().storbinary(command, fp, blocksize=blocksize, callback=callback, rest=rest)
 
 
+class LoginFailureFTP(FakeFTP):
+    last_instance = None
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        type(self).last_instance = self
+
+    def login(self, user, password):
+        raise ftplib.error_perm("530 Login incorrect")
+
+
 @pytest.fixture(autouse=True)
 def reset_fake():
     FakeFTP.files = {}
     FakeFTP.dirs = {"/"}
+    LoginFailureFTP.last_instance = None
 
 
 def make_backend(remote_root: str = "/", ftp_factory=FakeFTP) -> ThreeDSFtpBackend:
@@ -155,6 +169,26 @@ def test_backend_connects_with_configured_endpoint():
     assert backend.ftp.logged_in
     assert backend.ftp.host == "192.0.2.10"
     assert backend.ftp.port == 5000
+
+
+def test_failed_login_closes_partial_connection():
+    backend = ThreeDSFtpBackend(
+        ThreeDSFtpSettings(host="192.0.2.10"),
+        ftp_factory=LoginFailureFTP,
+    )
+
+    with pytest.raises(ftplib.error_perm, match="530"):
+        backend.connect()
+
+    assert not backend.connected
+    assert LoginFailureFTP.last_instance is not None
+    assert LoginFailureFTP.last_instance.closed
+
+
+def test_connection_errors_include_console_side_remediation():
+    assert "Open ftpd" in describe_connection_error(ConnectionRefusedError("refused"))
+    assert "same local network" in describe_connection_error(TimeoutError("timed out"))
+    assert "username and password" in describe_connection_error(ftplib.error_perm("530 Login incorrect"))
 
 
 def test_upload_and_skip_same_size(tmp_path: Path):
