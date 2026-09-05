@@ -132,10 +132,13 @@ def allocate_registered_title_id(
 ) -> tuple[dict, bytes]:
     """Allocate a stable RommHeld title ID inside the family pool.
 
-    The registry guarantees uniqueness against other RommHeld assignments and
-    any explicitly supplied reserved IDs. It cannot by itself prove that an ID
-    is absent from an arbitrary console's installed-title database; callers that
-    can inventory a target should pass those IDs through ``reserved_title_ids``.
+    New assignments avoid other RommHeld assignments and any explicitly
+    supplied reserved IDs. A valid existing assignment is intentionally kept
+    stable even if it later appears in ``reserved_title_ids`` because changing
+    an established title ID would break upgrade/save continuity. Callers that
+    can inventory a target should therefore provide reserved IDs before the
+    title's first deployment. The registry cannot by itself prove that an ID is
+    absent from an arbitrary console's installed-title database.
     """
     if romm_id < 0:
         raise ValueError("RomM ROM ID must be non-negative.")
