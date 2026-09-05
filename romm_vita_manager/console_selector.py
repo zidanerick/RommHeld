@@ -4,11 +4,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QThread, QSize, Qt, Signal, Slot
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QButtonGroup,
     QDialog,
     QFileDialog,
+    QFrame,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -25,8 +24,10 @@ from PySide6.QtWidgets import (
 
 from .config import load_config, save_config
 from .console_identity import ConsoleIdentity
+from .design_tokens import DARK, brand_for_platform
 from .library_sources import LibrarySource, get_library_source, save_library_source
 from .romm_api import RomMApiError, normalize_romm_url, test_connection
+from .ui_components import AccentButton
 
 
 @dataclass(frozen=True)
@@ -39,11 +40,41 @@ class ConsoleProfile:
 
 
 CONSOLES = (
-    ConsoleProfile("vita", "PlayStation Vita", "supported", "#3b9cf5", "USB / VitaShell • RetroFlow • Adrenaline"),
-    ConsoleProfile("3ds", "Nintendo 3DS", "supported", "#d12228", "FTP / SD card • native 3DS runtimes"),
-    ConsoleProfile("ds", "Nintendo DS", "research", "#54b8ff", "Target research • TWiLight Menu++ / flashcards"),
-    ConsoleProfile("psp", "PlayStation Portable", "coming", "#8a8f98", "Coming soon"),
-    ConsoleProfile("mobile", "Mobile", "coming", "#8a8f98", "Coming soon"),
+    ConsoleProfile(
+        "vita",
+        "PlayStation Vita",
+        "supported",
+        brand_for_platform("vita").accent,
+        "VitaShell • RetroFlow • Adrenaline",
+    ),
+    ConsoleProfile(
+        "3ds",
+        "Nintendo 3DS",
+        "supported",
+        brand_for_platform("3ds").accent,
+        "FTP • FBI Remote Install • native runtimes",
+    ),
+    ConsoleProfile(
+        "ds",
+        "Nintendo DS",
+        "research",
+        brand_for_platform("ds").accent,
+        "TWiLight Menu++ • nds-bootstrap • flashcards",
+    ),
+    ConsoleProfile(
+        "psp",
+        "PlayStation Portable",
+        "coming",
+        brand_for_platform("psp").accent,
+        "Coming soon",
+    ),
+    ConsoleProfile(
+        "mobile",
+        "Mobile",
+        "coming",
+        brand_for_platform("mobile").accent,
+        "Coming soon",
+    ),
 )
 
 
@@ -66,74 +97,136 @@ class RomMConnectionWorker(QObject):
         except Exception as exc:
             self.failed.emit(f"Unexpected connection error: {exc}")
         else:
-            self.succeeded.emit("PASS • RomM API reachable and platforms.read is available.")
+            self.succeeded.emit("RomM connected • API access verified")
         finally:
             self.finished.emit()
 
 
-class ConsoleTile(QPushButton):
-    TILE_WIDTH = 260
-    TILE_HEIGHT = 205
+class ConsoleTile(QFrame):
+    """Clickable handheld card that stays stable across Linux Qt styles."""
+
+    clicked = Signal()
+    TILE_WIDTH = 250
+    TILE_HEIGHT = 170
 
     def __init__(self, profile: ConsoleProfile, parent=None):
         super().__init__(parent)
         self.profile = profile
-        selectable = profile.state in {"supported", "research"}
-        self.setCheckable(selectable)
-        self.setEnabled(selectable)
+        self.selectable = profile.state in {"supported", "research"}
+        self._selected = False
+
+        self.setObjectName("consoleTile")
         self.setFixedSize(QSize(self.TILE_WIDTH, self.TILE_HEIGHT))
-        self.setCursor(Qt.CursorShape.PointingHandCursor if self.isEnabled() else Qt.CursorShape.ArrowCursor)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setFocusPolicy(
+            Qt.FocusPolicy.StrongFocus if self.selectable else Qt.FocusPolicy.NoFocus
+        )
+        self.setCursor(
+            Qt.CursorShape.PointingHandCursor
+            if self.selectable
+            else Qt.CursorShape.ArrowCursor
+        )
+        self.setProperty("selected", False)
         self.setStyleSheet(self._style())
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(6)
+        layout.setContentsMargins(12, 9, 12, 8)
+        layout.setSpacing(3)
 
         identity = ConsoleIdentity(profile.key, profile.name, self)
+        identity.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         layout.addWidget(identity, 1)
 
         sub = QLabel(profile.subtitle)
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         sub.setWordWrap(True)
-        sub.setStyleSheet("background:transparent;border:none;color:#8f98a6;font-size:10px;padding:0;")
+        sub.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        sub.setStyleSheet(
+            f"background:transparent;border:none;color:{DARK.text_secondary};font-size:9px;padding:0;"
+        )
         layout.addWidget(sub)
 
-        labels = {"supported": "SUPPORTED", "research": "RESEARCH", "coming": "COMING SOON"}
-        state = QLabel(labels.get(profile.state, profile.state.upper()))
+        labels = {
+            "supported": "Ready",
+            "research": "In development",
+            "coming": "Coming soon",
+        }
+        state = QLabel(labels.get(profile.state, profile.state.title()))
         state.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        state.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         state.setStyleSheet(
-            f"background:transparent;border:none;color:{profile.accent};font-size:9px;font-weight:800;letter-spacing:1px;"
+            f"background:transparent;border:none;color:{profile.accent};font-size:9px;font-weight:700;padding:0;"
         )
         layout.addWidget(state)
 
     def _style(self) -> str:
-        if self.profile.state == "coming":
-            return (
-                "QPushButton { background:#12161c; border:1px solid #2b3139; border-radius:16px; }"
-                "QPushButton:disabled { color:#707782; }"
-            )
+        if not self.selectable:
+            return f"""
+                QFrame#consoleTile {{
+                    background:#171719;
+                    border:1px solid #29292C;
+                    border-radius:15px;
+                }}
+            """
+
         accent = self.profile.accent
+        soft = brand_for_platform(self.profile.key).accent_soft
         return f"""
-            QPushButton {{
-                background:#0f1319;
-                border:1px solid #2b3139;
-                border-radius:16px;
+            QFrame#consoleTile {{
+                background:{DARK.surface};
+                border:1px solid {DARK.separator};
+                border-radius:15px;
             }}
-            QPushButton:hover {{ border-color:{accent}; background:#141a22; }}
-            QPushButton:checked {{ border:2px solid {accent}; background:#171d26; }}
+            QFrame#consoleTile:hover {{
+                border:1px solid {accent};
+                background:{DARK.surface_raised};
+            }}
+            QFrame#consoleTile[selected="true"] {{
+                border:2px solid {accent};
+                background:{soft};
+            }}
         """
+
+    def set_selected(self, selected: bool) -> None:
+        selected = bool(selected and self.selectable)
+        if self._selected == selected:
+            return
+        self._selected = selected
+        self.setProperty("selected", selected)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
+
+    def mousePressEvent(self, event) -> None:
+        if self.selectable and event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        if self.selectable and event.key() in {
+            Qt.Key.Key_Return,
+            Qt.Key.Key_Enter,
+            Qt.Key.Key_Space,
+        }:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class ConsoleGrid(QWidget):
-    """Responsive grid that always wraps whole cards and never overlays siblings."""
+    """Responsive grid that always wraps complete handheld cards."""
 
     def __init__(self, tiles: list[ConsoleTile], parent=None):
         super().__init__(parent)
         self.tiles = tiles
         self.grid = QGridLayout(self)
         self.grid.setContentsMargins(0, 0, 0, 0)
-        self.grid.setHorizontalSpacing(14)
-        self.grid.setVerticalSpacing(14)
+        self.grid.setHorizontalSpacing(12)
+        self.grid.setVerticalSpacing(12)
         self.grid.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self._columns = 0
@@ -145,7 +238,10 @@ class ConsoleGrid(QWidget):
 
     def _column_count(self) -> int:
         usable = max(0, self.width())
-        return max(1, min(3, int((usable + 14) // (ConsoleTile.TILE_WIDTH + 14))))
+        return max(
+            1,
+            min(3, int((usable + 12) // (ConsoleTile.TILE_WIDTH + 12))),
+        )
 
     def _relayout(self) -> None:
         columns = self._column_count()
@@ -162,12 +258,13 @@ class ConsoleGrid(QWidget):
             self.grid.addWidget(tile, index // columns, index % columns)
 
         rows = (len(self.tiles) + columns - 1) // columns
-        height = rows * ConsoleTile.TILE_HEIGHT + max(0, rows - 1) * 14
+        height = rows * ConsoleTile.TILE_HEIGHT + max(0, rows - 1) * 12
         self.setMinimumHeight(height)
+        self.setMaximumHeight(height)
 
 
 class PlatformSelectorDialog(QDialog):
-    """Responsive startup selector for handheld and library context."""
+    """Startup selector for the active handheld and library source."""
 
     def __init__(self, config: dict, parent=None):
         super().__init__(parent)
@@ -179,59 +276,53 @@ class PlatformSelectorDialog(QDialog):
         self._romm_worker: RomMConnectionWorker | None = None
 
         self.setWindowTitle("RommHeld")
-        self.resize(1120, 820)
-        self.setMinimumSize(760, 680)
-        self.setStyleSheet("""
-            QDialog { background:#080a0e; color:#edf1f6; }
-            QGroupBox { border:1px solid #292e36; border-radius:12px; margin-top:10px; padding-top:10px; }
-            QGroupBox::title { subcontrol-origin:margin; left:12px; padding:0 8px; color:#8f98a6; font-weight:700; }
-            QLineEdit { background:#11151b; border:1px solid #333943; border-radius:8px; padding:8px 10px; color:#edf1f6; }
-            QLineEdit:disabled { background:#171a20; color:#6f7681; border-color:#292d35; }
-            QRadioButton { spacing:8px; color:#d7dce4; }
-            QPushButton#browse { background:#171b22; border:1px solid #333943; border-radius:8px; padding:8px 14px; }
-            QPushButton#test { background:#171b22; border:1px solid #333943; border-radius:8px; padding:8px 14px; font-weight:700; }
-            QPushButton#continue { background:#e8edf4; color:#11151b; border-radius:8px; padding:9px 18px; font-weight:800; }
-            QPushButton#exit { background:#171b22; color:#c6ccd5; border:1px solid #333943; border-radius:8px; padding:8px 14px; }
-            QLabel#muted { color:#8d96a4; }
-            QScrollArea { border:none; background:transparent; }
-            QScrollBar:vertical { width:10px; background:#0e1116; margin:0; }
-            QScrollBar::handle:vertical { background:#2f657e; border-radius:5px; min-height:28px; }
-        """)
+        self.resize(1080, 780)
+        self.setMinimumSize(760, 650)
+        self.setStyleSheet(self._stylesheet())
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(28, 22, 28, 22)
-        root.setSpacing(14)
+        root.setContentsMargins(26, 20, 26, 18)
+        root.setSpacing(12)
 
+        header = QHBoxLayout()
+        title_group = QVBoxLayout()
+        title_group.setContentsMargins(0, 0, 0, 0)
+        title_group.setSpacing(2)
         title = QLabel("RommHeld")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setFont(QFont("Sans Serif", 30, QFont.Weight.Bold))
-        title.setStyleSheet("color:#f4f6f8; letter-spacing:2px;")
-        root.addWidget(title)
+        title.setObjectName("selectorTitle")
+        subtitle = QLabel("Choose a handheld and library source")
+        subtitle.setObjectName("selectorSubtitle")
+        title_group.addWidget(title)
+        title_group.addWidget(subtitle)
+        header.addLayout(title_group, 1)
+        self.selection_context = QLabel()
+        self.selection_context.setObjectName("selectionContext")
+        header.addWidget(self.selection_context, 0, Qt.AlignmentFlag.AlignTop)
+        root.addLayout(header)
 
-        eyebrow = QLabel("SELECT YOUR HANDHELD")
-        eyebrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        eyebrow.setStyleSheet("color:#7e8794; font-size:10px; letter-spacing:4px;")
-        root.addWidget(eyebrow)
+        handheld_heading = QLabel("HANDHELD")
+        handheld_heading.setObjectName("selectorHeading")
+        root.addWidget(handheld_heading)
 
-        group = QButtonGroup(self)
-        group.setExclusive(True)
         tiles: list[ConsoleTile] = []
         for profile in CONSOLES:
             tile = ConsoleTile(profile)
             tiles.append(tile)
-            group.addButton(tile)
-            tile.clicked.connect(lambda _=False, key=profile.key: self.select_console(key))
+            tile.clicked.connect(lambda key=profile.key: self.select_console(key))
 
         self.console_grid = ConsoleGrid(tiles)
         scroll = QScrollArea()
+        scroll.setObjectName("consoleScroll")
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setMinimumHeight(ConsoleTile.TILE_HEIGHT * 2 + 12)
         scroll.setWidget(self.console_grid)
         root.addWidget(scroll, 1)
 
-        source_box = QGroupBox("LIBRARY SOURCE")
+        source_box = QGroupBox("Library source")
         source_layout = QVBoxLayout(source_box)
+        source_layout.setSpacing(9)
         source_row = QHBoxLayout()
         self.local_radio = QRadioButton("Local ROM directory")
         self.romm_radio = QRadioButton("RomM server")
@@ -244,30 +335,34 @@ class PlatformSelectorDialog(QDialog):
 
         local_row = QHBoxLayout()
         self.local_edit = QLineEdit(self.source.local_root)
+        self.local_edit.setPlaceholderText("Choose a local ROM directory")
         self.local_browse = QPushButton("Browse…")
-        self.local_browse.setObjectName("browse")
         self.local_browse.clicked.connect(self.choose_local_root)
         local_row.addWidget(self.local_edit, 1)
         local_row.addWidget(self.local_browse)
         source_layout.addLayout(local_row)
 
         server_row = QGridLayout()
+        server_row.setHorizontalSpacing(8)
+        server_row.setVerticalSpacing(7)
         self.url_edit = QLineEdit(self.source.romm_url)
+        self.url_edit.setPlaceholderText("https://romm.example.com")
         self.token_edit = QLineEdit(self.source.api_token)
+        self.token_edit.setPlaceholderText("Client API Token")
         self.token_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.test_button = QPushButton("Test server")
-        self.test_button.setObjectName("test")
+        self.test_button = QPushButton("Test connection")
         self.test_button.clicked.connect(self.test_romm_server)
-        server_row.addWidget(QLabel("Server URL"), 0, 0)
-        server_row.addWidget(self.url_edit, 0, 1)
-        server_row.addWidget(QLabel("Client API Token"), 1, 0)
+        server_row.addWidget(QLabel("Server"), 0, 0)
+        server_row.addWidget(self.url_edit, 0, 1, 1, 2)
+        server_row.addWidget(QLabel("Token"), 1, 0)
         server_row.addWidget(self.token_edit, 1, 1)
         server_row.addWidget(self.test_button, 1, 2)
         source_layout.addLayout(server_row)
 
         self.source_status = QLabel()
-        self.source_status.setObjectName("muted")
+        self.source_status.setObjectName("sourceStatus")
         self.source_status.setWordWrap(True)
+        self.source_status.setProperty("state", "neutral")
         source_layout.addWidget(self.source_status)
         self.local_radio.toggled.connect(self.update_source_visibility)
         self.url_edit.textChanged.connect(self.refresh_source_status)
@@ -276,19 +371,77 @@ class PlatformSelectorDialog(QDialog):
 
         actions = QHBoxLayout()
         exit_button = QPushButton("Exit")
-        exit_button.setObjectName("exit")
+        exit_button.setProperty("quiet", True)
         exit_button.clicked.connect(self.reject)
-        self.continue_button = QPushButton("Continue")
-        self.continue_button.setObjectName("continue")
+        initial_accent = brand_for_platform(self.selected_console).accent
+        self.continue_button = AccentButton("Continue", initial_accent)
         self.continue_button.clicked.connect(self.continue_selected)
         actions.addWidget(exit_button)
         actions.addStretch()
         actions.addWidget(self.continue_button)
         root.addLayout(actions)
 
-        self.select_console(self.selected_console if self.selected_console in {p.key for p in CONSOLES} else "vita")
+        valid_keys = {p.key for p in CONSOLES}
+        self.select_console(
+            self.selected_console if self.selected_console in valid_keys else "vita"
+        )
         self.update_source_visibility()
         self.refresh_source_status()
+
+    def _stylesheet(self) -> str:
+        return f"""
+        QDialog {{ background:{DARK.background}; color:{DARK.text_primary}; }}
+        QLabel#selectorTitle {{ color:{DARK.text_primary}; font-size:28px; font-weight:700; }}
+        QLabel#selectorSubtitle {{ color:{DARK.text_secondary}; font-size:11px; }}
+        QLabel#selectorHeading {{
+            color:{DARK.text_tertiary};
+            font-size:9px;
+            font-weight:700;
+            letter-spacing:1px;
+            padding-top:3px;
+        }}
+        QLabel#selectionContext {{
+            background:{DARK.surface};
+            color:{DARK.text_secondary};
+            border:1px solid {DARK.separator};
+            border-radius:9px;
+            padding:6px 10px;
+            font-size:10px;
+        }}
+        QScrollArea#consoleScroll {{ border:none; background:transparent; }}
+        QScrollArea#consoleScroll > QWidget > QWidget {{ background:transparent; }}
+        QGroupBox {{
+            background:{DARK.surface};
+            border:1px solid {DARK.separator};
+            border-radius:13px;
+            margin-top:14px;
+            padding-top:12px;
+        }}
+        QGroupBox::title {{
+            subcontrol-origin:margin;
+            left:12px;
+            padding:0 6px;
+            color:{DARK.text_secondary};
+            font-weight:600;
+        }}
+        QRadioButton {{
+            spacing:7px;
+            padding:4px 6px;
+            color:{DARK.text_primary};
+            background:transparent;
+        }}
+        QLabel#sourceStatus {{ color:{DARK.text_secondary}; font-size:10px; }}
+        QLabel#sourceStatus[state="success"] {{ color:{DARK.success}; }}
+        QLabel#sourceStatus[state="error"] {{ color:{DARK.error}; }}
+        QLabel#sourceStatus[state="busy"] {{ color:{DARK.warning}; }}
+        """
+
+    def _set_source_state(self, state: str, text: str) -> None:
+        self.source_status.setProperty("state", state)
+        self.source_status.setText(text)
+        self.source_status.style().unpolish(self.source_status)
+        self.source_status.style().polish(self.source_status)
+        self.source_status.update()
 
     def select_console(self, key: str) -> None:
         profile = next((item for item in CONSOLES if item.key == key), None)
@@ -297,10 +450,16 @@ class PlatformSelectorDialog(QDialog):
         self.selected_console = key
         self.selected_profile = profile
         for tile in self.console_grid.tiles:
-            tile.setChecked(tile.profile.key == key)
+            tile.set_selected(tile.profile.key == key)
+        self.continue_button.set_accent(profile.accent)
+        self.selection_context.setText(profile.name)
 
     def choose_local_root(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Select local ROM directory", self.local_edit.text())
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Select local ROM directory",
+            self.local_edit.text(),
+        )
         if path:
             self.local_edit.setText(path)
             self.local_radio.setChecked(True)
@@ -320,16 +479,16 @@ class PlatformSelectorDialog(QDialog):
     def refresh_source_status(self) -> None:
         if self.local_radio.isChecked():
             root = Path(self.local_edit.text()).expanduser()
-            self.source_status.setText(
-                "Local source ready." if root.is_dir() else "Choose an existing ROM directory."
-            )
+            if root.is_dir():
+                self._set_source_state("success", "Local library ready")
+            else:
+                self._set_source_state("neutral", "Choose an existing ROM directory")
         elif self._romm_thread and self._romm_thread.isRunning():
-            self.source_status.setText(
-                "TESTING… Network activity is isolated to this check. Handheld selection remains available."
-            )
+            self._set_source_state("busy", "Testing RomM connection…")
         else:
-            self.source_status.setText(
-                "RomM credentials are stored locally. Platform discovery requires platforms.read."
+            self._set_source_state(
+                "neutral",
+                "RomM uses the saved server URL and Client API Token",
             )
 
     def test_romm_server(self) -> None:
@@ -338,12 +497,15 @@ class PlatformSelectorDialog(QDialog):
         url = self.url_edit.text().strip()
         token = self.token_edit.text().strip()
         if not url or not token:
-            self.source_status.setText("Enter the RomM server URL and Client API Token first.")
+            self._set_source_state(
+                "error",
+                "Enter the RomM server URL and Client API Token first",
+            )
             return
         try:
             normalize_romm_url(url)
         except ValueError as exc:
-            self.source_status.setText(str(exc))
+            self._set_source_state("error", str(exc))
             return
 
         self.test_button.setText("Testing…")
@@ -354,36 +516,33 @@ class PlatformSelectorDialog(QDialog):
         self.local_browse.setEnabled(False)
         self.continue_button.setEnabled(False)
 
-        self._romm_thread = QThread(self)
-        self._romm_worker = RomMConnectionWorker(url, token)
-        self._romm_worker.moveToThread(self._romm_thread)
-        self._romm_thread.started.connect(self._romm_worker.run)
-        self._romm_worker.succeeded.connect(self._romm_test_succeeded)
-        self._romm_worker.failed.connect(self._romm_test_failed)
-        self._romm_worker.finished.connect(self._romm_test_finished)
-        self._romm_worker.finished.connect(self._romm_thread.quit)
-        self._romm_thread.finished.connect(self._romm_thread.deleteLater)
-        self._romm_thread.start()
+        thread = QThread(self)
+        worker = RomMConnectionWorker(url, token)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.succeeded.connect(self._romm_test_succeeded)
+        worker.failed.connect(self._romm_test_failed)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(self._romm_thread_finished)
+        thread.finished.connect(thread.deleteLater)
+        self._romm_thread = thread
+        self._romm_worker = worker
+        thread.start()
         self.refresh_source_status()
 
     @Slot(str)
     def _romm_test_succeeded(self, message: str) -> None:
-        self.source_status.setText(message)
-        self.test_button.setStyleSheet("background:#1f8f4d;color:white;border-radius:8px;padding:8px 14px;font-weight:700;")
+        self._set_source_state("success", message)
 
     @Slot(str)
     def _romm_test_failed(self, message: str) -> None:
-        self.source_status.setText(f"FAIL • {message}")
-        self.test_button.setStyleSheet("background:#b83232;color:white;border-radius:8px;padding:8px 14px;font-weight:700;")
+        self._set_source_state("error", f"RomM unavailable • {message}")
 
     @Slot()
-    def _romm_test_finished(self) -> None:
-        if self._romm_thread is not None:
-            self._romm_thread.wait(1000)
+    def _romm_thread_finished(self) -> None:
         self._romm_worker = None
         self._romm_thread = None
-        self.test_button.setText("Test again")
-        self.test_button.setStyleSheet("")
+        self.test_button.setText("Test connection")
         self.update_source_visibility()
 
     def continue_selected(self) -> None:
@@ -392,7 +551,11 @@ class PlatformSelectorDialog(QDialog):
         if self.local_radio.isChecked():
             root = Path(self.local_edit.text()).expanduser()
             if not root.is_dir():
-                QMessageBox.warning(self, "Library not found", "Choose an existing local ROM directory.")
+                QMessageBox.warning(
+                    self,
+                    "Library not found",
+                    "Choose an existing local ROM directory.",
+                )
                 return
             source = LibrarySource(mode="local", local_root=str(root))
         else:
@@ -403,9 +566,17 @@ class PlatformSelectorDialog(QDialog):
                 return
             token = self.token_edit.text().strip()
             if not token:
-                QMessageBox.warning(self, "RomM configuration", "Enter the RomM Client API Token.")
+                QMessageBox.warning(
+                    self,
+                    "RomM configuration",
+                    "Enter the RomM Client API Token.",
+                )
                 return
-            source = LibrarySource(mode="romm_api", romm_url=url, api_token=token)
+            source = LibrarySource(
+                mode="romm_api",
+                romm_url=url,
+                api_token=token,
+            )
         updated = save_library_source(self.config, source)
         updated["active_console"] = self.selected_console
         updated["setup_complete"] = True
@@ -414,9 +585,14 @@ class PlatformSelectorDialog(QDialog):
         self.accept()
 
     def closeEvent(self, event) -> None:
-        if self._romm_thread and self._romm_thread.isRunning():
-            self._romm_thread.quit()
-            self._romm_thread.wait(1000)
+        thread = self._romm_thread
+        if thread is not None and thread.isRunning():
+            thread.quit()
+            thread.wait()
+        for tile in self.console_grid.tiles:
+            identity = tile.findChild(ConsoleIdentity)
+            if identity is not None:
+                identity.stop_loading()
         super().closeEvent(event)
 
 

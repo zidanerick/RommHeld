@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from .config import APP_DIR
+
+
+_STATE_PATH = APP_DIR / "fbi_firewall_rules.json"
 
 
 @dataclass(frozen=True)
@@ -14,6 +20,7 @@ class FirewallRule:
     source_ip: str
     port: int
     destination_ip: str | None = None
+    persistent: bool = False
 
 
 class FirewallError(RuntimeError):
@@ -152,8 +159,47 @@ def _ufw_delete_args(source_ip: str, port: int, destination_ip: str | None) -> l
     ]
 
 
-def allow_temporary(source_ip: str, port: int, *, destination_ip: str | None = None) -> FirewallRule | None:
-    """Allow one 3DS address to reach one TCP port for the current transfer."""
+def _rule_key(rule: FirewallRule) -> str:
+    return "|".join(
+        (
+            rule.backend,
+            rule.zone or "",
+            rule.source_ip,
+            rule.destination_ip or "",
+            str(rule.port),
+        )
+    )
+
+
+def _load_persistent_rules() -> dict[str, dict]:
+    try:
+        value = json.loads(_STATE_PATH.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _remember_persistent_rule(rule: FirewallRule) -> None:
+    state = _load_persistent_rules()
+    state[_rule_key(rule)] = asdict(rule)
+    _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = _STATE_PATH.with_suffix(".tmp")
+    temporary.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    temporary.replace(_STATE_PATH)
+
+
+def _persistent_rule_was_installed(rule: FirewallRule) -> bool:
+    return _rule_key(rule) in _load_persistent_rules()
+
+
+def allow_persistent(source_ip: str, port: int, *, destination_ip: str | None = None) -> FirewallRule | None:
+    """Create a persistent FBI HTTP rule once and reuse it on later transfers.
+
+    The rule remains narrowly scoped to the configured 3DS IPv4 address and
+    serving TCP port. RommHeld records successful creation in its local config
+    directory so routine FBI sends do not repeatedly trigger an elevation
+    prompt. If the 3DS address changes, a new scoped rule is created.
+    """
     backend = detect_backend()
     if backend is None:
         return None
@@ -161,24 +207,46 @@ def allow_temporary(source_ip: str, port: int, *, destination_ip: str | None = N
     source_ip = source_ip.strip()
     destination_ip = destination_ip.strip() if destination_ip else None
     if not source_ip:
-        raise FirewallError("A 3DS IPv4 address is required for the temporary firewall rule.")
+        raise FirewallError("A 3DS IPv4 address is required for the FBI firewall rule.")
     if not (1 <= int(port) <= 65535):
         raise FirewallError(f"Invalid firewall port: {port}")
 
-    if backend == "firewalld":
-        zone = _firewalld_zone()
-        rule = _firewalld_rich_rule(source_ip, int(port))
-        result = _pkexec([_firewalld_command(), f"--zone={zone}", f"--add-rich-rule={rule}"])
-        _require_success(result, "Unable to temporarily allow the 3DS through firewalld")
-        return FirewallRule("firewalld", zone, source_ip, int(port), destination_ip)
+    zone = _firewalld_zone() if backend == "firewalld" else None
+    rule = FirewallRule(backend, zone, source_ip, int(port), destination_ip, True)
+    if _persistent_rule_was_installed(rule):
+        return rule
 
-    result = _pkexec(_ufw_rule_args(source_ip, int(port), destination_ip))
-    _require_success(result, "Unable to temporarily allow the 3DS through UFW")
-    return FirewallRule("ufw", None, source_ip, int(port), destination_ip)
+    if backend == "firewalld":
+        rich_rule = _firewalld_rich_rule(source_ip, int(port))
+        permanent = _pkexec(
+            [
+                _firewalld_command(),
+                f"--zone={zone}",
+                "--permanent",
+                f"--add-rich-rule={rich_rule}",
+            ]
+        )
+        _require_success(permanent, "Unable to permanently allow FBI Remote Install through firewalld")
+        runtime = _pkexec(
+            [_firewalld_command(), f"--zone={zone}", f"--add-rich-rule={rich_rule}"]
+        )
+        _require_success(runtime, "Unable to activate the FBI Remote Install firewalld rule")
+    else:
+        result = _pkexec(_ufw_rule_args(source_ip, int(port), destination_ip))
+        _require_success(result, "Unable to permanently allow FBI Remote Install through UFW")
+
+    _remember_persistent_rule(rule)
+    return rule
+
+
+def allow_temporary(source_ip: str, port: int, *, destination_ip: str | None = None) -> FirewallRule | None:
+    """Compatibility wrapper for older callers; FBI rules are now persistent."""
+    return allow_persistent(source_ip, port, destination_ip=destination_ip)
 
 
 def remove_temporary(rule: FirewallRule | None) -> None:
-    if rule is None:
+    """Remove legacy temporary rules; persistent FBI rules intentionally remain."""
+    if rule is None or rule.persistent:
         return
     if rule.backend == "firewalld":
         if not rule.zone:

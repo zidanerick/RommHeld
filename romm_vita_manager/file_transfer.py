@@ -7,6 +7,26 @@ from typing import Callable
 from .transfers import copy_file_chunked
 
 
+def required_transfer_space(
+    source_size: int,
+    destination: Path,
+    overwrite: bool = False,
+) -> int:
+    """Return free bytes required before a staged transfer can begin.
+
+    Same-size destinations are skipped. A different-size destination needs no
+    staging space until overwrite is explicitly approved. Once overwrite is
+    approved, the complete source is staged beside the existing destination so
+    cancellation can preserve the known-good file.
+    """
+    if destination.is_file():
+        if destination.stat().st_size == source_size:
+            return 0
+        if not overwrite:
+            return 0
+    return source_size
+
+
 def transfer_file(
     source: Path,
     destination: Path,
@@ -39,3 +59,6 @@ def transfer_file(
         )
 
     return "copied", source_size
+
+
+__all__ = ["required_transfer_space", "transfer_file"]

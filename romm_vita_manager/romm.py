@@ -9,6 +9,8 @@ EXTENSIONS = {
     ".3ds", ".3dsx", ".cia",
     ".nes", ".fds", ".smc", ".sfc", ".gba", ".gb", ".gbc", ".md", ".gen", ".sms", ".gg",
     ".32x", ".pce", ".sg", ".a26", ".a52", ".a78", ".lnx", ".nds", ".n64", ".z64", ".v64",
+    ".vb", ".ws", ".wsc", ".ngp", ".ngc", ".vec", ".col", ".rom", ".mx1", ".mx2",
+    ".d64", ".t64", ".prg", ".adf", ".adz", ".lha", ".ipf",
     ".wbfs", ".rvz", ".gdi", ".cdi", ".tap", ".dsk", ".hdf", ".3do", ".uae",
 }
 

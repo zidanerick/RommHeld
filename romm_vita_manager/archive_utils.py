@@ -36,19 +36,32 @@ def list_archive(archive: Path) -> list[ArchiveEntry]:
             raise RuntimeError(result.stderr.strip() or "7z could not inspect the archive.")
         entries: list[ArchiveEntry] = []
         current: dict[str, str] = {}
+        listing_started = False
+
+        def append_current() -> None:
+            if "Path" not in current:
+                return
+            name = current["Path"]
+            is_dir = current.get("Folder") == "+"
+            size = 0 if is_dir else int(current.get("Size", "0"))
+            entries.append(ArchiveEntry(name, size, is_dir))
+
         for raw_line in result.stdout.splitlines():
             line = raw_line.strip()
+            if line.startswith("----------"):
+                listing_started = True
+                current = {}
+                continue
+            if not listing_started:
+                continue
             if not line:
-                if "Path" in current:
-                    name = current["Path"]
-                    is_dir = current.get("Folder") == "+"
-                    size = 0 if is_dir else int(current.get("Size", "0"))
-                    entries.append(ArchiveEntry(name, size, is_dir))
+                append_current()
                 current = {}
                 continue
             if " = " in line:
                 key, value = line.split(" = ", 1)
                 current[key] = value
+        append_current()
         return entries
     raise ValueError(f"Unsupported archive format: {archive.name}")
 
