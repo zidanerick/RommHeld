@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import QAbstractListModel, QModelIndex, QSortFilterProxyModel, QTimer, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
@@ -8,6 +10,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListView,
+    QMessageBox,
+    QProgressBar,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -15,13 +19,22 @@ from PySide6.QtWidgets import (
 )
 
 from .design_tokens import DARK, brand_for_platform
+from .library_sources import get_library_source
+from .mappings import PLATFORM_LABELS, platform_label
+from .models import Game
 from .preferences import get_device_preference
+from .romm import scan_games
 from .romm_library_cache import load_cached_page, save_cached_page
 from .romm_remote import RomMRemoteGame
 from .romm_remote_worker import RomMLibraryWorker
-from .three_ds_manager import RomMArtworkWorker
+from .three_ds_ftp import ThreeDSFtpSettings
+from .three_ds_manager import RomMArtworkWorker, ThreeDSTransferWorker
 from .three_ds_targets import available_targets, default_destination, preferred_target_key
 from .ui_components import AccentButton, SurfaceCard
+
+
+LibraryGame = RomMRemoteGame | Game
+PACKAGE_GENERATION_TARGETS = frozenset({"native_gba", "vc_cia"})
 
 
 def _human_size(value: int) -> str:
@@ -33,14 +46,61 @@ def _human_size(value: int) -> str:
     return f"{value} B"
 
 
+def _local_platform_slug(value: str) -> str:
+    raw = str(value or "").strip()
+    folded = raw.casefold()
+    if folded in PLATFORM_LABELS:
+        return folded
+    for slug, label in PLATFORM_LABELS.items():
+        if label.casefold() == folded:
+            return slug
+    return folded
+
+
+def _platform_slug(game: LibraryGame) -> str:
+    if isinstance(game, RomMRemoteGame):
+        return str(game.platform_slug or "").strip().lower()
+    return _local_platform_slug(game.source_platform)
+
+
+def _platform_name(game: LibraryGame) -> str:
+    if isinstance(game, RomMRemoteGame):
+        return game.platform
+    slug = _platform_slug(game)
+    return platform_label(slug or game.source_platform)
+
+
+def _filename(game: LibraryGame) -> str:
+    return game.filename if isinstance(game, RomMRemoteGame) else game.path.name
+
+
+def _local_targets(game: Game):
+    targets = [
+        target
+        for target in available_targets(_platform_slug(game))
+        if target.key not in PACKAGE_GENERATION_TARGETS
+    ]
+    if _platform_slug(game) == "3ds" and game.path.suffix.casefold() != ".cia":
+        targets = [target for target in targets if target.key != "native_3ds_cia"]
+    return tuple(targets)
+
+
+def _targets_for_game(game: LibraryGame):
+    return (
+        available_targets(_platform_slug(game))
+        if isinstance(game, RomMRemoteGame)
+        else _local_targets(game)
+    )
+
+
 class RomMGameListModel(QAbstractListModel):
-    """Compact Qt model for large RomM libraries."""
+    """Compact Qt model shared by RomM-backed and local 3DS library items."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.games: list[RomMRemoteGame] = []
+        self.games: list[LibraryGame] = []
 
-    def rowCount(self, parent=QModelIndex()) -> int:
+    def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.games)
 
     def data(self, index: QModelIndex, role=Qt.ItemDataRole.DisplayRole):
@@ -48,11 +108,14 @@ class RomMGameListModel(QAbstractListModel):
             return None
         game = self.games[index.row()]
         if role == Qt.ItemDataRole.DisplayRole:
-            return f"{game.name}\n{game.platform}  •  {_human_size(game.size)}"
+            return f"{game.name}\n{_platform_name(game)}  •  {_human_size(game.size)}"
         if role == Qt.ItemDataRole.UserRole:
             return game
         if role == Qt.ItemDataRole.ToolTipRole:
-            return f"{game.name}\n{game.platform} • {game.filename}"
+            source = _filename(game)
+            if isinstance(game, Game):
+                source = str(game.path)
+            return f"{game.name}\n{_platform_name(game)} • {source}"
         return None
 
     def clear_games(self) -> None:
@@ -60,7 +123,12 @@ class RomMGameListModel(QAbstractListModel):
         self.games.clear()
         self.endResetModel()
 
-    def add_games(self, games: list[RomMRemoteGame]) -> None:
+    def set_games(self, games: list[LibraryGame]) -> None:
+        self.beginResetModel()
+        self.games = list(games)
+        self.endResetModel()
+
+    def add_games(self, games: list[LibraryGame]) -> None:
         if not games:
             return
         start = len(self.games)
@@ -74,11 +142,11 @@ class RomMGameFilterProxy(QSortFilterProxyModel):
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:
         index = self.sourceModel().index(source_row, 0, source_parent)
-        return isinstance(index.data(Qt.ItemDataRole.UserRole), RomMRemoteGame)
+        return isinstance(index.data(Qt.ItemDataRole.UserRole), (RomMRemoteGame, Game))
 
 
 class ThreeDSLibraryWidget(QWidget):
-    """Progressive RomM browser with a master-detail deployment layout."""
+    """3DS master/detail library for either a RomM server or local ROM directory."""
 
     PAGE_SIZE = 24
     SCROLL_THRESHOLD = 15
@@ -89,7 +157,9 @@ class ThreeDSLibraryWidget(QWidget):
         self.open_manager_callback = open_manager_callback
         self.library_worker: RomMLibraryWorker | None = None
         self.artwork_worker: RomMArtworkWorker | None = None
-        self.games: list[RomMRemoteGame] = []
+        self.transfer_worker: ThreeDSTransferWorker | None = None
+        self.games: list[LibraryGame] = []
+        self._local_games: list[Game] = []
         self._loading = False
         self._remote_offset = 0
         self._platform_cursor = 0
@@ -98,13 +168,14 @@ class ThreeDSLibraryWidget(QWidget):
         self._end_reached = False
         self._artwork_rom_id: int | None = None
         self._active_artwork_rom_id: int | None = None
+        self._last_transfer_result: str | None = None
         self._filter_timer = QTimer(self)
         self._filter_timer.setSingleShot(True)
         self._filter_timer.setInterval(180)
         self._filter_timer.timeout.connect(self._reload_for_filter)
 
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search your RomM library")
+        self.search.setPlaceholderText("Search games")
         self.search.setClearButtonEnabled(True)
         self.platforms = QComboBox()
         self.platforms.addItem("All compatible platforms", "")
@@ -122,7 +193,9 @@ class ThreeDSLibraryWidget(QWidget):
 
         self.status = QLabel("Ready")
         self.status.setWordWrap(True)
-        self.status.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;padding:0 2px;")
+        self.status.setStyleSheet(
+            f"color:{DARK.text_secondary};font-size:10px;padding:0 2px;"
+        )
 
         self.list_model = RomMGameListModel(self)
         self.list_proxy = RomMGameFilterProxy(self)
@@ -153,7 +226,8 @@ class ThreeDSLibraryWidget(QWidget):
         self.artwork.setFixedSize(230, 230)
         self.artwork.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.artwork.setStyleSheet(
-            f"background:#151517;border:1px solid {DARK.separator};border-radius:12px;color:{DARK.text_tertiary};"
+            f"background:#151517;border:1px solid {DARK.separator};"
+            f"border-radius:12px;color:{DARK.text_tertiary};"
         )
         inspector.content.addWidget(self.artwork, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -166,14 +240,18 @@ class ThreeDSLibraryWidget(QWidget):
         inspector.content.addWidget(self.details)
 
         target_label = QLabel("Deployment target")
-        target_label.setStyleSheet(f"color:{DARK.text_tertiary};font-size:10px;font-weight:600;")
+        target_label.setStyleSheet(
+            f"color:{DARK.text_tertiary};font-size:10px;font-weight:600;"
+        )
         inspector.content.addWidget(target_label)
         self.target_combo = QComboBox()
         self.target_combo.currentIndexChanged.connect(self._target_changed)
         inspector.content.addWidget(self.target_combo)
 
         destination_label = QLabel("Destination")
-        destination_label.setStyleSheet(f"color:{DARK.text_tertiary};font-size:10px;font-weight:600;")
+        destination_label.setStyleSheet(
+            f"color:{DARK.text_tertiary};font-size:10px;font-weight:600;"
+        )
         inspector.content.addWidget(destination_label)
         self.destination = QLineEdit()
         self.destination.setReadOnly(True)
@@ -187,6 +265,18 @@ class ThreeDSLibraryWidget(QWidget):
         self.deploy_button.setEnabled(False)
         self.deploy_button.clicked.connect(self._open_manager)
         inspector.content.addWidget(self.deploy_button)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.setVisible(False)
+        self.cancel_button = QPushButton("Cancel transfer")
+        self.cancel_button.setVisible(False)
+        self.cancel_button.clicked.connect(self.cancel_transfer)
+        transfer_row = QHBoxLayout()
+        transfer_row.addWidget(self.progress, 1)
+        transfer_row.addWidget(self.cancel_button)
+        inspector.content.addLayout(transfer_row)
         inspector.content.addStretch(1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -206,29 +296,37 @@ class ThreeDSLibraryWidget(QWidget):
 
         self.refresh_library()
 
+    def _source_mode(self) -> str:
+        return get_library_source(self.config).mode
+
     def _source(self) -> tuple[str, str] | None:
-        source = self.config.get("library_source", {})
-        mode = str(source.get("mode", "local")).lower() if isinstance(source, dict) else "local"
-        if mode != "romm_api":
+        source = get_library_source(self.config)
+        if source.mode != "romm_api":
             return None
-        url = str(source.get("romm_url", "")).strip()
-        token = str(source.get("api_token", "")).strip()
+        url = source.romm_url.strip()
+        token = source.api_token.strip()
         return (url, token) if url and token else None
 
     def refresh_library(self) -> None:
+        if self.transfer_worker is not None and self.transfer_worker.isRunning():
+            return
         self._filter_timer.stop()
         self.search.blockSignals(True)
         self.search.clear()
         self.search.blockSignals(False)
         self._generation += 1
         self._clear_results(clear_platforms=True)
-        self._start_page(reset=True, prefer_cache=True)
+        if self._source_mode() == "local":
+            self._load_local_library()
+        else:
+            self._start_page(reset=True, prefer_cache=True)
 
     def _clear_results(self, *, clear_platforms: bool = False) -> None:
         self._loading = False
         self._cache_displayed = False
         self._end_reached = False
         self.games = []
+        self._local_games = []
         self._remote_offset = 0
         self._platform_cursor = 0
         self.list_model.clear_games()
@@ -239,16 +337,67 @@ class ThreeDSLibraryWidget(QWidget):
             self.platforms.blockSignals(False)
         self._clear_details()
 
+    def _load_local_library(self) -> None:
+        source = get_library_source(self.config)
+        root = Path(source.local_root).expanduser()
+        if not root.is_dir():
+            self.status.setText(
+                "The configured local library is unavailable. Reconnect it or choose another source in Settings."
+            )
+            return
+
+        compatible = [game for game in scan_games(root) if _local_targets(game)]
+        self._local_games = compatible
+        slugs = sorted({_platform_slug(game) for game in compatible})
+        self.platforms.blockSignals(True)
+        self.platforms.clear()
+        self.platforms.addItem("All compatible platforms", "")
+        for slug in slugs:
+            self.platforms.addItem(platform_label(slug), slug)
+        self.platforms.blockSignals(False)
+        self._end_reached = True
+        self._apply_local_filters()
+        if compatible:
+            self.status.setText(
+                f"{len(compatible):,} compatible games loaded from local library."
+            )
+        else:
+            self.status.setText(
+                "No Nintendo 3DS-compatible games were found in the configured local library."
+            )
+
     def _schedule_filter(self) -> None:
         self._filter_timer.start()
 
     def _reload_for_filter(self) -> None:
+        if self.transfer_worker is not None and self.transfer_worker.isRunning():
+            return
+        if self._source_mode() == "local":
+            self._apply_local_filters()
+            return
         if self.library_worker and self.library_worker.isRunning():
             self._filter_timer.start()
             return
         self._generation += 1
         self._clear_results(clear_platforms=False)
         self._start_page(reset=True, prefer_cache=True)
+
+    def _apply_local_filters(self) -> None:
+        query = self.search.text().strip().casefold()
+        slug = str(self.platforms.currentData() or "").lower()
+        filtered = [
+            game
+            for game in self._local_games
+            if (not query or query in game.name.casefold())
+            and (not slug or _platform_slug(game) == slug)
+        ]
+        self.games = list(filtered)
+        self.list_model.set_games(self.games)
+        self._clear_details()
+        if self._local_games:
+            self.status.setText(
+                f"{len(filtered):,} of {len(self._local_games):,} compatible local games shown."
+            )
 
     def _cached_query(self) -> tuple[str, str | None]:
         return self.search.text().strip(), str(self.platforms.currentData() or "") or None
@@ -262,14 +411,18 @@ class ThreeDSLibraryWidget(QWidget):
         self._remote_offset = len(cached) if platform_slug else 0
         self._platform_cursor = 0
         self._cache_displayed = True
-        self.list_model.add_games(cached)
-        self.status.setText(f"Showing {len(cached):,} cached results while RomM refreshes…")
+        self.list_model.add_games(list(cached))
+        self.status.setText(
+            f"Showing {len(cached):,} cached results while RomM refreshes…"
+        )
         return True
 
     def _start_page(self, *, reset: bool = False, prefer_cache: bool = False) -> None:
         source = self._source()
         if source is None:
-            self.status.setText("RomM is not configured. Choose RomM Server in Settings to browse this library.")
+            self.status.setText(
+                "RomM is not configured. Choose a valid library source in Settings."
+            )
             return
         if self.library_worker and self.library_worker.isRunning():
             return
@@ -313,8 +466,12 @@ class ThreeDSLibraryWidget(QWidget):
             platform_slug=platform_slug,
         )
         generation = self._generation
-        worker.loaded.connect(lambda batch, g=generation, w=worker: self._loaded_batch(batch, g, w))
-        worker.platforms_loaded.connect(lambda platforms, g=generation: self._platforms_loaded(platforms, g))
+        worker.loaded.connect(
+            lambda batch, g=generation, w=worker: self._loaded_batch(batch, g, w)
+        )
+        worker.platforms_loaded.connect(
+            lambda platforms, g=generation: self._platforms_loaded(platforms, g)
+        )
         worker.failed.connect(lambda message, g=generation: self._failed(message, g))
         worker.finished.connect(lambda g=generation: self._finished(g))
         self.library_worker = worker
@@ -327,14 +484,18 @@ class ThreeDSLibraryWidget(QWidget):
         additions = [
             item
             for item in platforms
-            if isinstance(item, dict) and item.get("name") and str(item.get("name")) not in existing
+            if isinstance(item, dict)
+            and item.get("name")
+            and str(item.get("name")) not in existing
         ]
         if not additions:
             return
         current_slug = str(self.platforms.currentData() or "")
         self.platforms.blockSignals(True)
         for item in sorted(additions, key=lambda x: str(x.get("name")).casefold()):
-            self.platforms.addItem(str(item["name"]), str(item.get("slug") or "").lower())
+            self.platforms.addItem(
+                str(item["name"]), str(item.get("slug") or "").lower()
+            )
         index = self.platforms.findData(current_slug)
         self.platforms.setCurrentIndex(index if index >= 0 else 0)
         self.platforms.blockSignals(False)
@@ -345,7 +506,9 @@ class ThreeDSLibraryWidget(QWidget):
         batch = list(batch)
         search_term, platform_slug = self._cached_query()
         replacing_cache = self._cache_displayed
-        first_page = self._remote_offset == 0 if platform_slug else self._platform_cursor == 0
+        first_page = (
+            self._remote_offset == 0 if platform_slug else self._platform_cursor == 0
+        )
 
         if replacing_cache:
             self.list_model.clear_games()
@@ -359,7 +522,9 @@ class ThreeDSLibraryWidget(QWidget):
             self._loading = False
             self.refresh_button.setEnabled(True)
             if replacing_cache or not self.games:
-                self.status.setText("No matching games were found in RomM. Change the search or platform filter.")
+                self.status.setText(
+                    "No matching games were found in RomM. Change the search or platform filter."
+                )
                 self._clear_details()
             if platform_slug or self._platform_cursor >= worker.platforms_total:
                 self._end_reached = True
@@ -386,6 +551,8 @@ class ThreeDSLibraryWidget(QWidget):
         self.status.setText(f"{len(self.games):,} games loaded from {scope}.{suffix}")
 
     def _scroll_changed(self, value: int) -> None:
+        if self._source_mode() == "local":
+            return
         bar = self.game_list.verticalScrollBar()
         if bar.maximum() - value > self.SCROLL_THRESHOLD:
             return
@@ -416,56 +583,72 @@ class ThreeDSLibraryWidget(QWidget):
             self._filter_timer.stop()
             QTimer.singleShot(0, self._reload_for_filter)
 
-    def _selected_game(self) -> RomMRemoteGame | None:
+    def _selected_game(self) -> LibraryGame | None:
         index = self.game_list.currentIndex()
         value = index.data(Qt.ItemDataRole.UserRole) if index.isValid() else None
-        return value if isinstance(value, RomMRemoteGame) else None
+        return value if isinstance(value, (RomMRemoteGame, Game)) else None
 
     def _selected_changed(self, current: QModelIndex, previous: QModelIndex) -> None:
         game = current.data(Qt.ItemDataRole.UserRole) if current.isValid() else None
-        if not isinstance(game, RomMRemoteGame):
+        if not isinstance(game, (RomMRemoteGame, Game)):
             self._clear_details()
             return
 
+        targets = _targets_for_game(game)
         self.target_combo.blockSignals(True)
         self.target_combo.clear()
-        targets = available_targets(game.platform_slug)
         for target in targets:
             self.target_combo.addItem(target.label, target.key)
         preference = get_device_preference(self.config, "3ds")
-        preferred = preferred_target_key(game.platform_slug, preference)
+        preferred = preferred_target_key(_platform_slug(game), preference)
         preferred_index = self.target_combo.findData(preferred) if preferred else -1
         if preferred_index >= 0:
             self.target_combo.setCurrentIndex(preferred_index)
         self.target_combo.blockSignals(False)
-        self.details.setText(f"{game.name}\n{game.platform}  •  {_human_size(game.size)}")
-        self.deploy_button.setEnabled(bool(targets))
+        self.details.setText(
+            f"{game.name}\n{_platform_name(game)}  •  {_human_size(game.size)}"
+        )
         self._load_artwork(game)
         self._target_changed()
+        self._update_deploy_controls()
 
     def _target_changed(self) -> None:
         game = self._selected_game()
         if game is None or self.target_combo.count() == 0:
             self.destination.clear()
+            self._update_deploy_controls()
             return
         target_key = str(self.target_combo.currentData())
-        self.destination.setText(default_destination(target_key, game.platform_slug, game.filename))
-        target = next((t for t in available_targets(game.platform_slug) if t.key == target_key), None)
+        self.destination.setText(
+            default_destination(target_key, _platform_slug(game), _filename(game))
+        )
+        target = next(
+            (t for t in _targets_for_game(game) if t.key == target_key),
+            None,
+        )
         if target:
+            source_note = "Local file" if isinstance(game, Game) else "RomM library"
             self.details.setText(
-                f"{game.name}\n{game.platform}  •  {_human_size(game.size)}\n\n{target.description}"
+                f"{game.name}\n{_platform_name(game)}  •  {_human_size(game.size)}"
+                f"\n\n{target.description}\n\nSource: {source_note}"
             )
+        self._update_deploy_controls()
 
-    def _load_artwork(self, game: RomMRemoteGame) -> None:
-        self._artwork_rom_id = game.rom_id
+    def _load_artwork(self, game: LibraryGame) -> None:
         self.artwork.clear()
-        self.artwork.setText("Loading artwork…" if game.cover_url else "No artwork available")
-        if not game.cover_url:
+        if isinstance(game, Game):
+            self._artwork_rom_id = None
+            self._active_artwork_rom_id = None
+            self.artwork.setText("Local file")
             return
 
+        self._artwork_rom_id = game.rom_id
+        self.artwork.setText(
+            "Loading artwork…" if game.cover_url else "No artwork available"
+        )
+        if not game.cover_url:
+            return
         if self.artwork_worker and self.artwork_worker.isRunning():
-            # Let the bounded request finish, discard it if stale, then load the
-            # currently selected game's artwork in _artwork_finished().
             return
 
         source = self._source()
@@ -475,8 +658,12 @@ class ThreeDSLibraryWidget(QWidget):
         instance_url, token = source
         requested_rom_id = game.rom_id
         worker = RomMArtworkWorker(game.cover_url, token, instance_url)
-        worker.loaded.connect(lambda data, rid=requested_rom_id: self._artwork_loaded(data, rid))
-        worker.failed.connect(lambda msg, rid=requested_rom_id: self._artwork_failed(msg, rid))
+        worker.loaded.connect(
+            lambda data, rid=requested_rom_id: self._artwork_loaded(data, rid)
+        )
+        worker.failed.connect(
+            lambda msg, rid=requested_rom_id: self._artwork_failed(msg, rid)
+        )
         worker.finished.connect(self._artwork_finished)
         self._active_artwork_rom_id = requested_rom_id
         self.artwork_worker = worker
@@ -508,30 +695,190 @@ class ThreeDSLibraryWidget(QWidget):
         self.artwork_worker = None
         current = self._selected_game()
         if (
-            current is not None
+            isinstance(current, RomMRemoteGame)
             and current.cover_url
             and current.rom_id == self._artwork_rom_id
             and current.rom_id != finished_rom_id
         ):
             QTimer.singleShot(0, lambda game=current: self._load_artwork(game))
 
+    def _ftp_settings(self) -> ThreeDSFtpSettings:
+        saved = self.config.get("devices", {}).get("3ds", {})
+        host = str(saved.get("host", "")).strip()
+        if not host:
+            raise ValueError(
+                "Nintendo 3DS FTP is not configured. Open Device → Connection setup, "
+                "enter the address shown by ftpd, and leave ftpd running while deploying."
+            )
+        try:
+            port = int(saved.get("port", 5000))
+            if not 1 <= port <= 65535:
+                raise ValueError
+        except (TypeError, ValueError) as exc:
+            raise ValueError("The saved Nintendo 3DS FTP port is invalid.") from exc
+        return ThreeDSFtpSettings(
+            host=host,
+            port=port,
+            username=str(saved.get("username", "anonymous")) or "anonymous",
+            password=str(saved.get("password", "")),
+            remote_root=str(saved.get("remote_root", "/")) or "/",
+        )
+
+    def _open_manager(self, _checked: bool = False, *, overwrite: bool = False) -> None:
+        if self.transfer_worker is not None and self.transfer_worker.isRunning():
+            return
+        game = self._selected_game()
+        target_key = str(self.target_combo.currentData() or "")
+        if game is None or not target_key:
+            return
+
+        if target_key in PACKAGE_GENERATION_TARGETS:
+            self.open_manager_callback(game, target_key)
+            return
+
+        destination = self.destination.text().strip()
+        if not destination:
+            self.status.setText("Choose a deployment target with a valid destination.")
+            return
+        try:
+            settings = self._ftp_settings()
+        except ValueError as exc:
+            self.status.setText(str(exc))
+            return
+
+        if isinstance(game, RomMRemoteGame):
+            source = None
+            remote_game = game
+            romm_source = self._source()
+            if romm_source is None:
+                self.status.setText(
+                    "RomM credentials are unavailable. Re-save the library source in Settings."
+                )
+                return
+            romm_url, romm_token = romm_source
+        else:
+            if not game.path.is_file():
+                self.status.setText(
+                    "The selected local file is no longer available. Refresh the library and retry."
+                )
+                return
+            source = game.path
+            remote_game = None
+            romm_url = ""
+            romm_token = ""
+
+        self._last_transfer_result = None
+        self.progress.setValue(0)
+        self.progress.setVisible(True)
+        self.cancel_button.setVisible(True)
+        self.status.setText(
+            f"Preparing verified replacement for {game.name}…"
+            if overwrite
+            else f"Checking the Nintendo 3DS destination for {game.name}…"
+        )
+        worker = ThreeDSTransferWorker(
+            settings,
+            source,
+            destination,
+            remote_game=remote_game,
+            romm_url=romm_url,
+            romm_token=romm_token,
+            overwrite=overwrite,
+        )
+        worker.status_changed.connect(self.status.setText)
+        worker.progress.connect(self._transfer_progress)
+        worker.completed.connect(self._transfer_completed)
+        worker.failed.connect(self._transfer_failed)
+        worker.finished.connect(self._transfer_finished)
+        self.transfer_worker = worker
+        self._update_deploy_controls()
+        worker.start()
+
+    def _transfer_progress(self, done: int) -> None:
+        game = self._selected_game()
+        total = int(game.size) if game is not None else 0
+        self.progress.setValue(int(done * 100 / total) if total else 100)
+
+    def _transfer_completed(self, result: str) -> None:
+        self._last_transfer_result = result
+        self.status.setText(
+            {
+                "copied": "Transfer complete. The staged upload and final destination were size verified.",
+                "resumed": "Matching partial RommHeld upload resumed, verified, and moved into place.",
+                "skipped": "The Nintendo 3DS already has the same-size file; nothing was changed.",
+                "different": "A different-size file already exists at the destination. Nothing was changed.",
+                "cancelled": "Transfer cancelled. The existing destination was preserved.",
+            }.get(result, result)
+        )
+
+    def _transfer_failed(self, message: str) -> None:
+        self._last_transfer_result = None
+        self.status.setText(
+            "Transfer failed. The existing destination was preserved where replacement had begun. "
+            + message
+        )
+
+    def _transfer_finished(self) -> None:
+        result = self._last_transfer_result
+        self.transfer_worker = None
+        self.progress.setVisible(False)
+        self.cancel_button.setVisible(False)
+        self._update_deploy_controls()
+        if result != "different":
+            return
+        answer = QMessageBox.question(
+            self,
+            "Replace existing 3DS file?",
+            "The destination contains a different-size file. Replace it? RommHeld will "
+            "upload to a separate staging file, verify it, and preserve the existing "
+            "destination until the replacement is ready.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            QTimer.singleShot(0, lambda: self._open_manager(overwrite=True))
+
+    def cancel_transfer(self) -> None:
+        if self.transfer_worker is not None and self.transfer_worker.isRunning():
+            self.cancel_button.setEnabled(False)
+            self.status.setText("Cancelling Nintendo 3DS transfer…")
+            self.transfer_worker.cancel()
+
+    def _update_deploy_controls(self) -> None:
+        busy = bool(self.transfer_worker and self.transfer_worker.isRunning())
+        game = self._selected_game()
+        has_target = bool(game is not None and self.target_combo.currentData())
+        self.game_list.setEnabled(not busy)
+        self.target_combo.setEnabled(not busy and game is not None)
+        self.refresh_button.setEnabled(not busy and not self._loading)
+        self.deploy_button.setEnabled(not busy and has_target)
+        self.cancel_button.setEnabled(busy)
+        if game is not None and has_target:
+            target_key = str(self.target_combo.currentData() or "")
+            self.deploy_button.setText(
+                "Open package workflow"
+                if target_key in PACKAGE_GENERATION_TARGETS
+                else "Deploy to Nintendo 3DS"
+            )
+        else:
+            self.deploy_button.setText("Deploy to Nintendo 3DS")
+
     def _clear_details(self) -> None:
         self._artwork_rom_id = None
         self.artwork.clear()
         self.artwork.setText("Select a game")
-        self.details.setText("Choose a title to see its compatible Nintendo 3DS deployment routes.")
+        self.details.setText(
+            "Choose a title to see its compatible Nintendo 3DS deployment routes."
+        )
         self.destination.clear()
         self.target_combo.clear()
         self.deploy_button.setEnabled(False)
 
-    def _open_manager(self) -> None:
-        game = self._selected_game()
-        target_key = str(self.target_combo.currentData() or "")
-        if game is not None and target_key:
-            self.open_manager_callback(game, target_key)
-
     def closeEvent(self, event) -> None:
         self._filter_timer.stop()
+        if self.transfer_worker is not None and self.transfer_worker.isRunning():
+            self.transfer_worker.cancel()
+            self.transfer_worker.wait()
         for worker in (self.library_worker, self.artwork_worker):
             if worker is not None and worker.isRunning():
                 worker.requestInterruption()
