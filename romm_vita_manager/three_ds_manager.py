@@ -144,6 +144,9 @@ class ThreeDSTransferWorker(QThread):
             if self.remote_game is not None:
                 expected_size = int(self.remote_game.size)
                 name = self.remote_game.name
+                if expected_size <= 0:
+                    source = self._resolve_source()
+                    expected_size = source.stat().st_size
             else:
                 source = self._resolve_source()
                 expected_size = source.stat().st_size
@@ -816,7 +819,11 @@ class ThreeDSManagerDialog(QDialog):
             if selected.path.is_file()
             else 0
         )
-        self.progress.setValue(int(done * 100 / total) if total else 100)
+        if total:
+            self.progress.setRange(0, 100)
+            self.progress.setValue(int(done * 100 / total))
+        else:
+            self.progress.setRange(0, 0)
 
     def worker_completed(self, result: str) -> None:
         self._last_transfer_result = result
@@ -840,6 +847,7 @@ class ThreeDSManagerDialog(QDialog):
     def _worker_finished(self) -> None:
         result = self._last_transfer_result
         self.worker = None
+        self.progress.setRange(0, 100)
         self.progress.setVisible(False)
         if self._closing_requested:
             self._update_controls()
