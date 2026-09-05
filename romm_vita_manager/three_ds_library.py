@@ -27,7 +27,11 @@ from .romm_remote import RomMRemoteGame
 from .romm_remote_worker import RomMLibraryWorker
 from .three_ds_filesystem_deploy import ThreeDSFilesystemDeployDialog
 from .three_ds_manager import RomMArtworkWorker
-from .three_ds_targets import available_targets, default_destination, preferred_target_key
+from .three_ds_targets import (
+    available_targets_for_file,
+    default_destination,
+    preferred_target_key,
+)
 from .ui_components import AccentButton, SurfaceCard
 
 
@@ -60,23 +64,19 @@ def _filename(game: LibraryGame) -> str:
     return game.filename if isinstance(game, RomMRemoteGame) else game.path.name
 
 
-def _local_targets(game: Game):
-    targets = [
-        target
-        for target in available_targets(_platform_slug(game))
-        if target.key not in PACKAGE_GENERATION_TARGETS
-    ]
-    if _platform_slug(game) == "3ds" and game.path.suffix.casefold() != ".cia":
-        targets = [target for target in targets if target.key != "native_3ds_cia"]
-    return tuple(targets)
-
-
 def _targets_for_game(game: LibraryGame):
-    return (
-        available_targets(_platform_slug(game))
-        if isinstance(game, RomMRemoteGame)
-        else _local_targets(game)
-    )
+    targets = available_targets_for_file(_platform_slug(game), _filename(game))
+    if isinstance(game, Game):
+        targets = tuple(
+            target
+            for target in targets
+            if target.key not in PACKAGE_GENERATION_TARGETS
+        )
+    return targets
+
+
+def _local_targets(game: Game):
+    return _targets_for_game(game)
 
 
 class RomMGameListModel(QAbstractListModel):
