@@ -719,7 +719,7 @@ class ThreeDSManagerDialog(QDialog):
         if selected is None:
             return
         target_key = str(self.target_combo.currentData() or "retroarch")
-        if target_key in {"native_gba", "vc_cia"}:
+        if target_key == "native_gba":
             if isinstance(selected, RomMRemoteGame) and selected.platform_slug == "gba":
                 from .gba_vc_deploy import GbaVcDeployDialog
 
@@ -727,9 +727,28 @@ class ThreeDSManagerDialog(QDialog):
                 return
             QMessageBox.information(
                 self,
-                "CIA packaging unavailable",
-                "This CIA packaging route is currently available for RomM-backed GBA titles. "
-                "Local-file and other-platform CIA packaging remains explicit until a matching packager is implemented.",
+                "GBA CIA packaging unavailable",
+                "The native GBA CIA route is available for RomM-backed GBA titles. Local-file packaging remains explicit until a matching local-file packager is implemented.",
+            )
+            return
+
+        if target_key == "vc_cia":
+            if isinstance(selected, RomMRemoteGame):
+                platform = selected.platform_slug.strip().lower()
+                if platform == "gba":
+                    from .gba_vc_deploy import GbaVcDeployDialog
+
+                    GbaVcDeployDialog(self.config, selected, target_key, self).exec()
+                    return
+                if platform in {"gb", "gbc", "nes", "gamegear", "snes"}:
+                    from .classic_vc_deploy import ClassicVcDeployDialog
+
+                    ClassicVcDeployDialog(self.config, selected, self).exec()
+                    return
+            QMessageBox.information(
+                self,
+                "Virtual Console packaging unavailable",
+                "This Virtual Console route is available for RomM-backed GBA, GB, GBC, NES, Game Gear, and supported SNES titles. Local-file packaging remains explicit until a matching local-file packager is implemented.",
             )
             return
 
