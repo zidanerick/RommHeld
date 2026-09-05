@@ -51,6 +51,18 @@ def test_rgb565_texture_decoder_handles_tiled_primary_mip() -> None:
     assert result.getpixel((7, 7)) == (255, 0, 0)
 
 
+def test_l4_texture_decoder_handles_retail_nes_plaque_format() -> None:
+    # Renegade's localized COMMON2 title plaques use CGFX/PICA format 0x0A
+    # (L4), with the first swizzled texel in the low nibble.
+    raw = bytearray(32)
+    raw[0] = 0xE1
+    result = presentation._decode_l4(bytes(raw), 8, 8)
+
+    assert result.mode == "L"
+    assert result.getpixel((0, 0)) == 0x11
+    assert result.getpixel((1, 0)) == 0xEE
+
+
 def test_gbc_front_artwork_preserves_donor_cartridge_frame(monkeypatch):
     donor = Image.new("RGBA", (128, 128), (30, 30, 30, 255))
     draw = ImageDraw.Draw(donor)
