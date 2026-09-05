@@ -530,7 +530,7 @@ class LocalLibraryWidget(QWidget):
         replacements: list[str] = []
         for game in selected:
             state, _detail = self._game_status(game)
-            if state == "INSTALLED":
+            if state in {"INSTALLED", "STAGED"}:
                 continue
             label, destination, mode = destination_for_game(self.vita, game, self.mappings)
             if mode == "unknown":
