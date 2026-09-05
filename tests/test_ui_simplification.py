@@ -44,3 +44,14 @@ def test_vita_copy_primary_action_lives_with_library_selection() -> None:
     assert '"Copy to Vita"' in source
     assert 'self.copy_button.clicked.connect(self.copy_selected)' in source
     assert 'self.transfer_status.setText(f"Transfer complete' in source
+
+
+def test_romm_connection_can_be_tested_from_settings() -> None:
+    source = _source("romm_vita_manager/workspace_dashboard.py")
+
+    assert 'self.settings_test_button = QPushButton("Test connection")' in source
+    assert 'self.settings_test_button.clicked.connect(self._test_settings_romm)' in source
+    assert 'RomMConnectionWorker(normalized, token)' in source
+    assert 'worker.finished.connect(thread.quit)' in source
+    assert 'worker.finished.connect(worker.deleteLater)' in source
+    assert 'Finish the RomM connection test before switching handhelds.' in source
