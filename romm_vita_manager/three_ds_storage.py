@@ -10,16 +10,13 @@ from .storage_validation import validate_3ds_sd
 
 
 def configured_3ds_storage_root(config: dict) -> Path | None:
-    """Return the configured mounted 3DS SD root when it is still valid.
-
-    `three_ds_sd_root` is the canonical setting. The nested `storage_root` read is
-    retained only to migrate the short-lived integration-branch representation.
-    """
-    raw = str(config.get("three_ds_sd_root", "")).strip()
+    """Return the configured mounted 3DS SD root when it is still valid."""
+    raw = str(
+        config.get("devices", {}).get("3ds", {}).get("storage_root", "")
+    ).strip()
+    # Read compatibility for the brief integration-branch top-level variant.
     if not raw:
-        raw = str(
-            config.get("devices", {}).get("3ds", {}).get("storage_root", "")
-        ).strip()
+        raw = str(config.get("three_ds_sd_root", "")).strip()
     if not raw:
         return None
     try:
@@ -33,7 +30,7 @@ def configured_3ds_storage_root(config: dict) -> Path | None:
 
 
 def with_3ds_storage_root(config: dict, root: str | Path) -> dict:
-    """Return config updated with a validated, independently stored 3DS SD root."""
+    """Return config updated with a validated 3DS mounted-storage root."""
     resolved = resolve_storage_root(root)
     validation = validate_3ds_sd(resolved)
     if validation.confidence not in {"medium", "high"}:
@@ -42,7 +39,12 @@ def with_3ds_storage_root(config: dict, root: str | Path) -> dict:
             "Choose the card root that contains files such as boot.firm, boot.3dsx, luma/, or gm9/."
         )
     updated = dict(config)
-    updated["three_ds_sd_root"] = str(resolved)
+    devices = dict(updated.get("devices", {}))
+    three_ds = dict(devices.get("3ds", {}))
+    three_ds["storage_root"] = str(resolved)
+    devices["3ds"] = three_ds
+    updated["devices"] = devices
+    updated.pop("three_ds_sd_root", None)
     return updated
 
 
