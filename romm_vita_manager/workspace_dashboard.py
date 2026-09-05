@@ -32,6 +32,7 @@ from .romm_remote import RomMRemoteGame
 from .storage_validation import validate_storage
 from .three_ds_library import ThreeDSLibraryWidget
 from .three_ds_manager import ThreeDSManagerDialog
+from .three_ds_readiness_ui import ThreeDSReadinessDialog
 from .three_ds_setup import ThreeDSSetupDialog
 from .ui_components import AccentButton, SurfaceCard
 from .vita import find_vita_mounts, free_space, total_space
@@ -134,23 +135,33 @@ class WorkspaceDashboardWindow(QMainWindow):
         card.content.addWidget(self._card_title("Device connection"))
 
         if self.workspace_key == "vita":
+            saved_ftp = self.config.get("devices", {}).get("vita_ftp", {})
+            ftp_host = str(saved_ftp.get("host", "")).strip()
+            ftp_port = saved_ftp.get("port", 1337)
             self.workspace_vita_status = QLabel("Detecting…")
             self.workspace_vita_space = QLabel("-")
+            self.workspace_vita_ftp = QLabel(
+                f"ftp://{ftp_host}:{ftp_port}" if ftp_host else "Not configured"
+            )
+            self.workspace_vita_ftp.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
             form = QFormLayout()
             form.setContentsMargins(0, 0, 0, 0)
-            form.addRow("Connection", self.workspace_vita_status)
+            form.addRow("USB", self.workspace_vita_status)
             form.addRow("Storage", self.workspace_vita_space)
+            form.addRow("FTP fallback", self.workspace_vita_ftp)
             card.content.addLayout(form)
             card.content.addWidget(
                 self._secondary(
-                    "RommHeld detects mounted Vita storage. Use Setup for runtime preparation, or Send file for an advanced one-off transfer outside the library workflow."
+                    "VitaShell USB is preferred on a handheld Vita. VitaShell FTP is available for wireless transfers and PlayStation TV; configure its endpoint from Send file when USB is unavailable."
                 )
             )
 
             actions = QHBoxLayout()
             refresh = QPushButton("Refresh")
             refresh.clicked.connect(self.refresh_device_page)
-            send = QPushButton("Send file")
+            send = QPushButton("Send file / configure FTP")
             send.clicked.connect(self.open_vita_send_file)
             setup = AccentButton("Vita setup", accent)
             setup.clicked.connect(self.open_vita_setup)
@@ -175,15 +186,18 @@ class WorkspaceDashboardWindow(QMainWindow):
             card.content.addLayout(form)
             card.content.addWidget(
                 self._secondary(
-                    "FTP handles filesystem transfers. FBI Remote Install is offered when a deployment produces an installable CIA."
+                    "FTP handles filesystem transfers through ftpd. FBI Remote Install is offered when a deployment produces an installable CIA. Runtime readiness can also stage the verified ftpd 3DSX to a mounted 3DS SD card."
                 )
             )
             actions = QHBoxLayout()
-            setup = QPushButton("Setup")
+            setup = QPushButton("Connection setup")
             setup.clicked.connect(self.open_3ds_setup)
+            readiness = QPushButton("Runtime / FTP readiness")
+            readiness.clicked.connect(self.open_3ds_readiness)
             manage = AccentButton("Open 3DS manager", accent)
             manage.clicked.connect(self.open_3ds)
             actions.addWidget(setup)
+            actions.addWidget(readiness)
             actions.addStretch()
             actions.addWidget(manage)
             card.content.addLayout(actions)
@@ -499,18 +513,24 @@ class WorkspaceDashboardWindow(QMainWindow):
             mounts = self._safe_vita_mounts()
             self.vita = mounts[0] if mounts else None
             self.local_library.set_vita(self.vita)
+            saved_ftp = self.config.get("devices", {}).get("vita_ftp", {})
+            ftp_host = str(saved_ftp.get("host", "")).strip()
+            ftp_port = saved_ftp.get("port", 1337)
             if self.vita:
-                self.workspace_vita_status.setText("Connected")
+                self.workspace_vita_status.setText("Mounted")
                 self.workspace_vita_status.setToolTip(str(self.vita))
                 try:
                     self.workspace_vita_space.setText(
                         f"{human_size(free_space(self.vita))} free of {human_size(total_space(self.vita))}"
                     )
                 except OSError:
-                    self.workspace_vita_space.setText("Connected, storage unavailable")
+                    self.workspace_vita_space.setText("Mounted, storage unavailable")
             else:
-                self.workspace_vita_status.setText("Not detected")
+                self.workspace_vita_status.setText("Not mounted")
                 self.workspace_vita_space.setText("-")
+            self.workspace_vita_ftp.setText(
+                f"ftp://{ftp_host}:{ftp_port}" if ftp_host else "Not configured"
+            )
         elif self.workspace_key == "3ds":
             saved = self.config.get("devices", {}).get("3ds", {})
             host = str(saved.get("host", "")).strip()
@@ -524,7 +544,14 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.ds_root.setText(root if root else "No SD root selected")
 
         if self.workspace_key == "vita":
-            vita_text = "Connected" if self.vita is not None else "Not detected"
+            saved_ftp = self.config.get("devices", {}).get("vita_ftp", {})
+            vita_text = (
+                "USB mounted"
+                if self.vita is not None
+                else "FTP configured"
+                if str(saved_ftp.get("host", "")).strip()
+                else "Not detected"
+            )
         else:
             vita_text = "Connected" if self._safe_vita_mounts() else "Not detected"
         saved = self.config.get("devices", {}).get("3ds", {})
@@ -584,12 +611,10 @@ class WorkspaceDashboardWindow(QMainWindow):
     def open_vita_send_file(self) -> None:
         if self.vita is None:
             self.refresh_device_page()
-        if self.vita is None:
-            self.statusBar().showMessage(
-                "Connect the Vita in VitaShell USB mode first.", 5000
-            )
-            return
         SendFileDialog(self.vita, self).exec()
+        self.config = self._reload_config()
+        self.refresh_device_page()
+        self.refresh_games()
 
     def open_3ds(
         self,
@@ -636,6 +661,22 @@ class WorkspaceDashboardWindow(QMainWindow):
         else:
             self.config = self._reload_config()
             self.refresh_device_page()
+
+    def open_3ds_readiness(self) -> None:
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Select mounted Nintendo 3DS SD-card root",
+        )
+        if not path:
+            return
+        ThreeDSReadinessDialog(
+            Path(path),
+            needs_ftp=True,
+            needs_cia_install=False,
+            parent=self,
+        ).exec()
+        self.config = self._reload_config()
+        self.refresh_device_page()
 
     @staticmethod
     def _reload_config() -> dict:
