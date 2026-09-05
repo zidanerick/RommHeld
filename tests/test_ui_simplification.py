@@ -131,8 +131,10 @@ def test_device_primary_actions_follow_readiness() -> None:
     assert 'def set_emphasized(self, emphasized: bool) -> None:' in components
     assert 'self.workspace_vita_send_action.set_emphasized(not route_ready)' in source
     assert 'self.workspace_vita_setup_action.set_emphasized(route_ready)' in source
-    assert 'self.workspace_3ds_setup_action.set_emphasized(not bool(host))' in source
-    assert 'self.workspace_3ds_manage_action.set_emphasized(bool(host))' in source
+    assert 'mounted_root = self._safe_3ds_storage_root(saved)' in source
+    assert 'route_ready = bool(host) or mounted_root is not None' in source
+    assert 'self.workspace_3ds_setup_action.set_emphasized(not route_ready)' in source
+    assert 'self.workspace_3ds_manage_action.set_emphasized(route_ready)' in source
     assert 'self.ds_browse_action.set_emphasized(not bool(root))' in source
     assert 'self.ds_validate_action.set_emphasized(bool(root))' in source
     assert 'self.ds_browse_action.set_emphasized(False)' in source
