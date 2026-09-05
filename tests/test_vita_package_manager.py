@@ -3,12 +3,24 @@ from pathlib import Path
 from romm_vita_manager import package_manager
 from romm_vita_manager.config import package_cache_dir
 from romm_vita_manager.emulators import detect_emulators
-from romm_vita_manager.package_manager import PACKAGES, PackageSpec, stage_package
+from romm_vita_manager.package_manager import (
+    PACKAGES,
+    RETROARCH_STABLE_VERSION,
+    PackageSpec,
+    stage_package,
+)
 
 
 def test_vita_packages_use_platform_cache_directory():
     assert package_manager.CACHE_DIR == package_cache_dir()
     assert package_manager.CACHE_DIR.name == "packages"
+
+
+def test_retroarch_uses_current_stable_vita_build():
+    assert RETROARCH_STABLE_VERSION == "1.22.2"
+    assert f"/stable/{RETROARCH_STABLE_VERSION}/playstation/vita/RetroArch.vpk" in PACKAGES["retroarch"].source
+    assert f"/stable/{RETROARCH_STABLE_VERSION}/playstation/vita/RetroArch_data.7z" in PACKAGES["retroarch-data"].source
+    assert PACKAGES["retroarch-data"].requires_archive_review is True
 
 
 def test_daedalus_uses_vita_native_upstream_vpk():
