@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .design_tokens import DARK
+from .design_tokens import DARK, brand_for_platform
 from .library_sources import get_library_source
 from .mappings import platform_label
 from .models import Game
@@ -85,6 +85,11 @@ class LocalLibraryWidget(QWidget):
         self.destination_label = QLabel("Select a game to see its destination.")
         self.destination_label.setWordWrap(True)
         self.destination_label.setStyleSheet(f"color:{DARK.text_secondary};")
+        self.copy_button = AccentButton(
+            "Copy to Vita",
+            brand_for_platform("vita").accent,
+        )
+        self.copy_button.setEnabled(False)
 
         self.progress = QProgressBar()
         self.progress.setVisible(False)
@@ -101,9 +106,10 @@ class LocalLibraryWidget(QWidget):
         card.content.addWidget(self.game_list, 1)
 
         summary = QHBoxLayout()
+        summary.setSpacing(10)
         summary.addWidget(self.selection_label)
-        summary.addStretch()
         summary.addWidget(self.destination_label, 1)
+        summary.addWidget(self.copy_button)
         card.content.addLayout(summary)
         card.content.addWidget(self.progress)
 
@@ -122,6 +128,7 @@ class LocalLibraryWidget(QWidget):
         self.status_filter.currentIndexChanged.connect(self.refresh_library)
         self.view_mode.currentIndexChanged.connect(self.apply_view_mode)
         self.game_list.itemSelectionChanged.connect(self.update_summary)
+        self.copy_button.clicked.connect(self.copy_selected)
         self.cancel_button.clicked.connect(self.cancel_copy)
 
         self.set_target(target_key, vita)
@@ -136,6 +143,7 @@ class LocalLibraryWidget(QWidget):
         self.vita = vita
         is_vita = target_key == "vita"
         self.status_filter.setEnabled(is_vita)
+        self.copy_button.setVisible(is_vita)
         if not is_vita:
             self.status_filter.setCurrentIndex(0)
         self.update_summary()
@@ -154,8 +162,8 @@ class LocalLibraryWidget(QWidget):
             self.source_label.setText(
                 "RomM server selected • this workspace does not yet expose a remote library view."
             )
-            self.selection_label.setText("0 selected")
             self.destination_label.setText("No local library is substituted.")
+            self.update_summary()
             return
 
         root = Path(source.local_root or self.config.get("romm_root", "")).expanduser()
@@ -244,17 +252,29 @@ class LocalLibraryWidget(QWidget):
     def update_summary(self) -> None:
         selected = self.selected_games()
         total = sum(game.size for game in selected)
+        is_vita = self.target_key == "vita"
+        worker_running = self.worker is not None and self.worker.isRunning()
+        self.copy_button.setVisible(is_vita)
+        self.copy_button.setEnabled(
+            is_vita and self.vita is not None and bool(selected) and not worker_running
+        )
         self.selection_label.setText(f"{len(selected)} selected • {human_size(total)}")
         if len(selected) != 1:
-            self.destination_label.setText(
-                "Multiple games selected." if selected else "Select a game to see its destination."
-            )
+            if selected and is_vita:
+                if self.vita is None:
+                    self.destination_label.setText("Connect the Vita to copy the selected games.")
+                else:
+                    self.destination_label.setText(f"Ready to copy {len(selected)} games to the Vita.")
+            else:
+                self.destination_label.setText(
+                    "Multiple games selected." if selected else "Select a game to see its destination."
+                )
             return
-        if self.target_key != "vita":
+        if not is_vita:
             self.destination_label.setText("Deployment destination is selected from the Device workflow.")
             return
         if self.vita is None:
-            self.destination_label.setText("No Vita connected.")
+            self.destination_label.setText("Connect the Vita to copy this game.")
             return
         label, path, _mode = destination_for_game(self.vita, selected[0], self.mappings)
         self.destination_label.setText(f"{label} • {path}")
@@ -363,7 +383,10 @@ class LocalLibraryWidget(QWidget):
         self.cancel_button.setVisible(running)
         self.cancel_button.setEnabled(running)
         if running:
+            self.copy_button.setEnabled(False)
             self.transfer_status.setText("Preparing transfer…")
+        else:
+            self.update_summary()
 
     def _on_progress(self, value: int, message: str, detail: str) -> None:
         self.progress.setValue(value)
@@ -372,11 +395,13 @@ class LocalLibraryWidget(QWidget):
     def _copy_finished(self, copied: int, skipped: int, cancelled: int) -> None:
         self._set_transfer_running(False)
         self.refresh_library()
-        QMessageBox.information(
-            self,
-            "Transfer summary",
-            f"Copied: {copied}\nSkipped: {skipped}\nCancelled: {cancelled}",
-        )
+        self.transfer_status.setVisible(True)
+        if cancelled:
+            self.transfer_status.setText(
+                f"Transfer stopped • {copied} copied • {skipped} skipped • {cancelled} cancelled"
+            )
+        else:
+            self.transfer_status.setText(f"Transfer complete • {copied} copied • {skipped} skipped")
 
     def _copy_failed(self, message: str) -> None:
         self._set_transfer_running(False)
@@ -384,6 +409,7 @@ class LocalLibraryWidget(QWidget):
 
     def _worker_finished(self) -> None:
         self.worker = None
+        self.update_summary()
 
     def closeEvent(self, event) -> None:
         if self.worker is not None and self.worker.isRunning():
