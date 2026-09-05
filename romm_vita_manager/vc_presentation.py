@@ -119,6 +119,22 @@ def _decode_la8(raw: bytes, width: int, height: int) -> Image.Image:
     return Image.frombytes("LA", (width, height), bytes(out))
 
 
+def _decode_l4(raw: bytes, width: int, height: int) -> Image.Image:
+    """Decode Nintendo/PICA200 tiled 4-bit luminance texture data."""
+    texels = width * height
+    required = (texels + 1) // 2
+    if len(raw) < required:
+        raise ValueError("Donor L4 texture is truncated.")
+    out = bytearray(texels)
+    for y in range(height):
+        for x in range(width):
+            texel = _tile_offset(x, y, width)
+            packed = raw[texel >> 1]
+            nibble = (packed >> 4) & 0x0F if texel & 1 else packed & 0x0F
+            out[y * width + x] = nibble * 0x11
+    return Image.frombytes("L", (width, height), bytes(out))
+
+
 def _banner_cgfx_slots(donor_banner: bytes) -> list[bytes]:
     """Return every populated donor CBMD language scene, common first."""
     try:
@@ -152,6 +168,8 @@ def _texture_image_from_cgfx(scene: bytes, name: str) -> Image.Image:
         return _decode_rgb565(raw, texture.width, texture.height)
     if texture.hw_format == 5:
         return _decode_la8(raw, texture.width, texture.height)
+    if texture.hw_format == 10:
+        return _decode_l4(raw, texture.width, texture.height)
     raise ValueError(
         f"Unsupported donor texture format for {name}: {texture.hw_format} "
         f"({texture.width}x{texture.height})."
