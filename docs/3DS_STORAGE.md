@@ -20,7 +20,7 @@ The mounted-card route is deliberately **not** labelled as console USB. Nintendo
 
 Normal filesystem deployment can use either route after the runtime target and destination have been selected. This includes direct-ROM/runtime targets such as open_agb_firm, TWiLight Menu++ / nds-bootstrap, Red Viper, DaedalusX64, RetroArch, and copying an existing CIA into `/cias/` for later installation.
 
-Package generation remains separate. Generated GBA or Virtual Console CIAs first go through their package workflow; selecting SD versus FTP must never decide which runtime or package format is created.
+Package generation remains separate from transport. Generated GBA or Virtual Console CIAs first go through their package workflow. After generation, **FBI Remote Install** remains the direct-install route, while **Mounted SD card · Copy CIA** and **ftpd · Copy CIA** are explicit copy-only routes for later installation with FBI. Selecting a delivery method must never decide which runtime or package format is created.
 
 ## Observed 3DS SD card
 
