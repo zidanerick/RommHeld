@@ -33,6 +33,7 @@ from .gba_vc import build_native_gba_cia
 from .hshop_catalog import HShopVcRelease, find_official_vc_release
 from .romm_remote import RomMRemoteGame, download_artwork, download_rom
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
+from .three_ds_storage import ThreeDSMountedStorageBackend, configured_3ds_storage_root
 from .three_ds_targets import default_destination
 from .ui_components import AccentButton, SurfaceCard
 from .vc_donors import configured_boot9_path, configured_donor_path
@@ -124,7 +125,13 @@ class GbaCiaDeployWorker(QThread):
             self.temp_rom = Path(handle.name)
             self.status_changed.emit(f"Downloading {self.game.name} from RomM…")
             try:
-                download_rom(url, token, self.game, self.temp_rom)
+                download_rom(
+                    url,
+                    token,
+                    self.game,
+                    self.temp_rom,
+                    cancel_event=self.cancel_event,
+                )
             except TimeoutError as exc:
                 raise TimeoutError("Timed out downloading the ROM from RomM.") from exc
             self._check_cancelled()
@@ -191,6 +198,25 @@ class GbaCiaDeployWorker(QThread):
                     self._check_cancelled()
                     self.progress.emit(100)
                     self.completed.emit("fbi", self.destination)
+                    return
+
+                if self.install_method == "sd":
+                    root = configured_3ds_storage_root(self.config)
+                    if root is None:
+                        raise ValueError(
+                            "No validated Nintendo 3DS SD card is mounted. Configure Mounted SD on the Device page first."
+                        )
+                    self.status_changed.emit("Copying CIA to the mounted Nintendo 3DS SD card…")
+                    storage = ThreeDSMountedStorageBackend(root)
+                    result, _ = storage.upload(
+                        cia_path,
+                        self.destination,
+                        cancel_event=self.cancel_event,
+                        progress=self._progress,
+                    )
+                    self._check_cancelled()
+                    self.progress.emit(100)
+                    self.completed.emit(result, self.destination)
                     return
 
                 self.status_changed.emit("Connecting to Nintendo 3DS FTP…")
@@ -364,7 +390,7 @@ class GbaVcDeployDialog(QDialog):
         self._refresh_donor_status()
 
         configuration = SurfaceCard()
-        configuration_title = QLabel("Installation")
+        configuration_title = QLabel("Delivery")
         configuration_title.setStyleSheet("font-size:14px;font-weight:700;")
         configuration.content.addWidget(configuration_title)
 
@@ -394,15 +420,16 @@ class GbaVcDeployDialog(QDialog):
         self.three_ds_ip_edit.editingFinished.connect(self._save_3ds_ip)
 
         self.install_method_combo = QComboBox()
-        self.install_method_combo.addItem("FBI Remote Install", "fbi")
-        self.install_method_combo.addItem("3DS FTP (copy CIA)", "ftp")
+        self.install_method_combo.addItem("FBI Remote Install · Install directly", "fbi")
+        self.install_method_combo.addItem("Mounted SD card · Copy CIA", "sd")
+        self.install_method_combo.addItem("ftpd · Copy CIA", "ftp")
         self.install_method_combo.currentIndexChanged.connect(self._install_method_changed)
 
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
         form.setHorizontalSpacing(12)
         form.setVerticalSpacing(9)
-        form.addRow("Install with", self.install_method_combo)
+        form.addRow("Delivery method", self.install_method_combo)
         form.addRow("3DS IP", self.three_ds_ip_edit)
         form.addRow("Display title", self.display_title_edit)
         form.addRow("Publisher", self.publisher_edit)
@@ -414,9 +441,11 @@ class GbaVcDeployDialog(QDialog):
         self.install_hint.setWordWrap(True)
         self.install_hint.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
         configuration.content.addWidget(self.install_hint)
-        self.ftp_status = QLabel("FTP uses the saved Nintendo 3DS device settings.")
-        self.ftp_status.setStyleSheet(f"color:{DARK.text_tertiary};font-size:10px;")
-        configuration.content.addWidget(self.ftp_status)
+        self.copy_status = QLabel(
+            "Mounted SD and ftpd copy the generated CIA only. Install copied CIAs later with FBI."
+        )
+        self.copy_status.setStyleSheet(f"color:{DARK.text_tertiary};font-size:10px;")
+        configuration.content.addWidget(self.copy_status)
         self._install_method_changed()
 
         progress_card = SurfaceCard()
@@ -566,9 +595,13 @@ class GbaVcDeployDialog(QDialog):
                 "On the 3DS open FBI → Remote Install → Receive URLs over the network. "
                 "RommHeld serves the generated CIA directly and temporarily opens a narrowly scoped firewall rule when supported."
             )
+        elif method == "sd":
+            self.install_hint.setText(
+                "Copies the generated CIA to the validated mounted 3DS SD card. Eject the card cleanly, return it to the console, then install the CIA with FBI."
+            )
         else:
             self.install_hint.setText(
-                "FTP copies the generated CIA to the configured 3DS destination. Open the CIA in FBI afterward to install it."
+                "ftpd copies the generated CIA to the configured 3DS destination while the console is running. Open the CIA in FBI afterward to install it."
             )
 
     def _save_3ds_ip(self) -> None:
@@ -594,6 +627,13 @@ class GbaVcDeployDialog(QDialog):
         saved = self.config.get("devices", {}).get("3ds", {})
         if method == "ftp" and not str(saved.get("host", "")).strip():
             QMessageBox.warning(self, "3DS FTP not configured", "Configure the Nintendo 3DS FTP host first.")
+            return
+        if method == "sd" and configured_3ds_storage_root(self.config) is None:
+            QMessageBox.warning(
+                self,
+                "3DS SD card not mounted",
+                "Configure and mount a validated Nintendo 3DS SD card from the Device page first.",
+            )
             return
         if method == "fbi" and not self.three_ds_ip_edit.text().strip():
             QMessageBox.warning(
