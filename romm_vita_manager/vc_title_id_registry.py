@@ -5,6 +5,7 @@ import threading
 from collections.abc import Iterable
 
 from .config import load_config, save_config
+from .three_ds_title_inventory import configured_mounted_sd_title_ids
 
 
 _GBA_FAMILY = "gba"
@@ -201,15 +202,27 @@ def persist_registered_title_id(
     *,
     reserved_title_ids: Iterable[bytes] = (),
 ) -> tuple[dict, bytes]:
-    """Atomically resolve and persist a deployment-time title-ID assignment."""
+    """Atomically resolve and persist a deployment-time title-ID assignment.
+
+    For a first-time allocation, Title IDs visible on a currently configured
+    mounted 3DS SD card are merged into the reserved set automatically. This
+    remains best-effort evidence only: it cannot inventory NAND-only titles or
+    another console/card that is not mounted.
+    """
     with _LOCK:
         config = load_config()
+        existing = configured_title_id(config, family, romm_id)
+        if existing is not None:
+            return config, existing
+
+        reserved = list(reserved_title_ids)
+        reserved.extend(configured_mounted_sd_title_ids(config))
         updated, title_id = allocate_registered_title_id(
             config,
             family,
             romm_id,
             preferred,
-            reserved_title_ids=reserved_title_ids,
+            reserved_title_ids=reserved,
         )
         if updated != config:
             save_config(updated)
