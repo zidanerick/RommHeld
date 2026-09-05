@@ -49,5 +49,17 @@ ROMM_TO_RETROFLOW = {
 }
 
 
+def normalize_platform_slug(platform: str) -> str:
+    """Normalize a RomM slug or mapped display label to the canonical slug."""
+    raw = str(platform or "").strip()
+    folded = raw.casefold()
+    if folded in PLATFORM_LABELS:
+        return folded
+    for slug, label in PLATFORM_LABELS.items():
+        if label.casefold() == folded:
+            return slug
+    return folded
+
+
 def platform_label(platform: str) -> str:
-    return PLATFORM_LABELS.get(platform.lower(), platform)
+    return PLATFORM_LABELS.get(normalize_platform_slug(platform), platform)
