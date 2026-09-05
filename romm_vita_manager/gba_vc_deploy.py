@@ -36,6 +36,7 @@ from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
 from .three_ds_targets import default_destination
 from .ui_components import AccentButton, SurfaceCard
 from .vc_donors import configured_boot9_path, configured_donor_path
+from .vc_runtime_profiles import guidance_for_family, runtime_guidance_summary
 from .vc_title_id_registry import displayed_title_id, persist_registered_title_id
 
 
@@ -300,6 +301,11 @@ class GbaVcDeployDialog(QDialog):
         donor_title = QLabel("GBA Virtual Console runtime")
         donor_title.setStyleSheet("font-size:14px;font-weight:700;")
         donor_card.content.addWidget(donor_title)
+        self.donor_guidance = QLabel()
+        self.donor_guidance.setWordWrap(True)
+        self.donor_guidance.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
+        donor_card.content.addWidget(self.donor_guidance)
+        self._refresh_donor_guidance()
 
         assets_ready = configured_boot_logo(config) is not None and configured_donor_banner(config) is not None
         configured_donor = configured_donor_path(config, "gba")
@@ -452,6 +458,11 @@ class GbaVcDeployDialog(QDialog):
 
         self._start_hshop_lookup()
 
+    def _refresh_donor_guidance(self) -> None:
+        guidance = guidance_for_family("gba")
+        self.donor_guidance.setText(runtime_guidance_summary(self.config, "gba"))
+        self.donor_guidance.setToolTip("\n".join(guidance.details))
+
     def _start_hshop_lookup(self) -> None:
         self.hshop_worker = HShopLookupWorker(self.game.name, "gba")
         self.hshop_worker.completed.connect(self._hshop_lookup_completed)
@@ -535,6 +546,7 @@ class GbaVcDeployDialog(QDialog):
             return False
         self.donor_cia_edit.clear()
         self.boot9_edit.clear()
+        self._refresh_donor_guidance()
         self.donor_status.setText(
             f"Ready — cached {logo.name} and {banner.name}. Source paths were discarded and are no longer required."
         )
