@@ -49,7 +49,7 @@ On the Vita:
 6. Press `SELECT` to start USB mode.
 7. Connect the Vita to the desktop using a USB data cable.
 
-RommHeld should detect the mounted filesystem only when it has strong VitaShell/ux0 evidence. A generic removable disk containing a few similarly named folders must not be treated as a Vita.
+RommHeld should detect the mounted filesystem only when it has strong VitaShell/ux0 evidence. A generic removable disk containing a few similarly named folders must not be treated as a Vita. VitaShell itself creates the `ux0:VitaShell` tree, so RommHeld uses that together with the installed VitaShell application and supporting ux0 structure rather than relying on generic folder names alone.
 
 ### USB-01: mount detection
 
@@ -59,6 +59,7 @@ RommHeld should detect the mounted filesystem only when it has strong VitaShell/
 - Confirm RommHeld detects the correct mounted storage.
 - Confirm displayed free/total storage is plausible for the selected Vita storage device.
 - Stop VitaShell USB, refresh, and confirm RommHeld no longer treats the stale mount as connected.
+- If two filesystems with strong VitaShell/ux0 evidence are simultaneously visible to the desktop, confirm RommHeld does not auto-select either one. Ambiguous detection must fail closed rather than choosing the first mount.
 
 ### USB-02: Send File path mapping
 
@@ -212,9 +213,13 @@ Expected: `.nds` ROMs go to `ux0:/data/dsvita/`.
 
 After copying:
 
+- confirm `libshacccg.suprx` is installed using the upstream-supported extraction/VitaDB route
+- confirm `kubridge.skprx` version `0.3.1` or later is installed in the `*KERNEL` section; the current upstream hotfix release remains `0.3.1`
 - open DSVita
 - confirm the ROM is visible using its default/recommended directory
 - launch a known-good small test title if available
+
+Do not treat DSVita VPK installation alone as runtime readiness. RommHeld must not redistribute `libshacccg.suprx` or silently rewrite the user's kernel plugin configuration.
 
 ### LIB-05: generic RetroFlow system
 
@@ -248,7 +253,7 @@ Vita Setup now exposes two staging transports:
 - `VitaShell USB · Recommended`
 - `VitaShell FTP · Wireless / PlayStation TV`
 
-Package selection/download remains independent from transport. Archive packages remain review-only until an explicit extraction rule exists.
+Package selection/download remains independent from transport. Archive packages remain review-only until an explicit traversal-safe extraction rule exists.
 
 ### SETUP-01: RetroFlow
 
@@ -271,13 +276,17 @@ RommHeld currently targets the official `6.61 Adrenaline-7` release because that
 
 ### SETUP-03: DSVita
 
-- Download current configured DSVita VPK.
-- Verify the configured SHA-256.
-- Stage/install it.
-- Confirm DSVita detection with USB inspection.
-- Complete LIB-04.
+RommHeld prepares the DSVita VPK but does not claim that the VPK alone makes DSVita runnable. Current upstream installation requirements are part of the hardware readiness test:
 
-Also confirm the user-facing prerequisite note remains accurate for the tested DSVita build, including any required plugins/runtime dependencies.
+- download the current configured DSVita VPK and verify the configured SHA-256
+- stage/install the VPK
+- confirm DSVita title ID `DSVITA000` is detected with USB inspection
+- install `libshacccg.suprx` through the upstream-supported extraction guide or VitaDB route; RommHeld does not redistribute it
+- install `kubridge.skprx` version `0.3.1` or later, currently the upstream `v0.3.1_hotfix` release
+- confirm kubridge is configured in the Vita `*KERNEL` section before launch
+- complete LIB-04 and launch a representative `.nds` title
+
+If DSVita crashes at startup or cannot launch games, check those prerequisites before treating the RommHeld ROM deployment route as failed.
 
 ### SETUP-04: DaedalusX64
 
@@ -291,10 +300,18 @@ RommHeld uses the Vita-native `Rinnegatamante/DaedalusX64-vitaGL` release and st
 
 ### SETUP-05: RetroArch
 
-- Download/stage the configured RetroArch VPK.
-- Confirm the companion data archive is inspected rather than blindly extracted.
-- Complete manual/upstream-required data installation.
-- Confirm a representative RetroFlow/libretro title launches.
+RommHeld currently targets stable RetroArch `1.22.2` for Vita and models the VPK and required data payload as separate readiness components.
+
+- confirm Vita Setup exposes separate `RetroArch` and `RetroArch data` rows
+- download/stage `RetroArch.vpk` from the configured `1.22.2` stable Vita build
+- install the VPK with VitaShell and confirm the installed RetroArch application is detected independently of its data directory
+- download `RetroArch_data.7z` from the same `1.22.2` stable Vita build
+- confirm the companion archive is inspected rather than blindly extracted
+- manually install/extract the required contents according to upstream into `ux0:/data/retroarch/`
+- reopen Setup with USB inspection and confirm the data readiness row is detected independently of the application row
+- confirm a representative RetroFlow/libretro title launches
+
+RommHeld must not auto-extract the 7z payload until an explicit extraction implementation rejects traversal, unsafe links and other archive escape cases.
 
 ### SETUP-06: FTP package replacement safety
 
@@ -321,6 +338,8 @@ Expected:
 - transport controls remain locked while each worker is active
 - there is no `QThread: Destroyed while thread is still running` warning or abort
 - closing is blocked while the current package worker is active
+
+The package backend supports cancellation events for downloads and USB staging, and FTP staging already uses the same cancellation event. A user-facing Vita Setup cancellation control is still required before Setup cancellation can be marked desktop/device validated.
 
 ## 5. Worker and application lifecycle
 
@@ -350,16 +369,18 @@ Record physical-device results here when executed. Do not mark a route validated
 
 | Area | Unit/CI | Desktop GUI | Real Vita/PSTV | Notes |
 | --- | --- | --- | --- | --- |
-| USB mount detection | covered | pending | pending | Requires VitaShell USB |
+| USB mount detection | covered | pending | pending | Strong VitaShell evidence; ambiguous candidates fail closed |
 | USB copy/skip/replacement | covered | pending | pending | Atomic sibling staging |
 | USB cancellation rollback | covered | pending | pending | Existing destination must survive |
 | VitaShell FTP backend | covered | pending | pending | Requires real ftpvitalib behavior |
 | VitaShell FTP library copy | covered | pending | pending | Destination parity required |
 | PSTV FTP-only workflow | covered | pending | pending | No USB mount available |
 | PSP/PS1 Adrenaline routes | covered | pending | pending | Launch/rescan requires device |
-| DSVita route | covered | pending | pending | `ux0:/data/dsvita/` |
+| DSVita route | covered | pending | pending | `ux0:/data/dsvita/`; libshacccg + kubridge prerequisites |
 | Vita VPK staging | covered | pending | pending | Staged is not installed |
 | Vita Setup package USB staging | covered | pending | pending | Install/launch requires device |
-| Vita Setup package FTP staging | covered | pending | pending | New PSTV-capable path |
+| Vita Setup package FTP staging | covered | pending | pending | PSTV-capable path |
+| RetroArch VPK/data readiness | covered | pending | pending | 1.22.2; archive remains review-only |
+| Package cancellation backend | covered | pending | pending | Setup user-facing cancel control still pending |
 | Download-to-stage worker handoff | covered | pending | pending | Must fully finish old QThread first |
 | Lifecycle/shutdown | partial | pending | pending | Exercise worker close/reconnect cases |
