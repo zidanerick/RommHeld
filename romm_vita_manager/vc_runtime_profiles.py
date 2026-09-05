@@ -269,3 +269,21 @@ def configured_runtime_profile(config: dict, family: str) -> dict | None:
         entry = root.get(key, {}) if isinstance(root, dict) else {}
         value = entry.get("runtime_profile") if isinstance(entry, dict) else None
     return dict(value) if isinstance(value, dict) else None
+
+
+def runtime_guidance_summary(config: dict, family: str) -> str:
+    """Return concise donor guidance for deployment UI without packaging logic."""
+    guidance = guidance_for_family(family)
+    profile = configured_runtime_profile(config, family)
+    if profile is None:
+        return f"Donor guidance: {guidance.recommendation}"
+
+    classification = str(
+        profile.get("classification", guidance.classification)
+    ).strip().lower() or guidance.classification
+    status = classification.replace("-", " ")
+    profile_id = str(profile.get("profile_id", "")).strip()
+    prefix = f"Cached profile: {status}"
+    if profile_id:
+        prefix += f" • {profile_id}"
+    return f"{prefix}. {guidance.recommendation}"
