@@ -24,6 +24,7 @@ from .mappings import platform_label
 from .models import Game
 from .romm import scan_games
 from .ui_components import AccentButton, SurfaceCard
+from .vita import free_space, is_vita_mount
 from .vita_ftp import VitaFtpSettings
 from .vita_ftp_library import VitaFtpCopyWorker, ftp_destination_target
 from .vita_library_support import CopyWorker, destination_for_game, game_status, human_size
@@ -562,11 +563,12 @@ class LocalLibraryWidget(QWidget):
         self.worker.start()
 
     def _copy_selected_usb(self, selected: list[Game]) -> None:
-        if self.vita is None:
+        if self.vita is None or not is_vita_mount(self.vita):
+            self.set_vita(None)
             QMessageBox.warning(
                 self,
                 "Vita not connected",
-                "Connect the Vita through VitaShell USB first, or select VitaShell FTP.",
+                "The VitaShell USB mount is no longer available. Reconnect the Vita or select VitaShell FTP.",
             )
             return
 
@@ -602,7 +604,6 @@ class LocalLibraryWidget(QWidget):
             return
 
         total = sum(game.size for game, *_rest in jobs)
-        from .vita import free_space
 
         try:
             available = free_space(self.vita)
