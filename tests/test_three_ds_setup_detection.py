@@ -37,7 +37,10 @@ def test_setup_fbi_quick_check_ignores_theme_only_leftovers(tmp_path: Path):
 
     detected, marker = component_presence(tmp_path, fbi)
     assert detected
-    assert marker == "3ds/FBI/FBI.3dsx"
+    assert marker is not None
+    matched = marker.split("; ")
+    assert "3ds/FBI/FBI.3dsx" in matched
+    assert "fbi/theme" not in matched
 
 
 def test_setup_open_agb_firm_quick_check_requires_firm_payload(tmp_path: Path):
