@@ -11,6 +11,7 @@ def test_vita_target_maps_ux0_to_mount_root(tmp_path: Path):
 
 def test_vita_target_accepts_ux0_root(tmp_path: Path):
     assert vita_target(tmp_path, "ux0:/") == tmp_path.resolve()
+    assert vita_target(tmp_path, "ux0:") == tmp_path.resolve()
     assert vita_target(tmp_path, "ux0") == tmp_path.resolve()
 
 
