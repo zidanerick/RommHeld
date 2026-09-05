@@ -85,7 +85,7 @@ class VitaSetupDialog(QDialog):
 
         installed = detect_emulators(vita) if vita is not None else {}
         free_text = "Unavailable"
-        storage_detail = "Storage cannot be read until a Vita filesystem is mounted."
+        storage_detail = "Storage cannot be read until VitaShell exposes the ux0 filesystem over USB."
         if vita is not None:
             try:
                 free = free_space(vita)
@@ -118,14 +118,14 @@ class VitaSetupDialog(QDialog):
         if vita is None:
             device_card.content.addWidget(
                 self._secondary(
-                    "No Vita filesystem is mounted. Connect VitaShell in USB mode and reopen this setup screen before staging packages. Downloads can still be prepared in the local cache now."
+                    "No Vita filesystem is mounted. On the Vita, open VitaShell and press START. Set SELECT button to USB, choose the USB device that contains ux0 (for example the memory card or SD2Vita), close Settings, press SELECT, then connect a USB data cable. Refresh or reopen RommHeld after the filesystem appears. Downloads can still be prepared in the local cache now."
                 )
             )
             device_path = QLabel("No mounted Vita path")
         else:
             device_card.content.addWidget(
                 self._secondary(
-                    "RommHeld stages files onto the mounted Vita filesystem. VPK installation still happens explicitly in VitaShell."
+                    "RommHeld is using the mounted ux0 filesystem exposed by VitaShell USB. Keep VitaShell's USB session active while staging files. VPK installation still happens explicitly in VitaShell."
                 )
             )
             device_path = QLabel(str(vita))
@@ -263,7 +263,7 @@ class VitaSetupDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "Vita not connected",
-                "Connect the Vita in VitaShell USB mode first.",
+                "Open VitaShell, press START, set SELECT button to USB, close Settings, press SELECT, then connect the Vita with a USB data cable before staging files.",
             )
             return
         self.activity.setText(f"Preparing {package.name}…")
