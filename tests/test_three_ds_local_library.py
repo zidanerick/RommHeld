@@ -16,7 +16,8 @@ def test_local_library_source_contract_stays_headless():
     assert "from .library_sources import get_library_source" in source
     assert 'PACKAGE_GENERATION_TARGETS = frozenset({"native_gba", "vc_cia"})' in source
     assert "if target.key not in PACKAGE_GENERATION_TARGETS" in source
-    assert 'game.path.suffix.casefold() != ".cia"' in source
+    assert "available_targets_for_file" in source
+    assert "available_targets_for_file(_platform_slug(game), _filename(game))" in source
     assert 'if self._source_mode() == "local":' in source
     assert "self._load_local_library()" in source
     assert "scan_games(root)" in source
