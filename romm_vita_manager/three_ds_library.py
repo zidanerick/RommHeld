@@ -15,11 +15,12 @@ from PySide6.QtWidgets import (
 )
 
 from .design_tokens import DARK, brand_for_platform
+from .preferences import get_device_preference
 from .romm_library_cache import load_cached_page, save_cached_page
 from .romm_remote import RomMRemoteGame
 from .romm_remote_worker import RomMLibraryWorker
 from .three_ds_manager import RomMArtworkWorker
-from .three_ds_targets import available_targets, default_destination
+from .three_ds_targets import available_targets, default_destination, preferred_target_key
 from .ui_components import AccentButton, SurfaceCard
 
 
@@ -431,6 +432,11 @@ class ThreeDSLibraryWidget(QWidget):
         targets = available_targets(game.platform_slug)
         for target in targets:
             self.target_combo.addItem(target.label, target.key)
+        preference = get_device_preference(self.config, "3ds")
+        preferred = preferred_target_key(game.platform_slug, preference)
+        preferred_index = self.target_combo.findData(preferred) if preferred else -1
+        if preferred_index >= 0:
+            self.target_combo.setCurrentIndex(preferred_index)
         self.target_combo.blockSignals(False)
         self.details.setText(f"{game.name}\n{game.platform}  •  {_human_size(game.size)}")
         self.deploy_button.setEnabled(bool(targets))
