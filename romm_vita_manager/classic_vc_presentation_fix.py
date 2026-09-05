@@ -46,8 +46,9 @@ def validate_final_vc_cia(
     cert_size = int.from_bytes(cia[0x08:0x0C], "little")
     ticket_size = int.from_bytes(cia[0x0C:0x10], "little")
     tmd_size = int.from_bytes(cia[0x10:0x14], "little")
-    ticket_offset = _align(0x2020)
-    tmd_offset = _align(ticket_offset + cert_size + ticket_size)
+    cert_offset = _align(0x2020)
+    ticket_offset = _align(cert_offset + cert_size)
+    tmd_offset = _align(ticket_offset + ticket_size)
     content_offset = _align(tmd_offset + tmd_size)
     if content_offset + 0xA00 > len(cia):
         raise ValueError("Generated VC CIA content is truncated.")
@@ -84,9 +85,6 @@ def validate_final_vc_cia(
     if hashlib.sha256(exheader[:0x400]).digest() != ncch[0x160:0x180]:
         raise ValueError("Final VC serialized exheader hash is invalid.")
 
-    # The path itself is checked earlier against the rebuilt RomFS. Keep it in
-    # this final preflight contract so family adapters cannot accidentally pass
-    # an empty/invalid runtime path while the outer CIA still looks plausible.
     if not expected_rom_path.startswith("/") or expected_rom_path.endswith("/"):
         raise ValueError(f"Final {family.upper()} VC runtime has an invalid ROM path.")
 
@@ -170,11 +168,6 @@ def install() -> None:
             raise ValueError("Cached VC runtime is missing its ROM placeholder.")
         files[runtime.rom_path] = payload
 
-        # Family runtimes may require a file-level invariant in addition to the
-        # ROM payload itself. NES, for example, performs a per-ROM .patch lookup;
-        # its donor patch is game-specific, so RommHeld supplies an inert empty
-        # matching INI instead of either applying donor code patches or deleting
-        # the lookup path entirely.
         runtime_files_builder = getattr(vc, "prepare_runtime_files", None)
         if callable(runtime_files_builder):
             files = runtime_files_builder(files, family, runtime.rom_path)
