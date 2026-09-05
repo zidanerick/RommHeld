@@ -52,6 +52,7 @@ def test_new_current_recipe_profiles_detect_representative_3dsx_cores(tmp_path: 
         "neogeomvs": "fbalpha2012_neogeo_libretro.3dsx",
         "neo-geo-pocket-color": "mednafen_ngp_libretro.3dsx",
         "zxs": "fuse_libretro.3dsx",
+        "virtualboy": "mednafen_vb_libretro.3dsx",
     }
 
     for platform_slug, filename in examples.items():
@@ -61,6 +62,13 @@ def test_new_current_recipe_profiles_detect_representative_3dsx_cores(tmp_path: 
         assert status.state == "launchable_sd_core_detected"
         assert core in status.active_core_files
         core.unlink()
+
+
+def test_virtual_boy_beetle_vb_profile_is_retroachievements_recommended():
+    profile = RETROARCH_CORE_PROFILES["virtualboy"]
+    assert profile.core_ids == ("mednafen_vb",)
+    assert profile.achievement_core_ids == ("mednafen_vb",)
+    assert profile.retroachievements_recommended
 
 
 def test_atari_5200_profile_requires_bios_when_system_directory_is_explicit(tmp_path: Path):
