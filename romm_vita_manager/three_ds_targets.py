@@ -107,6 +107,26 @@ RETROARCH_TARGET_PLATFORM_SLUGS = frozenset(
     }
 )
 
+# Conservative current 3DS RetroArch routes where the official 3DS core bundle
+# contains a core that Libretro currently documents with memory-monitoring
+# support suitable for achievement integration. Keep this narrower than the
+# general RetroArch platform set when capability is not independently verified.
+RETROACHIEVEMENTS_RETROARCH_PLATFORM_SLUGS = frozenset(
+    {
+        "gba",        # mGBA
+        "gb",         # Gambatte / mGBA
+        "gbc",        # Gambatte / mGBA
+        "nes",        # FCEUmm / QuickNES
+        "famicom",    # FCEUmm
+        "fds",        # FCEUmm
+        "gamegear",   # Genesis Plus GX / Gearsystem
+        "sms",        # Genesis Plus GX / PicoDrive / SMS Plus GX / Gearsystem
+        "genesis",    # Genesis Plus GX / PicoDrive / ClownMDEmu
+        "sega32",     # PicoDrive
+        "segacd",     # Genesis Plus GX / PicoDrive
+    }
+)
+
 DIRECT_RUNTIME_PLATFORM_SLUGS = frozenset({"gba", "nds", "virtualboy", "n64"})
 THREE_DS_PLATFORM_SLUGS = RETROARCH_TARGET_PLATFORM_SLUGS | DIRECT_RUNTIME_PLATFORM_SLUGS
 
@@ -173,8 +193,17 @@ def preferred_target_key(slug: str, preference: str = "compatibility") -> str | 
         return None
     target_keys = {target.key for target in targets}
 
-    if preference == "retroachievements" and "retroarch" in target_keys:
-        return "retroarch"
+    if preference == "retroachievements":
+        if (
+            key in RETROACHIEVEMENTS_RETROARCH_PLATFORM_SLUGS
+            and "retroarch" in target_keys
+        ):
+            return "retroarch"
+        dedicated = DEDICATED_COMPATIBILITY_TARGETS.get(key)
+        if dedicated in target_keys:
+            return dedicated
+        if "vc_cia" in target_keys:
+            return "vc_cia"
 
     if preference == "native":
         dedicated = DEDICATED_COMPATIBILITY_TARGETS.get(key)
