@@ -21,6 +21,76 @@ if TYPE_CHECKING:
 _INSTALLED = False
 
 
+def _align(value: int, boundary: int = 0x40) -> int:
+    return (value + boundary - 1) & ~(boundary - 1)
+
+
+def validate_final_vc_cia(
+    cia: bytes,
+    *,
+    title_id: bytes,
+    expected_jump_id: bytes,
+    expected_rom_path: str,
+    family: str,
+) -> None:
+    """Re-open the final CIA bytes and verify launch-critical identity.
+
+    Earlier validators operated on the pieces before CIA assembly. This one is
+    deliberately independent of the builder objects: it walks the serialized
+    CIA/TMD/content layout, finds the final NCCH, then checks the exheader that
+    HOME Menu/loader will actually read. This catches wrapper/order mistakes
+    before a hardware test can be used as a parser.
+    """
+    if len(cia) < 0x4000 or int.from_bytes(cia[0:4], "little") != 0x2020:
+        raise ValueError("Generated VC CIA has an invalid serialized header.")
+    cert_size = int.from_bytes(cia[0x08:0x0C], "little")
+    ticket_size = int.from_bytes(cia[0x0C:0x10], "little")
+    tmd_size = int.from_bytes(cia[0x10:0x14], "little")
+    ticket_offset = _align(0x2020)
+    tmd_offset = _align(ticket_offset + cert_size + ticket_size)
+    content_offset = _align(tmd_offset + tmd_size)
+    if content_offset + 0xA00 > len(cia):
+        raise ValueError("Generated VC CIA content is truncated.")
+
+    ticket = cia[ticket_offset : ticket_offset + ticket_size]
+    if len(ticket) < 0x1E4 or ticket[0x1DC:0x1E4] != title_id:
+        raise ValueError("Final VC CIA ticket does not contain the generated title ID.")
+
+    tmd = cia[tmd_offset : tmd_offset + tmd_size]
+    if len(tmd) < 0xB34 or tmd[0x18C:0x194] != title_id:
+        raise ValueError("Final VC CIA TMD does not contain the generated title ID.")
+    content_size = int.from_bytes(tmd[0xB0C:0xB14], "big")
+    content_hash = tmd[0xB14:0xB34]
+    ncch = cia[content_offset : content_offset + content_size]
+    if len(ncch) != content_size or ncch[0x100:0x104] != b"NCCH":
+        raise ValueError("Final VC CIA does not contain the expected NCCH application.")
+    if hashlib.sha256(ncch).digest() != content_hash:
+        raise ValueError("Final VC CIA NCCH does not match its serialized TMD hash.")
+
+    disk_title_id = title_id[::-1]
+    if ncch[0x108:0x110] != disk_title_id or ncch[0x118:0x120] != disk_title_id:
+        raise ValueError("Final VC NCCH partition/program IDs do not match the generated title.")
+    if int.from_bytes(ncch[0x180:0x184], "little") != 0x400:
+        raise ValueError("Final VC NCCH does not expose a normal extended header.")
+    exheader = ncch[0x200:0xA00]
+    if len(exheader) != 0x800:
+        raise ValueError("Final VC NCCH extended header is truncated.")
+    if exheader[0x1C8:0x1D0] != expected_jump_id[::-1]:
+        raise ValueError("Final VC SCI JumpId does not point at the generated title.")
+    if exheader[0x200:0x208] != expected_jump_id[::-1]:
+        raise ValueError("Final VC ACI ProgramId does not match the generated title.")
+    if not (exheader[0x0D] & 0x02):
+        raise ValueError("Final VC exheader lost the retail SDApplication flag.")
+    if hashlib.sha256(exheader[:0x400]).digest() != ncch[0x160:0x180]:
+        raise ValueError("Final VC serialized exheader hash is invalid.")
+
+    # The path itself is checked earlier against the rebuilt RomFS. Keep it in
+    # this final preflight contract so family adapters cannot accidentally pass
+    # an empty/invalid runtime path while the outer CIA still looks plausible.
+    if not expected_rom_path.startswith("/") or expected_rom_path.endswith("/"):
+        raise ValueError(f"Final {family.upper()} VC runtime has an invalid ROM path.")
+
+
 def install() -> None:
     """Layer donor-derived retail presentation over the validated VC builder."""
     global _INSTALLED
@@ -100,6 +170,17 @@ def install() -> None:
             raise ValueError("Cached VC runtime is missing its ROM placeholder.")
         files[runtime.rom_path] = payload
 
+        # Family runtimes may require a file-level invariant in addition to the
+        # ROM payload itself. NES, for example, performs a per-ROM .patch lookup;
+        # its donor patch is game-specific, so RommHeld supplies an inert empty
+        # matching INI instead of either applying donor code patches or deleting
+        # the lookup path entirely.
+        runtime_files_builder = getattr(vc, "prepare_runtime_files", None)
+        if callable(runtime_files_builder):
+            files = runtime_files_builder(files, family, runtime.rom_path)
+        if runtime.rom_path not in files or files[runtime.rom_path] != payload:
+            raise ValueError("VC runtime file finalization changed or removed its ROM payload.")
+
         (
             banner_assembly,
             _,
@@ -123,10 +204,6 @@ def install() -> None:
         if callable(icon_postprocessor):
             icon = icon_postprocessor(icon, family)
 
-        # SNES (and any future runtime with title-specific RomFS metadata) can
-        # update auxiliary files after the final SMDH exists but before the
-        # IVFC tree is built. GB/GBC/NES/Game Gear simply leave the dictionary
-        # unchanged here.
         auxiliary_builder = getattr(vc, "prepare_runtime_aux_files", None)
         if callable(auxiliary_builder):
             files = auxiliary_builder(files, family, product_code, icon)
@@ -198,6 +275,13 @@ def install() -> None:
             raise ValueError("Generated VC CIA failed final container validation.")
         if hashlib.sha256(ncch_bytes).digest() not in tmd:
             raise ValueError("Generated VC TMD lost its NCCH content hash.")
+        validate_final_vc_cia(
+            cia,
+            title_id=title_id,
+            expected_jump_id=title_id,
+            expected_rom_path=runtime.rom_path,
+            family=family,
+        )
         return cia
 
     vc.ClassicVcRuntime = PresentedClassicVcRuntime
