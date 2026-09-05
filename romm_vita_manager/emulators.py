@@ -94,8 +94,8 @@ EMULATORS = (
         ("dsvita000", "dsvita"),
         ("app/DSVITA000",),
         ("dsvita",),
-        "Not a RetroAchievements-first route",
-        "Requires libshacccg.suprx and kubridge >= 0.3.1; ROMs use ux0:/data/dsvita/.",
+        "Requires libshacccg.suprx + kubridge >= 0.3.1 (*KERNEL)",
+        "Requires libshacccg.suprx and kubridge >= 0.3.1; kubridge must be configured in the taiHEN *KERNEL section. ROMs use ux0:/data/dsvita/.",
     ),
     EmulatorDefinition(
         "fake-08",
