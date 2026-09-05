@@ -78,6 +78,10 @@ def describe_connection_error(exc: BaseException) -> str:
     return detail or exc.__class__.__name__
 
 
+class ThreeDSFtpConnectionError(ConnectionError):
+    """Connection failure already translated into actionable 3DS FTP guidance."""
+
+
 class ThreeDSFtpBackend:
     """FTP transport for a Nintendo 3DS FTP server."""
 
@@ -103,12 +107,12 @@ class ThreeDSFtpBackend:
             ftp.login(self.settings.username or "anonymous", self.settings.password)
             ftp.set_pasv(self.settings.passive)
             cwd = ftp.pwd()
-        except Exception:
+        except Exception as exc:
             try:
                 ftp.close()
             except Exception:
                 pass
-            raise
+            raise ThreeDSFtpConnectionError(describe_connection_error(exc)) from exc
         self.ftp = ftp
         return cwd
 
