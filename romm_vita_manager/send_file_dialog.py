@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from .design_tokens import DARK, brand_for_platform
-from .file_transfer import transfer_file
+from .file_transfer import required_transfer_space, transfer_file
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 from .vita import free_space
 from .vita_paths import vita_target
@@ -224,10 +224,16 @@ class SendFileDialog(QDialog):
                 available = free_space(self.vita) if self.vita else None
             except OSError:
                 pass
-            existing_size = destination.stat().st_size if destination.is_file() else 0
-            needed = max(0, required - existing_size)
+            needed = required_transfer_space(
+                required,
+                destination,
+                overwrite=self.overwrite,
+            )
             if available is not None and needed > available:
-                raise OSError(f"Not enough Vita free space for {human_size(needed)}.")
+                raise OSError(
+                    f"Not enough Vita free space for the safe staged transfer. "
+                    f"{human_size(needed)} is required."
+                )
 
             self.send_button.setEnabled(False)
             self.cancel_button.setEnabled(True)
@@ -247,6 +253,8 @@ class SendFileDialog(QDialog):
             self.worker.failed.connect(self.transfer_failed)
             self.worker.start()
         except Exception as exc:
+            self.overwrite = False
+            self._selection_changed()
             QMessageBox.warning(self, "Unable to send file", str(exc))
 
     def cancel_transfer(self) -> None:
@@ -264,7 +272,7 @@ class SendFileDialog(QDialog):
             answer = QMessageBox.question(
                 self,
                 "File already exists",
-                "The destination contains a different-size file. Overwrite it?",
+                "The destination contains a different-size file. Overwrite it? The existing file is kept until the replacement has copied successfully.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -272,18 +280,20 @@ class SendFileDialog(QDialog):
                 self.overwrite = True
                 self.start_transfer()
             else:
+                self.overwrite = False
                 self._selection_changed()
             return
 
         message = {
             "copied": "Transfer completed and size verified.",
             "skipped": "Destination already contains the same-size file.",
-            "cancelled": "Transfer cancelled.",
+            "cancelled": "Transfer cancelled. Any existing destination was preserved.",
         }.get(result, result)
         self.status.setText(message)
         self.transfer_status.set_value(
             "Complete" if result in {"copied", "skipped"} else "Cancelled"
         )
+        self.overwrite = False
         self._selection_changed()
         if result in {"copied", "skipped"}:
             QMessageBox.information(self, "Send File", message)
@@ -292,7 +302,8 @@ class SendFileDialog(QDialog):
         self.cancel_button.setEnabled(False)
         self.progress.setVisible(False)
         self.transfer_status.set_value("Failed")
-        self.status.setText("Transfer failed.")
+        self.status.setText("Transfer failed. An existing destination was preserved.")
+        self.overwrite = False
         self._selection_changed()
         QMessageBox.critical(self, "Transfer failed", message)
 
