@@ -124,8 +124,8 @@ def build_readiness_requirements(
         _append_requirement(
             result,
             "homebrew-launcher",
-            "required",
-            "The current ftpd 3DS release is launched as homebrew, so a working homebrew entry environment is needed for the normal FTP workflow.",
+            "recommended",
+            "Homebrew Launcher is needed when ftpd is used as a 3DSX application, but an installed ftpd CIA can provide the FTP server without it.",
         )
         _append_requirement(
             result,
