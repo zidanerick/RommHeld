@@ -10,7 +10,7 @@ from .gba_vc import (
 )
 from .gba_vc_donor_validation import inspect_gba_vc_donor
 from .vc_donors import configure_boot9, configure_donor, configured_donor_info
-from .vc_runtime_profiles import build_gba_runtime_profile
+from .vc_runtime_profiles import build_gba_runtime_profile, gba_runtime_profile_matches
 
 
 BOOT_LOGO_FILENAME = "agb_firm_boot_logo.bin"
@@ -30,6 +30,30 @@ def cached_donor_icon_path() -> Path:
     return package_cache_dir() / DONOR_ICON_FILENAME
 
 
+def _profile_matches_cached_assets(settings: dict) -> bool:
+    profile = settings.get("runtime_profile")
+    if not isinstance(profile, dict):
+        return True
+    paths = []
+    for key in ("boot_logo_path", "donor_banner_path", "donor_icon_path"):
+        raw = str(settings.get(key, "")).strip()
+        if not raw:
+            return False
+        path = Path(raw).expanduser()
+        if not path.is_file():
+            return False
+        paths.append(path)
+    try:
+        return gba_runtime_profile_matches(
+            profile,
+            boot_logo=paths[0].read_bytes(),
+            donor_banner=paths[1].read_bytes(),
+            donor_icon=paths[2].read_bytes(),
+        )
+    except OSError:
+        return False
+
+
 def configured_boot_logo(config: dict) -> Path | None:
     settings = config.get("gba_vc", {})
     if not isinstance(settings, dict):
@@ -38,7 +62,9 @@ def configured_boot_logo(config: dict) -> Path | None:
     if not raw:
         return None
     path = Path(raw).expanduser()
-    return path if path.is_file() else None
+    if not path.is_file() or not _profile_matches_cached_assets(settings):
+        return None
+    return path
 
 
 def configured_donor_banner(config: dict) -> Path | None:
@@ -57,7 +83,9 @@ def configured_donor_banner(config: dict) -> Path | None:
         return None
     path = Path(raw).expanduser()
     icon = Path(icon_raw).expanduser()
-    return path if path.is_file() and icon.is_file() else None
+    if not path.is_file() or not icon.is_file() or not _profile_matches_cached_assets(settings):
+        return None
+    return path
 
 
 def configured_donor_icon(config: dict) -> Path | None:
@@ -68,7 +96,9 @@ def configured_donor_icon(config: dict) -> Path | None:
     if not raw:
         return None
     path = Path(raw).expanduser()
-    return path if path.is_file() else None
+    if not path.is_file() or not _profile_matches_cached_assets(settings):
+        return None
+    return path
 
 
 def save_gba_vc_asset_paths(
