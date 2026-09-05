@@ -90,6 +90,29 @@ def test_profiled_classic_cache_is_rejected_after_runtime_file_changes(
     assert assets.configured_classic_runtime(config, "gbc") is None
 
 
+def test_profiled_classic_cache_is_rejected_after_presentation_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(assets, "validate_retail_romfs", lambda data: None)
+    config = _cache_config(tmp_path, "gbc", 5)
+    entry = config["classic_vc"]["gbc"]
+    entry["runtime_profile"] = build_classic_runtime_profile(
+        "gbc",
+        {"title_id": "0004000001234500"},
+        code=b"C",
+        exheader=b"E",
+        romfs_template=b"R",
+        rom_path=entry["rom_path"],
+        donor_banner=b"B",
+        donor_icon=b"I",
+    )
+    assert assets.configured_classic_runtime(config, "gbc") is not None
+
+    Path(entry["donor_banner_path"]).write_bytes(b"tampered-banner")
+    assert assets.configured_classic_runtime(config, "gbc") is None
+
+
 def test_hashed_nes_auxiliary_logo_is_rejected_after_cache_tampering(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
