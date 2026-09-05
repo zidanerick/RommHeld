@@ -9,6 +9,7 @@ from romm_vita_manager.vc_runtime_profiles import (
     configured_runtime_profile,
     gba_runtime_profile_matches,
     guidance_for_family,
+    runtime_guidance_details,
     runtime_guidance_summary,
 )
 
@@ -57,6 +58,33 @@ def test_runtime_guidance_summary_reports_cached_profile_status_and_id():
     summary = runtime_guidance_summary(config, "nes")
     assert summary.startswith("Cached profile: hardware retest required • abc123def456.")
     assert "later standard retail NES VC donor" in summary
+
+
+def test_runtime_guidance_surfaces_emulator_build_and_safe_profile_details():
+    config_hash = hashlib.sha256(b"[NES]\nWidth=256\n").hexdigest()
+    config = {
+        "classic_vc": {
+            "nes": {
+                "runtime_profile": {
+                    "classification": "hardware-retest-required",
+                    "profile_id": "abc123def456",
+                    "donor_title_id": "0004000001234500",
+                    "emulator_build": "  2016-02-03   04:05:06  ",
+                    "config_ini_sha256": config_hash,
+                }
+            }
+        }
+    }
+
+    summary = runtime_guidance_summary(config, "nes")
+    assert "build 2016-02-03 04:05:06" in summary
+    assert "abc123def456" in summary
+
+    details = runtime_guidance_details(config, "nes")
+    assert "Runtime profile ID: abc123def456" in details
+    assert "Donor Title ID: 0004000001234500" in details
+    assert "Emulator build: 2016-02-03 04:05:06" in details
+    assert f"config.ini SHA-256: {config_hash}" in details
 
 
 def test_classic_runtime_profile_is_deterministic_and_sensitive_to_runtime_code():
@@ -131,6 +159,45 @@ def test_classic_profile_can_cover_reusable_presentation_assets_compatibly():
         donor_icon=b"icon",
         logo=b"logo",
     )
+
+
+def test_classic_profile_records_build_metadata_without_changing_core_profile_id():
+    config_hash = hashlib.sha256(b"config").hexdigest()
+    base = build_classic_runtime_profile(
+        "nes",
+        {"title_id": "0004000001234500"},
+        code=b"code",
+        exheader=b"exheader",
+        romfs_template=b"romfs",
+        rom_path="/rom/game.tnes",
+    )
+    profiled = build_classic_runtime_profile(
+        "nes",
+        {"title_id": "0004000001234500"},
+        code=b"code",
+        exheader=b"exheader",
+        romfs_template=b"romfs",
+        rom_path="/rom/game.tnes",
+        emulator_build="  2016-02-03\x00 04:05:06  ",
+        config_ini_sha256=config_hash.upper(),
+    )
+
+    assert profiled["profile_id"] == base["profile_id"]
+    assert profiled["emulator_build"] == "2016-02-03 04:05:06"
+    assert profiled["config_ini_sha256"] == config_hash
+
+
+def test_classic_profile_rejects_invalid_config_fingerprint():
+    with pytest.raises(ValueError, match="config.ini SHA-256"):
+        build_classic_runtime_profile(
+            "nes",
+            {},
+            code=b"code",
+            exheader=b"exheader",
+            romfs_template=b"romfs",
+            rom_path="/rom/game.tnes",
+            config_ini_sha256="not-a-hash",
+        )
 
 
 def test_gba_runtime_profile_records_retail_donor_identity_and_runtime_structure():
