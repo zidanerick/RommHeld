@@ -179,7 +179,7 @@ class LocalLibraryWidget(QWidget):
         host = str(saved.get("host", "")).strip()
         if not host:
             raise ValueError(
-                "VitaShell FTP is not configured. Open Tools → Send file, choose VitaShell FTP, and enter the IP address and port shown by VitaShell."
+                "VitaShell FTP is not configured. Open Device → Send file, choose VitaShell FTP, and enter the IP address and port shown by VitaShell."
             )
         try:
             port = int(saved.get("port", 1337))
@@ -377,7 +377,7 @@ class LocalLibraryWidget(QWidget):
             if selected and is_vita:
                 if not transport_ready:
                     self.destination_label.setText(
-                        "Configure VitaShell FTP in Tools → Send file."
+                        "Configure VitaShell FTP in Device → Send file."
                         if self._using_ftp()
                         else "Connect the Vita through VitaShell USB to copy the selected games."
                     )
@@ -398,7 +398,7 @@ class LocalLibraryWidget(QWidget):
             return
         if not transport_ready:
             self.destination_label.setText(
-                "Configure VitaShell FTP in Tools → Send file."
+                "Configure VitaShell FTP in Device → Send file."
                 if self._using_ftp()
                 else "Connect the Vita through VitaShell USB to copy this game."
             )
