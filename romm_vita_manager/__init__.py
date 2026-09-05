@@ -13,7 +13,6 @@ from .classic_vc_title_fix import install as _install_classic_vc_title_fix
 from .classic_vc_hardware_fix import install as _install_classic_vc_hardware_fix
 from .classic_vc_presentation_fix import install as _install_classic_vc_presentation_fix
 from .gba_vc_presentation_compat import install as _install_gba_vc_presentation_compat
-from .vc_title_id_registry import install as _install_vc_title_id_registry
 
 _install_nes_vc()
 _install_gamegear_vc()
@@ -25,7 +24,6 @@ _install_classic_vc_title_fix()
 _install_classic_vc_hardware_fix()
 _install_classic_vc_presentation_fix()
 _install_gba_vc_presentation_compat()
-_install_vc_title_id_registry()
 
 del _install_nes_vc
 del _install_gamegear_vc
@@ -37,4 +35,3 @@ del _install_classic_vc_title_fix
 del _install_classic_vc_hardware_fix
 del _install_classic_vc_presentation_fix
 del _install_gba_vc_presentation_compat
-del _install_vc_title_id_registry
