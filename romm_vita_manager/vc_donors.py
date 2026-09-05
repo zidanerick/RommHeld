@@ -207,24 +207,15 @@ def configure_boot9(config: dict, boot9_path: str | Path) -> dict:
 
 
 def _cached_classic_runtime_ready(config: dict, family_key: str) -> bool:
-    root = config.get("classic_vc", {})
-    entry = root.get(family_key, {}) if isinstance(root, dict) else {}
-    if not isinstance(entry, dict):
+    # Keep readiness tied to the exact cache contract used by deployment. A
+    # simple path-exists check previously let stale cache versions report
+    # "ready" even though configured_classic_runtime() would reject them.
+    try:
+        from .classic_vc_assets import configured_classic_runtime
+
+        return configured_classic_runtime(config, family_key) is not None
+    except (OSError, ValueError):
         return False
-    required = (
-        "exheader_path",
-        "code_path",
-        "romfs_template_path",
-        "donor_banner_path",
-        "donor_icon_path",
-    )
-    if not str(entry.get("rom_path", "")).strip():
-        return False
-    return all(
-        str(entry.get(key, "")).strip()
-        and Path(str(entry.get(key, ""))).expanduser().is_file()
-        for key in required
-    )
 
 
 def _cached_gba_runtime_ready(config: dict) -> bool:
