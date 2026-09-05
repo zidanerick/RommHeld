@@ -5,13 +5,20 @@ from pathlib import Path
 
 from .classic_vc import ClassicVcRuntime, extract_classic_vc_runtime
 from .classic_vc_hardware_fix import validate_retail_romfs
+from .classic_vc_ncch_regions import (
+    auxiliary_cache_paths,
+    extract_ncch_auxiliary_regions,
+)
 from .config import package_cache_dir, save_config
+from .gba_vc import _primary_ncch_from_cia
 from .vc_donors import configure_boot9, configure_donor
 
 _SUPPORTED = {"gb", "gbc", "nes", "gamegear", "snes"}
-# Version 4 includes donor SMDH/banner presentation and uses the independently
-# validated retail RomFS cache contract for every supported software VC family.
-_CACHE_VERSION = 4
+# Version 5 adds the donor's optional NCCH plain and dedicated launch-logo
+# regions. Version 4 caches are deliberately invalidated so a one-time donor
+# re-prepare captures the retail regions rather than silently continuing with a
+# structurally-minimal NCCH.
+_CACHE_VERSION = 5
 
 
 @dataclass(frozen=True)
@@ -24,6 +31,8 @@ class ClassicVcRuntimePaths:
     donor_icon: Path
     romfs_template: Path
     rom_path: str
+    ncch_plain: Path | None = None
+    ncch_logo: Path | None = None
 
     def load(self) -> ClassicVcRuntime:
         romfs = self.romfs_template.read_bytes()
@@ -59,6 +68,16 @@ def _write(path: Path, data: bytes) -> Path:
     return path
 
 
+def _write_optional(path: Path, data: bytes) -> Path | None:
+    if data:
+        return _write(path, data)
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
+    return None
+
+
 def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePaths | None:
     family = _family_key(family)
     root = config.get("classic_vc", {})
@@ -77,6 +96,10 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
     donor_banner = Path(banner_raw).expanduser() if banner_raw else None
     icon_raw = str(entry.get("donor_icon_path", "")).strip()
     donor_icon = Path(icon_raw).expanduser() if icon_raw else None
+    plain_raw = str(entry.get("ncch_plain_path", "")).strip()
+    ncch_plain = Path(plain_raw).expanduser() if plain_raw else None
+    ncch_logo_raw = str(entry.get("ncch_logo_path", "")).strip()
+    ncch_logo = Path(ncch_logo_raw).expanduser() if ncch_logo_raw else None
     if not exheader.is_file() or not code.is_file() or not romfs.is_file() or not rom_path:
         return None
     if logo is not None and not logo.is_file():
@@ -84,6 +107,12 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
     if donor_banner is None or not donor_banner.is_file():
         return None
     if donor_icon is None or not donor_icon.is_file():
+        return None
+    if ncch_plain is not None and not ncch_plain.is_file():
+        return None
+    if ncch_logo is not None and not ncch_logo.is_file():
+        return None
+    if ncch_logo is not None and ncch_logo.stat().st_size != 0x2000:
         return None
     try:
         validate_retail_romfs(romfs.read_bytes())
@@ -98,6 +127,8 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
         donor_icon=donor_icon,
         romfs_template=romfs,
         rom_path=rom_path,
+        ncch_plain=ncch_plain,
+        ncch_logo=ncch_logo,
     )
 
 
@@ -136,6 +167,10 @@ def extract_and_cache_classic_runtime(
     boot9 = boot9.expanduser()
     updated = configure_boot9(config, boot9)
     updated = configure_donor(updated, family, donor_cia)
+
+    donor_bytes = donor_cia.read_bytes()
+    donor_ncch = _primary_ncch_from_cia(donor_bytes)
+    auxiliary = extract_ncch_auxiliary_regions(donor_ncch)
     runtime = extract_classic_vc_runtime(donor_cia, boot9, family)
 
     if not getattr(runtime, "donor_banner", b""):
@@ -151,6 +186,9 @@ def extract_and_cache_classic_runtime(
     logo = _write(cache / "logo.bin", runtime.logo) if runtime.logo else None
     donor_banner = _write(cache / "donor_banner.bin", runtime.donor_banner)
     donor_icon = _write(cache / "donor_icon.smdh", runtime.donor_icon)
+    plain_cache, logo_cache = auxiliary_cache_paths(family)
+    ncch_plain = _write_optional(plain_cache, auxiliary.plain)
+    ncch_logo = _write_optional(logo_cache, auxiliary.logo)
 
     root = dict(updated.get("classic_vc", {})) if isinstance(updated.get("classic_vc", {}), dict) else {}
     root[family] = {
@@ -161,6 +199,8 @@ def extract_and_cache_classic_runtime(
         "logo_path": str(logo) if logo is not None else "",
         "donor_banner_path": str(donor_banner),
         "donor_icon_path": str(donor_icon),
+        "ncch_plain_path": str(ncch_plain) if ncch_plain is not None else "",
+        "ncch_logo_path": str(ncch_logo) if ncch_logo is not None else "",
         "rom_path": runtime.rom_path,
     }
     updated["classic_vc"] = root
