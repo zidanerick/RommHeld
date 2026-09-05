@@ -19,12 +19,13 @@ _GUIDANCE: dict[str, VcDonorGuidance] = {
         label="Game Boy Advance",
         classification="recommended",
         recommendation=(
-            "Any genuine GBA Virtual Console donor in the AGB_FIRM title-ID range is suitable "
-            "for reusable runtime/presentation extraction."
+            "Any genuine GBA Virtual Console donor is suitable for reusable AGB_FIRM "
+            "boot-logo and presentation extraction."
         ),
         details=(
+            "Nintendo's original GBA VC donor title IDs are not in the generated-inject F??? namespace.",
             "Donor choice is not used to emulate the target GBA game; AGB_FIRM provides the runtime.",
-            "RommHeld still fingerprints the selected donor so presentation changes are traceable.",
+            "RommHeld fingerprints the selected donor so presentation changes remain traceable.",
         ),
     ),
     "gb": VcDonorGuidance(
