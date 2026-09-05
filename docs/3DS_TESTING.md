@@ -13,7 +13,7 @@ RommHeld exposes two filesystem routes after the game/runtime target and destina
 
 The direct-card route is not called USB. Nintendo 3DS systems do not expose a standard USB mass-storage mode. A USB card reader is simply one way the desktop may mount the SD card.
 
-Generated GBA/Virtual Console CIA package workflows remain separate from this transport choice. An existing CIA file can still be copied to `/cias/` through either filesystem route for later installation.
+Generated GBA/Virtual Console CIA package workflows remain separate from transport selection. After a CIA is generated, RommHeld can deliver it through **FBI Remote Install · Install directly**, **Mounted SD card · Copy CIA**, or **ftpd · Copy CIA**. The mounted-SD and ftpd routes only copy the CIA to `/cias/`; installation remains a separate FBI action on the console.
 
 ## 2. Mounted SD preparation
 
@@ -338,7 +338,46 @@ With both routes available:
 
 Package-generation targets such as generated GBA HOME Menu CIA and Nintendo VC CIA must not be converted into ordinary ROM-copy targets by switching this selector.
 
-## 8. Readiness and ftpd staging
+## 8. Generated CIA delivery through mounted SD
+
+This section validates the package-to-card boundary, not the correctness of the VC injector itself. Use a generated CIA family that has already passed the relevant packaging prerequisites.
+
+### CIA-SD-01: generated CIA copy
+
+1. Mount and validate the 3DS SD card.
+2. Open a generated GBA or classic Virtual Console package workflow.
+3. Confirm the delivery choices include:
+   - **FBI Remote Install · Install directly**
+   - **Mounted SD card · Copy CIA**
+   - **ftpd · Copy CIA**
+4. Select **Mounted SD card · Copy CIA**.
+5. Build the CIA and let the transfer complete.
+6. Confirm RommHeld reports a verified copy under `/cias/` and does not claim that the CIA is installed.
+7. Confirm no staged `.rommheld-*.part` file remains after normal success.
+
+Expected: package generation is unchanged by transport choice. Mounted SD only changes delivery of the completed CIA.
+
+### CIA-SD-02: clean eject and manual installation
+
+1. Eject/unmount the SD card cleanly.
+2. Return it to the powered-off 3DS and boot the console.
+3. Open FBI and browse to the copied CIA under `/cias/`.
+4. Confirm the CIA is present and install it manually.
+5. Confirm RommHeld's earlier copy status was accurate: the file was copied, but installation occurred only after the explicit FBI action.
+
+For a family still awaiting real-device package validation, continue with that family's separate launch/save/relaunch checklist after installation. A successful SD copy does not validate the generated CIA runtime.
+
+### CIA-SD-03: delivery parity
+
+For the same generated CIA, compare the logical destination shown by Mounted SD and ftpd copy modes.
+
+Expected:
+
+- both copy modes use the same `/cias/...` destination;
+- FBI Remote Install remains the only route labelled as direct installation;
+- selecting Mounted SD or ftpd does not change Title ID allocation, donor/runtime selection, package contents, or metadata.
+
+## 9. Readiness and ftpd staging
 
 With the 3DS SD card mounted on the desktop:
 
@@ -351,7 +390,7 @@ With the 3DS SD card mounted on the desktop:
 
 RommHeld must not treat this as a general CFW/homebrew package manager. Complex or system-sensitive packages remain delegated to their maintained upstream route or Universal-Updater.
 
-## 9. Security and compatibility notes
+## 10. Security and compatibility notes
 
 FTP is unencrypted. Use it only on a trusted local network and do not expose the 3DS FTP server directly to the Internet.
 
@@ -370,6 +409,8 @@ Do not mark a route validated solely because CI passes.
 | Mounted-SD free-space preflight | covered | pending | pending | OS-reported free space |
 | Mounted-SD removal/recovery | partial | pending | pending | Requires real removable media |
 | SD/FTP logical destination parity | covered | pending | pending | Same target/destination, different transport |
+| Generated CIA mounted-SD copy | covered | pending | pending | Copy only; manual FBI install remains separate |
+| Generated CIA SD/FTP delivery parity | covered | pending | pending | Transport must not alter package identity/content |
 | ftpd connection/error handling | covered | pending | pending | Requires real ftpd |
 | FTP remote-root enforcement | covered | pending | pending | Test existing and invalid roots |
 | FTP directory listing | covered | pending | pending | MLSD on ftpd |
