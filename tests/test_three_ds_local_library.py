@@ -60,16 +60,18 @@ def test_main_3ds_library_delegates_transport_after_target_selection():
     assert "ThreeDSTransferWorker" not in source
 
 
-def test_filesystem_dialog_uses_single_mounted_and_ftp_workers_for_local_or_romm_games():
+def test_filesystem_dialog_uses_one_payload_aware_worker_for_local_or_romm_games():
     source = DEPLOY_PATH.read_text(encoding="utf-8")
 
     assert "from .models import Game" in source
-    assert "from .three_ds_manager import ThreeDSTransferWorker" in source
-    assert "from .three_ds_storage_worker import ThreeDSMountedTransferWorker" in source
-    assert "class ThreeDSMountedTransferWorker" not in source
+    assert "from .three_ds_filesystem_worker import ThreeDSFilesystemTransferWorker" in source
+    assert "ThreeDSMountedTransferWorker" not in source
+    assert "ThreeDSTransferWorker" not in source
     assert "if isinstance(self.game, RomMRemoteGame):" in source
     assert "return self.game.path, None, \"\", \"\"" in source
-    assert "worker: QThread = ThreeDSMountedTransferWorker(" in source
-    assert "worker = ThreeDSTransferWorker(" in source
+    assert "worker = ThreeDSFilesystemTransferWorker(" in source
+    assert "target_key=self.target_key" in source
+    assert "platform_slug=self.platform_slug" in source
+    assert "worker.destination_resolved.connect(self._destination_resolved)" in source
     assert "self._closing_requested = True" in source
     assert "QTimer.singleShot(0, self.close)" in source
