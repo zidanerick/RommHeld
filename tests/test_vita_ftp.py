@@ -105,6 +105,40 @@ class RefusedVitaFTP(FakeVitaFTP):
         raise ConnectionRefusedError("refused")
 
 
+class FailBackupRenameVitaFTP(FakeVitaFTP):
+    fail_backup_rename = True
+
+    def voidcmd(self, command):
+        if command.startswith("RNTO "):
+            destination = normalize_vita_ftp_path(command[5:])
+            if (
+                type(self).fail_backup_rename
+                and self.rename_from == "/ux0:/data/game.bin"
+                and ".backup" in destination
+            ):
+                type(self).fail_backup_rename = False
+                raise ftplib.error_perm("550 simulated backup rename failure")
+        return super().voidcmd(command)
+
+
+class AmbiguousBackupRenameVitaFTP(FakeVitaFTP):
+    fail_backup_rename = True
+
+    def voidcmd(self, command):
+        if command.startswith("RNTO "):
+            destination = normalize_vita_ftp_path(command[5:])
+            source = self.rename_from
+            if (
+                type(self).fail_backup_rename
+                and source == "/ux0:/data/game.bin"
+                and ".backup" in destination
+            ):
+                type(self).fail_backup_rename = False
+                super().voidcmd(command)
+                raise ftplib.error_perm("550 simulated ambiguous backup rename failure")
+        return super().voidcmd(command)
+
+
 class FailFinalRenameVitaFTP(FakeVitaFTP):
     fail_final_rename = True
 
@@ -144,6 +178,8 @@ def reset_fake():
     FakeVitaFTP.files = {}
     FakeVitaFTP.dirs = {"/", "/ux0:"}
     FakeVitaFTP.last_instance = None
+    FailBackupRenameVitaFTP.fail_backup_rename = True
+    AmbiguousBackupRenameVitaFTP.fail_backup_rename = True
     FailFinalRenameVitaFTP.fail_final_rename = True
     BadFinalSizeVitaFTP.corrupt_final_size = False
 
@@ -232,6 +268,34 @@ def test_overwrite_replaces_only_after_verified_temp_upload(tmp_path: Path):
 
     assert result == "copied"
     assert FakeVitaFTP.files["/ux0:/data/game.bin"] == b"new-content"
+    assert not any(".rommheld-" in path for path in FakeVitaFTP.files)
+
+
+def test_failed_backup_rename_preserves_destination_and_cleans_temp(tmp_path: Path):
+    source = tmp_path / "game.bin"
+    source.write_bytes(b"new-content")
+    FakeVitaFTP.dirs.add("/ux0:/data")
+    FakeVitaFTP.files["/ux0:/data/game.bin"] = b"old"
+    backend = make_backend(FailBackupRenameVitaFTP)
+
+    with pytest.raises(ftplib.error_perm, match="simulated backup rename failure"):
+        backend.upload(source, "data/game.bin", overwrite=True)
+
+    assert FakeVitaFTP.files["/ux0:/data/game.bin"] == b"old"
+    assert not any(".rommheld-" in path for path in FakeVitaFTP.files)
+
+
+def test_ambiguous_backup_rename_is_restored_and_temp_is_cleaned(tmp_path: Path):
+    source = tmp_path / "game.bin"
+    source.write_bytes(b"new-content")
+    FakeVitaFTP.dirs.add("/ux0:/data")
+    FakeVitaFTP.files["/ux0:/data/game.bin"] = b"old"
+    backend = make_backend(AmbiguousBackupRenameVitaFTP)
+
+    with pytest.raises(ftplib.error_perm, match="ambiguous backup rename failure"):
+        backend.upload(source, "data/game.bin", overwrite=True)
+
+    assert FakeVitaFTP.files["/ux0:/data/game.bin"] == b"old"
     assert not any(".rommheld-" in path for path in FakeVitaFTP.files)
 
 
