@@ -7,6 +7,7 @@ import pytest
 
 from romm_vita_manager.three_ds_ftp import (
     ThreeDSFtpBackend,
+    ThreeDSFtpConnectionError,
     ThreeDSFtpSettings,
     describe_connection_error,
     join_remote_path,
@@ -171,13 +172,13 @@ def test_backend_connects_with_configured_endpoint():
     assert backend.ftp.port == 5000
 
 
-def test_failed_login_closes_partial_connection():
+def test_failed_login_closes_partial_connection_and_returns_guidance():
     backend = ThreeDSFtpBackend(
         ThreeDSFtpSettings(host="192.0.2.10"),
         ftp_factory=LoginFailureFTP,
     )
 
-    with pytest.raises(ftplib.error_perm, match="530"):
+    with pytest.raises(ThreeDSFtpConnectionError, match="username and password"):
         backend.connect()
 
     assert not backend.connected
