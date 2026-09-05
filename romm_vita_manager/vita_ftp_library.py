@@ -7,7 +7,7 @@ from PySide6.QtCore import QThread, Signal
 
 from .models import Game
 from .vita_ftp import VitaFtpBackend, VitaFtpSettings
-from .vita_library_support import destination_target, human_size
+from .vita_library_support import destination_target, human_size, validate_game_source
 
 
 def ftp_destination_target(
@@ -42,6 +42,8 @@ class VitaFtpCopyWorker(QThread):
     def run(self) -> None:
         copied = skipped = cancelled = 0
         try:
+            for game, *_ in self.jobs:
+                validate_game_source(game)
             total = sum(game.size for game, *_ in self.jobs) or 1
             completed = 0
             self.backend = VitaFtpBackend(self.settings)
