@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PIL import Image
 
-from .vc_presentation import presentation_profile
+from .vc_presentation import badge_texture_names, presentation_profile
 
 
 _CBMD_HEADER_SIZE = 0x88
@@ -33,21 +33,16 @@ def _encode_rgb565_tiled(image: Image.Image, width: int, height: int) -> bytes:
 
 
 def _encode_l4_tiled(image: Image.Image, width: int, height: int) -> bytes:
-    """Encode a grayscale image into Nintendo/PICA200 tiled L4.
-
-    CGFX texture format 0x0A stores two 4-bit luminance texels per byte.
-    After the normal 8x8 PICA200 swizzle, the first texel occupies the low
-    nibble and the second occupies the high nibble.  Retail Renegade uses this
-    format for localized ``COMMON2`` title-plaque textures, so treating every
-    plaque as LA8/RGB565 made otherwise-valid NES builds fail on the desktop.
-    """
+    """Encode a grayscale image into Nintendo/PICA200 tiled L4."""
     try:
         from agbcia.formats.pica_texture import tile_offset
     except ImportError as exc:
         raise RuntimeError("Virtual Console donor banner patching requires agbcia.") from exc
 
     if width <= 0 or height <= 0 or (width * height) % 2:
-        raise ValueError(f"L4 texture dimensions must contain an even number of texels, got {width}x{height}.")
+        raise ValueError(
+            f"L4 texture dimensions must contain an even number of texels, got {width}x{height}."
+        )
     source = image.convert("L")
     if source.size != (width, height):
         source = source.resize((width, height), Image.Resampling.LANCZOS)
@@ -57,8 +52,6 @@ def _encode_l4_tiled(image: Image.Image, width: int, height: int) -> bytes:
     for y in range(height):
         for x in range(width):
             texel = tile_offset(x, y, width)
-            # L4 reconstructs a nibble as n*0x11. Quantize to the nearest
-            # representable luminance rather than simply truncating.
             nibble = min(0x0F, (int(pixels[x, y]) + 8) // 17)
             byte_index = texel >> 1
             if texel & 1:
@@ -116,15 +109,27 @@ def _patch_image(cgfx_bytes: bytes, texture_name: str, image_source) -> bytes:
     return cgfx.patch_texture(cgfx_bytes, texture, encoded)
 
 
-def _patch_image_if_present(cgfx_bytes: bytes, texture_name: str, image_source) -> tuple[bytes, bool]:
+def _patch_image_if_present(
+    cgfx_bytes: bytes,
+    texture_name: str,
+    image_source,
+    *,
+    expected_size: tuple[int, int] | None = None,
+) -> tuple[bytes, bool]:
     try:
         from agbcia.exceptions import InvalidAssetError
         from agbcia.formats import cgfx
     except ImportError as exc:
         raise RuntimeError("Virtual Console donor banner patching requires agbcia.") from exc
     try:
-        cgfx.find_texture(cgfx_bytes, texture_name)
+        texture = cgfx.find_texture(cgfx_bytes, texture_name)
     except InvalidAssetError:
+        return cgfx_bytes, False
+    if expected_size is not None and (texture.width, texture.height) != expected_size:
+        # Nintendo sometimes reuses a texture name for unrelated material. The
+        # Renegade common scene has an 8x8 all-white L4 COMMON2, while the real
+        # visible title plates are 256x64 LA8 COMMON2 textures in language
+        # scenes. Leave same-name textures with the wrong geometry untouched.
         return cgfx_bytes, False
     return _patch_image(cgfx_bytes, texture_name, image_source), True
 
@@ -187,9 +192,6 @@ def _rebuild_cbmd_preserving_slots(
         body += donor_banner[donor_cwav_offset:]
 
     rebuilt = bytes(header) + bytes(body)
-    # Every original populated slot must remain populated. This guards against
-    # the exact regression that produced a blank NES information plaque: the
-    # first implementation rebuilt only CBMD's common scene.
     for slot, _ in scenes:
         field = _CBMD_SLOT_TABLE + slot * 4
         if int.from_bytes(rebuilt[field : field + 4], "little") == 0:
@@ -204,20 +206,12 @@ def patch_official_vc_banner(
     *,
     badge_image=None,
 ) -> bytes:
-    """Patch game-facing textures while preserving the full retail CBMD.
-
-    Nintendo's banner layout is family-specific. NES keeps its VC/title plaque
-    only in language CGFX slots; Game Gear uses ``TitlePlate`` there and repeats
-    its game artwork in some localized scenes. GB/GBC also ship localized badge
-    scenes. Rebuilding only the common scene silently discarded those assets,
-    producing the blank white NES panel seen on hardware. We now patch every
-    donor scene in place and preserve its original language-slot topology and
-    CWAV audio.
-    """
+    """Patch game-facing textures while preserving the full retail CBMD."""
     profile = presentation_profile(family)
-    if profile.badge_texture is not None and badge_image is None:
+    badge_names = badge_texture_names(profile)
+    if badge_names and badge_image is None:
         raise ValueError(f"{family.upper()} donor presentation requires a generated title badge.")
-    if profile.badge_texture is None and badge_image is not None:
+    if not badge_names and badge_image is not None:
         raise ValueError(f"{family.upper()} donor presentation has no separate badge texture.")
 
     patched_scenes: list[tuple[int, bytes]] = []
@@ -226,22 +220,25 @@ def patch_official_vc_banner(
     for slot, scene in _donor_slots(donor_banner):
         patched, hit = _patch_image_if_present(scene, profile.artwork_texture, front_artwork)
         artwork_hits += int(hit)
-        if profile.badge_texture is not None:
-            patched, hit = _patch_image_if_present(
-                patched,
-                profile.badge_texture,
-                badge_image,
-            )
-            badge_hits += int(hit)
+        if badge_names:
+            for badge_name in badge_names:
+                patched, hit = _patch_image_if_present(
+                    patched,
+                    badge_name,
+                    badge_image,
+                    expected_size=profile.badge_size,
+                )
+                badge_hits += int(hit)
         patched_scenes.append((slot, patched))
 
     if artwork_hits == 0:
         raise ValueError(
             f"{family.upper()} donor banner has no {profile.artwork_texture!r} artwork texture."
         )
-    if profile.badge_texture is not None and badge_hits == 0:
+    if badge_names and badge_hits == 0:
         raise ValueError(
-            f"{family.upper()} donor banner has no {profile.badge_texture!r} title-plaque texture."
+            f"{family.upper()} donor banner has no usable {profile.badge_size or ''} "
+            f"title-plaque texture from {badge_names!r}."
         )
 
     return _rebuild_cbmd_preserving_slots(donor_banner, patched_scenes)
