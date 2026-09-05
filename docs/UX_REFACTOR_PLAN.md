@@ -1,6 +1,6 @@
 # RommHeld UX and Repository Refactor Plan
 
-Status: implementation complete; hardware regression validation remains
+Status: structural refactor complete; UX polish and hardware regression validation remain
 
 Design authority: `docs/DESIGN_SYSTEM.md`
 
@@ -10,25 +10,28 @@ Baseline: `feature/ui-redesign` at `fddc07151d3105c6fee9a0217764973ecd200c4d`.
 
 RommHeld is moving from a Vita-first utility into a coherent multi-handheld desktop application. The refactor preserves working behavior while making the active architecture understandable, extensible and visually consistent.
 
-The branch has reached the point where broad restructuring should stop. Remaining work before merge should be driven by real-device defects, not by additional architectural churn.
+Broad architecture restructuring is complete. Current UX work is a focused simplification/polish pass: reduce permanent navigation, keep primary actions beside the user's selection, make device readiness obvious, and progressively disclose setup/advanced controls. Transport, package-generation and runtime boundaries remain unchanged.
 
 ## Current active architecture
 
 ```text
 launcher.py
-    -> PlatformSelectorDialog
+    -> PlatformSelectorDialog only for first setup / invalid saved configuration
+    -> otherwise reuse the saved active workspace directly
     -> WorkspaceDashboardWindow (QMainWindow)
         -> ManagementShell
-            -> LocalLibraryWidget for Vita / DS local-library presentation
-            -> ThreeDSLibraryWidget for RomM-backed 3DS browsing
-            -> Device page
-            -> Setup page
-            -> Queue page
-            -> Tools page
-            -> Settings page
+            -> Library
+                -> LocalLibraryWidget for Vita / DS local-library presentation
+                -> ThreeDSLibraryWidget for RomM-backed 3DS browsing
+            -> Device
+                -> contextual Vita / 3DS setup and advanced device actions
+            -> Settings
+                -> library source
+                -> RomM connection verification
+                -> runtime preference
 ```
 
-Supporting focused modules now include:
+Supporting focused modules include:
 
 - `vita_library_support.py` for Vita destination/status/copy behavior
 - `send_file_dialog.py` for explicit Vita single-file transfers
@@ -37,7 +40,7 @@ Supporting focused modules now include:
 - `three_ds_setup.py` for guided 3DS readiness
 - `vita_setup.py` for Vita package/runtime preparation
 
-The old `ui.py`, `app.py`, `platform_selector.py`, `audited_workspace.py` and `device_dashboard.py` surfaces have been removed. The root `romm_vita_manager.py` script now forwards to the current launcher rather than exposing a second application architecture.
+The old `ui.py`, `app.py`, `platform_selector.py`, `audited_workspace.py` and `device_dashboard.py` surfaces have been removed. The root `romm_vita_manager.py` script forwards to the current launcher rather than exposing a second application architecture.
 
 ## Refactor rules
 
@@ -45,9 +48,11 @@ The old `ui.py`, `app.py`, `platform_selector.py`, `audited_workspace.py` and `d
 - Keep platform branding in shared design tokens.
 - Keep transport, packaging and runtime-selection logic separate even when presented on one screen.
 - Prefer standalone widgets over inheritance from console-specific windows.
+- Keep common workflows simple and expose advanced controls contextually.
+- A normal deployment action should live beside the selected game rather than requiring navigation to another page.
 - Every cleanup step must leave the branch compilable and testable.
 - Do not add temporary files that are not actively used.
-- From this point onward, avoid structural rewrites unless hardware/runtime testing demonstrates a concrete need.
+- Avoid structural rewrites unless runtime/hardware testing demonstrates a concrete need.
 
 ## Phase 1: design foundation
 
@@ -69,7 +74,9 @@ The UI uses a neutral graphite base with restrained manufacturer accents:
 
 Platform color is an orientation/accent tool, not a full-screen background.
 
-## Phase 2: startup selector
+Shared primary buttons now have distinct hover, pressed, disabled and keyboard-focus states rather than relying on a static accent fill.
+
+## Phase 2: startup and handheld selection
 
 Status: implemented; desktop-scale validation remains useful.
 
@@ -82,17 +89,20 @@ Implemented:
 - asynchronous RomM verification
 - thread-safe selector shutdown
 - KDE/CachyOS-safe clickable-frame cards
+- normal configured startup opens directly into the saved workspace
+- selector remains available for first setup, invalid saved configuration, and explicit `Switch handheld`
 
 Remaining validation:
 
 - additional desktop scales/themes
 - future-platform placeholder consistency
+- first-run versus returning-user flow on a real desktop session
 
 ## Phase 3: library experience
 
 ### Vita / local library
 
-Status: complete for the refactor.
+Status: functional simplification complete; presentation polish remains.
 
 `LocalLibraryWidget` owns:
 
@@ -103,50 +113,63 @@ Status: complete for the refactor.
 - selection summary
 - automatic Vita destination summary
 - Vita copy workflow and cancellation
+- primary `Copy to Vita` action beside the selected games
+- inline routine transfer completion instead of a success-summary modal
 
-Vita destination/status/copy helpers are now isolated in `vita_library_support.py` rather than living in a legacy application window.
+Vita destination/status/copy helpers remain isolated in `vita_library_support.py` rather than living in an application window.
+
+Next visual pass should improve the text-heavy local-library presentation without changing its copy semantics. The 3DS master/detail library is the stronger reference pattern, but target-specific behavior should not be forced into a generic abstraction merely for visual consistency.
 
 ### Nintendo 3DS / RomM library
 
-Status: complete for the refactor.
+Status: complete for the structural refactor.
 
 Implemented:
 
 - progressive RomM-backed compatible library loading
 - artwork inspector with selection-race protection
 - target selection
-- GBA native/VC handoff to the CIA deployment workflow
+- GBA/native and VC handoff to deployment workflows
 - Nintendo-red deployment accents
 - bounded worker shutdown
 
-Further changes should be driven by hardware/runtime findings rather than forcing more generic abstraction into target-specific deployment logic.
+Further 3DS deployment changes should be coordinated with hardware/runtime work. The remaining UX concern is avoiding unnecessary second-stage manager indirection when the game and deployment route are already known.
 
-## Phase 4: device and setup pages
+## Phase 4: device readiness and contextual setup
 
-Status: visual refactor complete.
+Status: simplified shell implemented; target-specific dialogs retained.
 
-Each device page answers:
+The permanent `Setup`, `Queue` and `Tools` navigation destinations have been removed. The shell now exposes only:
 
-1. Is the target configured or connected?
+1. Library
+2. Device
+3. Settings
+
+`Queue` stays hidden until a real persistent queue exists. Advanced tools remain contextual rather than duplicating actions in permanent navigation.
+
+Each Device page should answer:
+
+1. Is the active target configured or connected?
 2. Which endpoint/storage root is in use?
 3. What is the next useful action?
-4. Which advanced actions are available?
+4. Which setup or advanced action is available if needed?
 
-Completed dialog/workflow passes:
+The sidebar shows compact state for the active handheld only rather than unrelated disconnected devices.
 
 ### Vita
 
 - mount state and free storage
-- redesigned Send File workflow
-- Copy selected games
+- `Vita setup` launched contextually from Device
+- Send File retained as an advanced one-off transfer action
+- normal selected-game copy moved to Library
 - redesigned Vita Setup with PlayStation-blue primary actions
 - explicit RetroArch/RetroAchievements route messaging
 
 ### Nintendo 3DS
 
 - FTP configuration state and endpoint
-- redesigned 3DS Manager master/detail workflow
-- redesigned guided 3DS Setup
+- 3DS Setup launched contextually from Device
+- 3DS Manager remains available for direct filesystem/deployment management
 - FTP connectivity kept separate from FBI Remote Install readiness
 - FBI Remote Install retained through package deployment flows
 
@@ -156,9 +179,19 @@ Completed dialog/workflow passes:
 - redesigned removable-storage dialog
 - explicit destination path constrained to the selected storage root
 
-## Phase 5: deployment dialogs
+## Phase 5: settings and service configuration
 
-Status: complete for the refactor.
+Status: simplification implemented.
+
+Settings owns the library source and runtime preference configuration. When RomM is selected, the same asynchronous `RomMConnectionWorker` used by onboarding can test the URL/token directly from Settings.
+
+The workspace cannot switch handhelds while that bounded test is active, and shutdown waits for it to finish, preserving Qt worker lifetime rules.
+
+Credentials remain in local application configuration until a separate secure credential-store migration is implemented.
+
+## Phase 6: deployment dialogs
+
+Status: complete for the structural refactor; defect-driven polish only.
 
 Implemented/polished:
 
@@ -170,9 +203,9 @@ Implemented/polished:
 - removable-storage transfer stages
 - transfer controls shown only when relevant
 
-Any further deployment UI work should follow actual device-test findings.
+Any further deployment UI work should follow actual device-test findings or remove demonstrable workflow duplication without changing transport/package semantics.
 
-## Phase 6: collapse the legacy inheritance ladder
+## Phase 7: collapse the legacy inheritance ladder
 
 Status: complete.
 
@@ -193,7 +226,7 @@ Completed:
 
 This phase should not be reopened without a concrete functional requirement.
 
-## Phase 7: asset cleanup
+## Phase 8: asset cleanup and visual identity
 
 Status: mostly complete.
 
@@ -211,11 +244,11 @@ Completed:
 - startup selector uses canonical handheld assets
 - Mobile has a neutral built-in placeholder rather than a blank card
 
-Keep `docs/ASSET_SOURCES.md` aligned with future asset additions/removals.
+Remaining polish can strengthen RommHeld's own identity and game-content presentation without adding heavy per-widget branding. Keep `docs/ASSET_SOURCES.md` aligned with future asset additions/removals.
 
-## Phase 8: documentation cleanup
+## Phase 9: documentation cleanup
 
-Status: complete for the refactor.
+Status: current.
 
 Authoritative documents:
 
@@ -225,7 +258,7 @@ Authoritative documents:
 
 Superseded transitional UI documentation should not be retained once it has no active purpose.
 
-## Phase 9: tests and lifecycle quality
+## Phase 10: tests and lifecycle quality
 
 Current regression areas include:
 
@@ -239,23 +272,34 @@ Current regression areas include:
 - FBI HTTP completion/cancellation semantics
 - direct `QMainWindow` workspace architecture
 - removal of legacy UI-module callers
+- absence of placeholder Queue/Tools navigation
+- core Library/Device/Settings navigation
+- contextual page subtitles
+- Vita copy action remaining in Library
+- RomM connection verification in Settings
+- direct configured startup bypassing onboarding
 
-CI is headless and does not provide `libEGL.so.1`, so architecture tests must not import Qt GUI modules merely to inspect inheritance. Runtime Qt validation remains a hardware/desktop responsibility.
+CI is headless and does not provide the full desktop graphics environment, so the UX regression tests inspect source/architecture contracts without claiming that Qt widgets have rendered correctly. Runtime Qt validation remains a desktop responsibility.
 
-## Remaining pre-merge validation
+## Remaining validation
 
-### Desktop lifecycle
+### Desktop lifecycle and usability
 
-- close startup selector during RomM verification
+- first launch shows onboarding; configured restart opens the saved workspace directly
+- explicit `Switch handheld` returns to the selector and rebuilds the workspace safely
+- close selector during RomM verification
+- close the main window during a Settings RomM verification
 - close deployment dialogs during transfer/cleanup
 - switch handheld workspaces repeatedly
 - quit while artwork/library workers are active
-- confirm redesigned dialogs render correctly at the target desktop scale
+- confirm Library, Device and Settings render correctly at target desktop scales/themes
+- verify local-library action/footer layout with long game names and paths
+- confirm keyboard focus is visible on primary actions
 
 ### PlayStation Vita hardware
 
 - mount detection through VitaShell USB mode
-- local-library copy and cancellation
+- local-library copy and cancellation from the new in-library action
 - same-size skip behavior
 - storage-space failure path
 - redesigned Send File transfer and overwrite path
@@ -268,7 +312,7 @@ CI is headless and does not provide `libEGL.so.1`, so architecture tests must no
 - local file upload
 - RomM download followed by 3DS upload
 - cancellation and close behavior
-- GBA CIA deployment
+- VC/native deployment paths under current hardware-validation work
 - FBI Remote Install completion and cleanup
 - 3DS Setup SD detection/validation and FTP-manager handoff
 
@@ -298,8 +342,10 @@ Remove a file when it is:
 The structural/UI refactor is considered complete when:
 
 - one coherent sidebar shell is the only active application architecture
+- normal navigation exposes only useful current destinations
 - visible pages follow `DESIGN_SYSTEM.md`
 - manufacturer accents come from shared tokens
+- normal primary actions live beside the relevant selection/state
 - no active workspace depends on a console-specific main-window inheritance chain
 - useful helpers have been extracted from removed legacy modules
 - transitional shims have been removed after callers migrated
@@ -307,4 +353,4 @@ The structural/UI refactor is considered complete when:
 - worker shutdown is reliable under CI-covered paths
 - tests pass
 
-Those implementation conditions are now substantially met. PR #21 should move to real Vita and 3DS regression testing, with only defect-driven fixes before merge.
+The architecture conditions are substantially met. Remaining UI work should be targeted usability/presentation polish and fixes found through desktop or real-device regression testing, not another broad architectural rewrite.
