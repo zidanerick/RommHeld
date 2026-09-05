@@ -10,8 +10,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListView,
-    QMessageBox,
-    QProgressBar,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -20,17 +18,14 @@ from PySide6.QtWidgets import (
 
 from .design_tokens import DARK, brand_for_platform
 from .library_sources import get_library_source
-from .mappings import PLATFORM_LABELS, platform_label
+from .mappings import normalize_platform_slug, platform_label
 from .models import Game
 from .preferences import get_device_preference
 from .romm import scan_games
 from .romm_library_cache import load_cached_page, save_cached_page
 from .romm_remote import RomMRemoteGame
 from .romm_remote_worker import RomMLibraryWorker
-from .three_ds_ftp import ThreeDSFtpSettings
-from .three_ds_manager import RomMArtworkWorker, ThreeDSTransferWorker
-from .three_ds_storage import configured_3ds_storage_root
-from .three_ds_storage_worker import ThreeDSMountedTransferWorker
+from .three_ds_manager import RomMArtworkWorker
 from .three_ds_targets import available_targets, default_destination, preferred_target_key
 from .ui_components import AccentButton, SurfaceCard
 
@@ -48,28 +43,16 @@ def _human_size(value: int) -> str:
     return f"{value} B"
 
 
-def _local_platform_slug(value: str) -> str:
-    raw = str(value or "").strip()
-    folded = raw.casefold()
-    if folded in PLATFORM_LABELS:
-        return folded
-    for slug, label in PLATFORM_LABELS.items():
-        if label.casefold() == folded:
-            return slug
-    return folded
-
-
 def _platform_slug(game: LibraryGame) -> str:
     if isinstance(game, RomMRemoteGame):
-        return str(game.platform_slug or "").strip().lower()
-    return _local_platform_slug(game.source_platform)
+        return str(game.platform_slug or game.platform).strip().lower()
+    return normalize_platform_slug(game.source_platform)
 
 
 def _platform_name(game: LibraryGame) -> str:
     if isinstance(game, RomMRemoteGame):
         return game.platform
-    slug = _platform_slug(game)
-    return platform_label(slug or game.source_platform)
+    return platform_label(_platform_slug(game))
 
 
 def _filename(game: LibraryGame) -> str:
@@ -159,7 +142,6 @@ class ThreeDSLibraryWidget(QWidget):
         self.open_manager_callback = open_manager_callback
         self.library_worker: RomMLibraryWorker | None = None
         self.artwork_worker: RomMArtworkWorker | None = None
-        self.transfer_worker: ThreeDSTransferWorker | ThreeDSMountedTransferWorker | None = None
         self.games: list[LibraryGame] = []
         self._local_games: list[Game] = []
         self._loading = False
@@ -170,8 +152,6 @@ class ThreeDSLibraryWidget(QWidget):
         self._end_reached = False
         self._artwork_rom_id: int | None = None
         self._active_artwork_rom_id: int | None = None
-        self._last_transfer_result: str | None = None
-        self._active_transport = ""
         self._filter_timer = QTimer(self)
         self._filter_timer.setSingleShot(True)
         self._filter_timer.setInterval(180)
@@ -261,16 +241,6 @@ class ThreeDSLibraryWidget(QWidget):
         self.destination.setPlaceholderText("Select a compatible target")
         inspector.content.addWidget(self.destination)
 
-        transport_label = QLabel("Filesystem transfer")
-        transport_label.setStyleSheet(
-            f"color:{DARK.text_tertiary};font-size:10px;font-weight:600;"
-        )
-        inspector.content.addWidget(transport_label)
-        self.transport_combo = QComboBox()
-        self.transport_combo.currentIndexChanged.connect(self._transport_changed)
-        inspector.content.addWidget(self.transport_combo)
-        self._refresh_transports()
-
         self.deploy_button = AccentButton(
             "Deploy to Nintendo 3DS",
             brand_for_platform("3ds").accent,
@@ -278,18 +248,6 @@ class ThreeDSLibraryWidget(QWidget):
         self.deploy_button.setEnabled(False)
         self.deploy_button.clicked.connect(self._open_manager)
         inspector.content.addWidget(self.deploy_button)
-
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
-        self.progress.setVisible(False)
-        self.cancel_button = QPushButton("Cancel transfer")
-        self.cancel_button.setVisible(False)
-        self.cancel_button.clicked.connect(self.cancel_transfer)
-        transfer_row = QHBoxLayout()
-        transfer_row.addWidget(self.progress, 1)
-        transfer_row.addWidget(self.cancel_button)
-        inspector.content.addLayout(transfer_row)
         inspector.content.addStretch(1)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -320,47 +278,7 @@ class ThreeDSLibraryWidget(QWidget):
         token = source.api_token.strip()
         return (url, token) if url and token else None
 
-    def _refresh_transports(self) -> None:
-        current = str(self.transport_combo.currentData() or "") if self.transport_combo.count() else ""
-        self.transport_combo.blockSignals(True)
-        self.transport_combo.clear()
-        root = configured_3ds_storage_root(self.config)
-        saved = self.config.get("devices", {}).get("3ds", {})
-        host = str(saved.get("host", "")).strip()
-        if root is not None:
-            self.transport_combo.addItem("Mounted SD card · Direct / offline", "sd")
-        if host:
-            self.transport_combo.addItem("ftpd · Wireless / live console", "ftp")
-        if not self.transport_combo.count():
-            self.transport_combo.addItem("Configure a route on the Device page", "")
-        index = self.transport_combo.findData(current)
-        self.transport_combo.setCurrentIndex(index if index >= 0 else 0)
-        self.transport_combo.blockSignals(False)
-
-    def _selected_transport(self) -> str:
-        return str(self.transport_combo.currentData() or "")
-
-    def _transport_changed(self, _index: int | None = None) -> None:
-        if self.transfer_worker is not None and self.transfer_worker.isRunning():
-            return
-        transport = self._selected_transport()
-        if transport == "sd":
-            root = configured_3ds_storage_root(self.config)
-            self.status.setText(
-                f"Mounted SD selected · {root}. Keep the card mounted until the transfer completes."
-                if root is not None
-                else "The configured 3DS SD card is no longer mounted. Reconfigure it from Device."
-            )
-        elif transport == "ftp":
-            self.status.setText(
-                "ftpd selected. Open ftpd on the Nintendo 3DS and leave it running while deploying."
-            )
-        self._update_deploy_controls()
-
     def refresh_library(self) -> None:
-        if self.transfer_worker is not None and self.transfer_worker.isRunning():
-            return
-        self._refresh_transports()
         self._filter_timer.stop()
         self.search.blockSignals(True)
         self.search.clear()
@@ -421,8 +339,6 @@ class ThreeDSLibraryWidget(QWidget):
         self._filter_timer.start()
 
     def _reload_for_filter(self) -> None:
-        if self.transfer_worker is not None and self.transfer_worker.isRunning():
-            return
         if self._source_mode() == "local":
             self._apply_local_filters()
             return
@@ -659,15 +575,15 @@ class ThreeDSLibraryWidget(QWidget):
         self.details.setText(
             f"{game.name}\n{_platform_name(game)}  •  {_human_size(game.size)}"
         )
+        self.deploy_button.setEnabled(bool(targets))
         self._load_artwork(game)
         self._target_changed()
-        self._update_deploy_controls()
 
     def _target_changed(self) -> None:
         game = self._selected_game()
         if game is None or self.target_combo.count() == 0:
             self.destination.clear()
-            self._update_deploy_controls()
+            self.deploy_button.setEnabled(False)
             return
         target_key = str(self.target_combo.currentData())
         self.destination.setText(
@@ -683,7 +599,12 @@ class ThreeDSLibraryWidget(QWidget):
                 f"{game.name}\n{_platform_name(game)}  •  {_human_size(game.size)}"
                 f"\n\n{target.description}\n\nSource: {source_note}"
             )
-        self._update_deploy_controls()
+        self.deploy_button.setEnabled(target is not None)
+        self.deploy_button.setText(
+            "Open package workflow"
+            if target_key in PACKAGE_GENERATION_TARGETS
+            else "Deploy to Nintendo 3DS"
+        )
 
     def _load_artwork(self, game: LibraryGame) -> None:
         self.artwork.clear()
@@ -753,212 +674,6 @@ class ThreeDSLibraryWidget(QWidget):
         ):
             QTimer.singleShot(0, lambda game=current: self._load_artwork(game))
 
-    def _ftp_settings(self) -> ThreeDSFtpSettings:
-        saved = self.config.get("devices", {}).get("3ds", {})
-        host = str(saved.get("host", "")).strip()
-        if not host:
-            raise ValueError(
-                "Nintendo 3DS FTP is not configured. Open Device → Connection setup, "
-                "enter the address shown by ftpd, and leave ftpd running while deploying."
-            )
-        try:
-            port = int(saved.get("port", 5000))
-            if not 1 <= port <= 65535:
-                raise ValueError
-        except (TypeError, ValueError) as exc:
-            raise ValueError("The saved Nintendo 3DS FTP port is invalid.") from exc
-        return ThreeDSFtpSettings(
-            host=host,
-            port=port,
-            username=str(saved.get("username", "anonymous")) or "anonymous",
-            password=str(saved.get("password", "")),
-            remote_root=str(saved.get("remote_root", "/")) or "/",
-        )
-
-    def _open_manager(self, _checked: bool = False, *, overwrite: bool = False) -> None:
-        if self.transfer_worker is not None and self.transfer_worker.isRunning():
-            return
-        game = self._selected_game()
-        target_key = str(self.target_combo.currentData() or "")
-        if game is None or not target_key:
-            return
-
-        if target_key in PACKAGE_GENERATION_TARGETS:
-            self.open_manager_callback(game, target_key)
-            return
-
-        destination = self.destination.text().strip()
-        if not destination:
-            self.status.setText("Choose a deployment target with a valid destination.")
-            return
-        transport = self._selected_transport()
-        if transport not in {"sd", "ftp"}:
-            self.status.setText(
-                "Configure a mounted Nintendo 3DS SD card or ftpd from the Device page before deploying."
-            )
-            return
-
-        if isinstance(game, RomMRemoteGame):
-            source = None
-            remote_game = game
-            romm_source = self._source()
-            if romm_source is None:
-                self.status.setText(
-                    "RomM credentials are unavailable. Re-save the library source in Settings."
-                )
-                return
-            romm_url, romm_token = romm_source
-        else:
-            if not game.path.is_file():
-                self.status.setText(
-                    "The selected local file is no longer available. Refresh the library and retry."
-                )
-                return
-            source = game.path
-            remote_game = None
-            romm_url = ""
-            romm_token = ""
-
-        if transport == "sd":
-            root = configured_3ds_storage_root(self.config)
-            if root is None:
-                self.status.setText(
-                    "The configured Nintendo 3DS SD card is no longer mounted or no longer validates as a 3DS root. Reconfigure it from Device."
-                )
-                self._refresh_transports()
-                self._update_deploy_controls()
-                return
-            worker: ThreeDSTransferWorker | ThreeDSMountedTransferWorker = ThreeDSMountedTransferWorker(
-                root,
-                source,
-                destination,
-                remote_game=remote_game,
-                romm_url=romm_url,
-                romm_token=romm_token,
-                overwrite=overwrite,
-            )
-        else:
-            try:
-                settings = self._ftp_settings()
-            except ValueError as exc:
-                self.status.setText(str(exc))
-                return
-            worker = ThreeDSTransferWorker(
-                settings,
-                source,
-                destination,
-                remote_game=remote_game,
-                romm_url=romm_url,
-                romm_token=romm_token,
-                overwrite=overwrite,
-            )
-
-        self._last_transfer_result = None
-        self._active_transport = transport
-        self.progress.setValue(0)
-        self.progress.setVisible(True)
-        self.cancel_button.setVisible(True)
-        route_name = "mounted SD" if transport == "sd" else "ftpd"
-        self.status.setText(
-            f"Preparing verified replacement for {game.name} through {route_name}…"
-            if overwrite
-            else f"Checking the Nintendo 3DS destination for {game.name} through {route_name}…"
-        )
-        worker.status_changed.connect(self.status.setText)
-        worker.progress.connect(self._transfer_progress)
-        worker.completed.connect(self._transfer_completed)
-        worker.failed.connect(self._transfer_failed)
-        worker.finished.connect(self._transfer_finished)
-        self.transfer_worker = worker
-        self._update_deploy_controls()
-        worker.start()
-
-    def _transfer_progress(self, done: int) -> None:
-        game = self._selected_game()
-        total = int(game.size) if game is not None else 0
-        if total > 0:
-            self.progress.setRange(0, 100)
-            self.progress.setValue(min(100, int(done * 100 / total)))
-        else:
-            self.progress.setRange(0, 0)
-
-    def _transfer_completed(self, result: str) -> None:
-        self._last_transfer_result = result
-        copied = (
-            "Transfer complete. The staged copy and final SD destination were size verified."
-            if self._active_transport == "sd"
-            else "Transfer complete. The staged upload and final FTP destination were size verified."
-        )
-        self.status.setText(
-            {
-                "copied": copied,
-                "resumed": "Matching partial RommHeld FTP upload resumed, verified, and moved into place.",
-                "skipped": "The Nintendo 3DS destination already has the same-size file; nothing was changed.",
-                "different": "A different-size file already exists at the destination. Nothing was changed.",
-                "cancelled": "Transfer cancelled. The existing destination was preserved.",
-            }.get(result, result)
-        )
-
-    def _transfer_failed(self, message: str) -> None:
-        self._last_transfer_result = None
-        prefix = (
-            "Mounted-SD transfer failed. Confirm the card is still mounted and writable. "
-            if self._active_transport == "sd"
-            else "ftpd transfer failed. Confirm ftpd is open on the 3DS and the saved endpoint is still correct. "
-        )
-        self.status.setText(prefix + message)
-
-    def _transfer_finished(self) -> None:
-        result = self._last_transfer_result
-        self.transfer_worker = None
-        self.progress.setRange(0, 100)
-        self.progress.setVisible(False)
-        self.cancel_button.setVisible(False)
-        self._update_deploy_controls()
-        if result != "different":
-            return
-        answer = QMessageBox.question(
-            self,
-            "Replace existing 3DS file?",
-            "The destination contains a different-size file. Replace it? RommHeld will "
-            "stage and verify the new file while preserving the existing destination until "
-            "the replacement is ready.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        if answer == QMessageBox.StandardButton.Yes:
-            QTimer.singleShot(0, lambda: self._open_manager(overwrite=True))
-
-    def cancel_transfer(self) -> None:
-        if self.transfer_worker is not None and self.transfer_worker.isRunning():
-            self.cancel_button.setEnabled(False)
-            self.status.setText("Cancelling Nintendo 3DS transfer…")
-            self.transfer_worker.cancel()
-
-    def _update_deploy_controls(self) -> None:
-        busy = bool(self.transfer_worker and self.transfer_worker.isRunning())
-        game = self._selected_game()
-        has_target = bool(game is not None and self.target_combo.currentData())
-        target_key = str(self.target_combo.currentData() or "") if has_target else ""
-        package_target = target_key in PACKAGE_GENERATION_TARGETS
-        transport_ready = self._selected_transport() in {"sd", "ftp"}
-        self.game_list.setEnabled(not busy)
-        self.target_combo.setEnabled(not busy and game is not None)
-        self.transport_combo.setEnabled(not busy and has_target and not package_target)
-        self.refresh_button.setEnabled(not busy and not self._loading)
-        self.deploy_button.setEnabled(
-            not busy and has_target and (package_target or transport_ready)
-        )
-        self.cancel_button.setEnabled(busy)
-        if game is not None and has_target:
-            self.deploy_button.setText(
-                "Open package workflow"
-                if package_target
-                else "Deploy to Nintendo 3DS"
-            )
-        else:
-            self.deploy_button.setText("Deploy to Nintendo 3DS")
-
     def _clear_details(self) -> None:
         self._artwork_rom_id = None
         self.artwork.clear()
@@ -968,13 +683,17 @@ class ThreeDSLibraryWidget(QWidget):
         )
         self.destination.clear()
         self.target_combo.clear()
+        self.deploy_button.setText("Deploy to Nintendo 3DS")
         self.deploy_button.setEnabled(False)
+
+    def _open_manager(self) -> None:
+        game = self._selected_game()
+        target_key = str(self.target_combo.currentData() or "")
+        if game is not None and target_key:
+            self.open_manager_callback(game, target_key)
 
     def closeEvent(self, event) -> None:
         self._filter_timer.stop()
-        if self.transfer_worker is not None and self.transfer_worker.isRunning():
-            self.transfer_worker.cancel()
-            self.transfer_worker.wait()
         for worker in (self.library_worker, self.artwork_worker):
             if worker is not None and worker.isRunning():
                 worker.requestInterruption()
