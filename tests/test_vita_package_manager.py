@@ -22,6 +22,38 @@ def test_daedalus_title_id_is_detected(tmp_path: Path):
     assert detected["daedalusx64"] is True
 
 
+def test_dsvita_title_id_is_detected(tmp_path: Path):
+    (tmp_path / "app" / "DSVITA000").mkdir(parents=True)
+
+    detected = detect_emulators(tmp_path)
+
+    assert detected["dsvita"] is True
+
+
+def test_dsvita_rom_directory_does_not_claim_emulator_is_installed(tmp_path: Path):
+    (tmp_path / "data" / "dsvita").mkdir(parents=True)
+
+    detected = detect_emulators(tmp_path)
+
+    assert detected["dsvita"] is False
+
+
+def test_retroarch_vita_title_id_is_detected(tmp_path: Path):
+    (tmp_path / "app" / "RETROVITA").mkdir(parents=True)
+
+    detected = detect_emulators(tmp_path)
+
+    assert detected["retroarch"] is True
+
+
+def test_retroarch_data_directory_does_not_claim_app_is_installed(tmp_path: Path):
+    (tmp_path / "data" / "retroarch").mkdir(parents=True)
+
+    detected = detect_emulators(tmp_path)
+
+    assert detected["retroarch"] is False
+
+
 def test_stage_package_replaces_existing_file_after_safe_copy(monkeypatch, tmp_path: Path):
     cache = tmp_path / "cache"
     cache.mkdir()
