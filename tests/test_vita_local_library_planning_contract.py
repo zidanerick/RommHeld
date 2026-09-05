@@ -26,3 +26,12 @@ def test_copy_action_requires_at_least_one_safe_destination_mapping() -> None:
     assert 'and safe_destination_count > 0' in source
     assert 'Selected games need destination review before they can be copied.' in source
     assert 'if mode == "unknown" or not target:' in source
+
+
+def test_usb_copy_revalidates_cached_vita_mount_before_planning() -> None:
+    source = SOURCE.read_text(encoding="utf-8")
+
+    assert "from .vita import free_space, is_vita_mount" in source
+    assert "if self.vita is None or not is_vita_mount(self.vita):" in source
+    assert "self.set_vita(None)" in source
+    assert "The VitaShell USB mount is no longer available." in source
