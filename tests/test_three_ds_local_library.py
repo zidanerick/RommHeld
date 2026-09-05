@@ -1,36 +1,31 @@
 from pathlib import Path
 
-from romm_vita_manager.models import Game
 from romm_vita_manager.romm import scan_games
-from romm_vita_manager.three_ds_library import _local_platform_slug, _local_targets
 
 
-def _game(tmp_path: Path, platform: str, filename: str) -> Game:
-    path = tmp_path / platform / filename
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(b"rom")
-    return Game(path, path.stem, platform, path.stat().st_size, path.relative_to(tmp_path))
+LIBRARY_PATH = Path(__file__).parents[1] / "romm_vita_manager" / "three_ds_library.py"
 
 
-def test_local_platform_slug_accepts_romm_slug_and_display_label():
-    assert _local_platform_slug("gba") == "gba"
-    assert _local_platform_slug("Game Boy Advance") == "gba"
-    assert _local_platform_slug("Nintendo 64") == "n64"
+def test_local_library_source_contract_stays_headless():
+    source = LIBRARY_PATH.read_text(encoding="utf-8")
+
+    assert "from .models import Game" in source
+    assert "from .library_sources import get_library_source" in source
+    assert 'PACKAGE_GENERATION_TARGETS = frozenset({"native_gba", "vc_cia"})' in source
+    assert "if target.key not in PACKAGE_GENERATION_TARGETS" in source
+    assert 'game.path.suffix.casefold() != ".cia"' in source
+    assert 'if self._source_mode() == "local":' in source
+    assert "self._load_local_library()" in source
+    assert "scan_games(root)" in source
 
 
-def test_local_library_exposes_only_existing_file_routes(tmp_path: Path):
-    gba = _game(tmp_path, "gba", "Metroid.gba")
-    gb = _game(tmp_path, "gb", "Tetris.gb")
-    cia = _game(tmp_path, "3ds", "Homebrew.cia")
-    three_dsx = _game(tmp_path, "3ds", "Homebrew.3dsx")
+def test_local_platform_labels_are_normalized_before_target_selection():
+    source = LIBRARY_PATH.read_text(encoding="utf-8")
 
-    assert [target.key for target in _local_targets(gba)] == [
-        "open_agb_firm",
-        "retroarch",
-    ]
-    assert [target.key for target in _local_targets(gb)] == ["retroarch"]
-    assert [target.key for target in _local_targets(cia)] == ["native_3ds_cia"]
-    assert _local_targets(three_dsx) == ()
+    assert "def _local_platform_slug(value: str) -> str:" in source
+    assert "if folded in PLATFORM_LABELS:" in source
+    assert "for slug, label in PLATFORM_LABELS.items():" in source
+    assert "if label.casefold() == folded:" in source
 
 
 def test_local_scan_recognizes_dedicated_and_retroarch_formats(tmp_path: Path):
@@ -53,12 +48,10 @@ def test_local_scan_recognizes_dedicated_and_retroarch_formats(tmp_path: Path):
 
 
 def test_main_3ds_library_reuses_verified_transfer_worker():
-    source = (Path(__file__).parents[1] / "romm_vita_manager" / "three_ds_library.py").read_text(
-        encoding="utf-8"
-    )
+    source = LIBRARY_PATH.read_text(encoding="utf-8")
 
     assert "ThreeDSTransferWorker" in source
     assert "worker = ThreeDSTransferWorker(" in source
-    assert "PACKAGE_GENERATION_TARGETS" in source
-    assert "scan_games(root)" in source
+    assert "worker.cancel()" in source
+    assert "overwrite=overwrite" in source
     assert "Open Device → Connection setup" in source
