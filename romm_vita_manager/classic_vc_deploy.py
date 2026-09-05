@@ -27,8 +27,9 @@ from .design_tokens import DARK, brand_for_platform
 from .fbi_remote_install import FBIUrlServer
 from .firewall import FirewallError, FirewallRule, allow_temporary, remove_temporary
 from .hshop_catalog import HShopVcRelease, find_official_vc_release
-from .romm_remote import RomMRemoteGame, download_artwork, download_rom
+from .romm_remote import RomMRemoteGame, download_artwork
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
+from .three_ds_payload import download_target_payload
 from .three_ds_storage import ThreeDSMountedStorageBackend, configured_3ds_storage_root
 from .three_ds_targets import default_destination
 from .ui_components import AccentButton, SurfaceCard
@@ -43,13 +44,6 @@ _FAMILY_LABELS = {
     "nes": "NES",
     "gamegear": "Game Gear",
     "snes": "Super Nintendo",
-}
-_FAMILY_SUFFIXES = {
-    "gb": ".gb",
-    "gbc": ".gbc",
-    "nes": ".nes",
-    "gamegear": ".gg",
-    "snes": ".sfc",
 }
 
 
@@ -96,6 +90,7 @@ class ClassicVcDeployWorker(QThread):
         self.fbi_server: FBIUrlServer | None = None
         self.firewall_rule: FirewallRule | None = None
         self.temp_rom: Path | None = None
+        self.payload_workspace = None
         self._transfer_total = 0
 
     def cancel(self) -> None:
@@ -129,16 +124,17 @@ class ClassicVcDeployWorker(QThread):
             if not url or not token:
                 raise ValueError("RomM Server is not configured.")
 
-            suffix = _FAMILY_SUFFIXES[self.family]
-            handle = tempfile.NamedTemporaryFile(prefix=f"rommheld-{self.family}-", suffix=suffix, delete=False)
-            handle.close()
-            self.temp_rom = Path(handle.name)
-            self.status_changed.emit(f"Downloading {self.game.name} from RomM…")
-            download_rom(
+            self.payload_workspace = tempfile.TemporaryDirectory(
+                prefix=f"rommheld-{self.family}-source-"
+            )
+            self.status_changed.emit(f"Downloading and preparing {self.game.name} from RomM…")
+            self.temp_rom = download_target_payload(
                 url,
                 token,
                 self.game,
-                self.temp_rom,
+                "vc_cia",
+                self.family,
+                Path(self.payload_workspace.name),
                 cancel_event=self.cancel_event,
             )
             self._check_cancelled()
@@ -257,6 +253,8 @@ class ClassicVcDeployWorker(QThread):
                 self.backend.close()
             if self.temp_rom is not None:
                 self.temp_rom.unlink(missing_ok=True)
+            if self.payload_workspace is not None:
+                self.payload_workspace.cleanup()
 
 
 class ClassicVcDeployDialog(QDialog):
