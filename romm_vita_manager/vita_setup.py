@@ -140,7 +140,7 @@ class VitaSetupDialog(QDialog):
         software_card.content.addWidget(self._card_title("2 · Prepare runtime software"))
         software_card.content.addWidget(
             self._secondary(
-                "Detected software is shown as device evidence. Package actions download and verify first; staging is separate, and archive packages are never extracted blindly."
+                "Detected software is shown as device evidence. Package actions verify SHA-256 when the upstream source provides a digest; staging is separate, and archive packages are never extracted blindly."
             )
         )
 
@@ -305,7 +305,7 @@ class VitaSetupDialog(QDialog):
             reply = QMessageBox.question(
                 self,
                 "Download complete",
-                f"{package.name} was downloaded and verified. Stage it to the Vita now?",
+                f"{package.name} was downloaded successfully. Stage it to the Vita now?",
             )
             if reply == QMessageBox.StandardButton.Yes:
                 self._start_worker(package.key, "stage")
