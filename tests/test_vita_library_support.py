@@ -129,3 +129,54 @@ def test_non_vpk_vita_input_requires_review(tmp_path: Path):
 
     assert label == "PS Vita deployment requires a VPK"
     assert mode == "unknown"
+
+
+def test_canonical_retroflow_mapping_is_used_when_config_has_no_override(tmp_path: Path):
+    game = _game(Path("/library/gba/Metroid Fusion.gba"), "gba")
+
+    label, target, mode = destination_target(tmp_path, game, {})
+
+    assert label == "RetroFlow / Nintendo - Game Boy Advance"
+    assert mode == "file"
+    assert target == (
+        tmp_path
+        / "data"
+        / "RetroFlow"
+        / "ROMS"
+        / "Nintendo - Game Boy Advance"
+        / "Metroid Fusion.gba"
+    )
+
+
+def test_user_retroflow_mapping_overrides_canonical_default(tmp_path: Path):
+    game = _game(Path("/library/gba/Metroid Fusion.gba"), "gba")
+
+    label, target, mode = destination_target(
+        tmp_path,
+        game,
+        {"gba": "My GBA Folder"},
+    )
+
+    assert label == "RetroFlow / My GBA Folder"
+    assert mode == "file"
+    assert target == (
+        tmp_path
+        / "data"
+        / "RetroFlow"
+        / "ROMS"
+        / "My GBA Folder"
+        / "Metroid Fusion.gba"
+    )
+
+
+def test_explicit_none_mapping_disables_canonical_default(tmp_path: Path):
+    game = _game(Path("/library/gba/Metroid Fusion.gba"), "gba")
+
+    label, _destination, mode = destination_for_game(
+        tmp_path,
+        game,
+        {"gba": None},
+    )
+
+    assert label == "Needs destination review"
+    assert mode == "unknown"
