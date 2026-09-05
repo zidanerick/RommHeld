@@ -137,8 +137,9 @@ Current primary workspace navigation is:
 
 1. Library
 2. Device
-3. Setup
-4. Settings
+3. Settings
+
+Setup is contextual device readiness rather than a permanent destination. Launch console-specific setup from Device when the user needs to configure storage, connectivity, runtime software or supporting homebrew.
 
 `Queue` must not appear until RommHeld has a real persistent queue with useful per-item state. `Tools` must not appear merely to duplicate actions already available from Library or Device. When a tool is genuinely secondary or advanced, prefer a contextual action or progressive disclosure before adding another permanent navigation destination.
 
