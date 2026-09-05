@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from .config import save_config
 from .design_tokens import DARK, brand_for_platform
 from .platform_services import temp_dir
 from .storage_detection import detect_3ds_sd_candidates
@@ -150,8 +151,9 @@ class ThreeDSSetupDialog(QDialog):
         saved = config.get("devices", {}).get("3ds", {})
         self._ftp_host = str(saved.get("host", "")).strip()
         self._ftp_port = saved.get("port", 5000)
+        saved_storage_root = str(saved.get("storage_root", "")).strip()
 
-        self.root_edit = QLineEdit()
+        self.root_edit = QLineEdit(saved_storage_root)
         self.root_edit.setPlaceholderText("Mounted Nintendo 3DS SD-card root")
         self.root_edit.textChanged.connect(self._storage_selection_changed)
 
@@ -172,7 +174,9 @@ class ThreeDSSetupDialog(QDialog):
         self.candidate_note.setWordWrap(True)
         self.candidate_note.setProperty("secondary", True)
 
-        self.sd_status = StatusPill("SD card", "Not selected")
+        self.sd_status = StatusPill(
+            "SD card", "Not validated" if saved_storage_root else "Not selected"
+        )
         self.ftp_status = StatusPill(
             "FTP", "Configured" if self._ftp_host else "Needs setup"
         )
@@ -180,7 +184,7 @@ class ThreeDSSetupDialog(QDialog):
 
         header = SectionHeader(
             "Prepare your Nintendo 3DS",
-            "Three separate checks matter: validate the SD card, configure FTP for file transfers, then confirm FBI separately if you want Remote Install.",
+            "Validate a mounted SD card for direct/offline file access, configure ftpd for live-console transfers, then confirm FBI separately if you want Remote Install.",
         )
         status_row = QHBoxLayout()
         status_row.setSpacing(8)
@@ -193,7 +197,7 @@ class ThreeDSSetupDialog(QDialog):
         storage_card.content.addWidget(self._card_title("1 · Validate the SD card"))
         storage_card.content.addWidget(
             self._secondary(
-                "This identifies a mounted 3DS SD card conservatively before RommHeld stages or inspects files. It does not install anything."
+                "Use the SD or microSD card mounted through a card reader when you want direct filesystem access. RommHeld remembers only a medium or high-confidence 3DS root and will not write to an unrecognised directory."
             )
         )
 
@@ -223,7 +227,7 @@ class ThreeDSSetupDialog(QDialog):
         ftp_card.content.addWidget(self._card_title("2 · Configure FTP file transfer"))
         ftp_card.content.addWidget(
             self._secondary(
-                "FTP is only the transport used for filesystem transfers. A working FTP connection does not imply that FBI is installed or ready for Remote Install."
+                "FTP is the wireless live-console filesystem transport. It is separate from mounted-SD access and a working FTP connection does not imply that FBI is installed or ready for Remote Install."
             )
         )
         ftp_card.content.addWidget(
@@ -331,6 +335,8 @@ class ThreeDSSetupDialog(QDialog):
         layout.addLayout(close_row)
 
         self.refresh_candidates()
+        if saved_storage_root:
+            self.validate_sd()
         self.refresh_components()
 
     def _card_title(self, text: str) -> QLabel:
@@ -360,13 +366,18 @@ class ThreeDSSetupDialog(QDialog):
         self.fbi_evidence.setText("Validate an SD card to check for FBI-related files.")
 
     def choose_root(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Choose mounted 3DS SD-card root")
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Choose mounted 3DS SD-card root",
+            self.root_edit.text().strip(),
+        )
         if path:
             self.root_edit.setText(path)
             self.validate_sd()
             self.refresh_components()
 
     def detect_sd(self) -> None:
+        selected_path = self.root_edit.text().strip()
         candidates = detect_3ds_sd_candidates()
         self.candidate_combo.blockSignals(True)
         self.candidate_combo.clear()
@@ -376,10 +387,13 @@ class ThreeDSSetupDialog(QDialog):
                 f"{label} — {candidate.root} — {candidate.validation.confidence} confidence",
                 str(candidate.root),
             )
+        if candidates:
+            match = self.candidate_combo.findData(selected_path) if selected_path else -1
+            self.candidate_combo.setCurrentIndex(match if match >= 0 else 0)
         self.candidate_combo.blockSignals(False)
         if candidates:
-            self.candidate_combo.setCurrentIndex(0)
-            self.use_candidate(0)
+            if not selected_path:
+                self.use_candidate(self.candidate_combo.currentIndex())
             self.candidate_note.setText(
                 f"Found {len(candidates)} possible 3DS SD volume(s). Review the validation confidence before using one."
             )
@@ -398,6 +412,16 @@ class ThreeDSSetupDialog(QDialog):
             self.validate_sd()
             self.refresh_components()
 
+    def _save_storage_root(self, root: Path) -> None:
+        cfg = dict(self.config)
+        devices = dict(cfg.get("devices", {}))
+        device = dict(devices.get("3ds", {}))
+        device["storage_root"] = str(root.resolve())
+        devices["3ds"] = device
+        cfg["devices"] = devices
+        save_config(cfg)
+        self.config = cfg
+
     def validate_sd(self) -> None:
         raw = self.root_edit.text().strip()
         self.signature_list.clear()
@@ -407,14 +431,21 @@ class ThreeDSSetupDialog(QDialog):
             self.validation_status.setText("Choose or detect the mounted 3DS SD-card root first.")
             return
         try:
-            result = validate_3ds_sd(Path(raw))
+            root = Path(raw).expanduser()
+            result = validate_3ds_sd(root)
         except (OSError, ValueError) as exc:
             self.sd_status.set_value("Validation failed")
             self.validation_status.setText(f"Validation failed: {exc}")
             return
         self.sd_status.set_value(result.confidence.capitalize())
+        suffix = ""
+        if result.confidence in {"medium", "high"}:
+            self._save_storage_root(root)
+            suffix = " · saved for direct SD transfers"
+        else:
+            suffix = " · not saved for writes"
         self.validation_status.setText(
-            f"{result.kind} • {result.confidence} confidence • {result.matched_count} markers matched"
+            f"{result.kind} • {result.confidence} confidence • {result.matched_count} markers matched{suffix}"
         )
         for signature in result.signatures:
             self.signature_list.addItem(signature)
@@ -463,14 +494,20 @@ class ThreeDSSetupDialog(QDialog):
             )
             return
         root = Path(raw).expanduser()
-        if not root.is_dir():
+        try:
+            validation = validate_3ds_sd(root)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "3DS SD card unavailable", str(exc))
+            return
+        if validation.confidence not in {"medium", "high"}:
             QMessageBox.warning(
                 self,
-                "3DS SD card unavailable",
-                f"The selected SD-card root is not available: {root}",
+                "3DS SD card not recognised",
+                "Validate a medium or high-confidence Nintendo 3DS SD-card root before opening runtime readiness.",
             )
             return
-        ThreeDSReadinessDialog(root, needs_ftp=True, parent=self).exec()
+        self._save_storage_root(root)
+        ThreeDSReadinessDialog(root.resolve(), needs_ftp=True, parent=self).exec()
         self.validate_sd()
         self.refresh_components()
 
