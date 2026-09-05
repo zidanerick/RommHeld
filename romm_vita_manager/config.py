@@ -18,9 +18,10 @@ LEGACY_UNSCOPED_CONFIG_PATH = CONFIG_PATH.parent.parent / "config.json"
 DEFAULT_ROMM_ROOT = Path.home() / "RomM" / "roms" / "roms"
 
 # Preserve deployment identity/cache metadata across a first-run setup reset.
-# In particular, Virtual Console title-ID allocations must remain stable so a
-# settings reset cannot silently break upgrade/save continuity.
-_RESET_PRESERVED_KEYS = ("three_ds_vc", "gba_vc")
+# Virtual Console title-ID allocations and prepared donor-runtime cache records
+# must remain stable so reset cannot break upgrade/save continuity or orphan
+# reusable GBA/classic VC assets that still exist in the package cache.
+_RESET_PRESERVED_KEYS = ("three_ds_vc", "gba_vc", "classic_vc")
 _ROMMHELD_CONFIG_KEYS = {
     "setup_complete",
     "active_console",
@@ -31,6 +32,7 @@ _ROMMHELD_CONFIG_KEYS = {
     "runtime_preferences",
     "three_ds_vc",
     "gba_vc",
+    "classic_vc",
 }
 
 
