@@ -170,6 +170,27 @@ def application_stylesheet() -> str:
         spacing: 7px;
         color: {p.text_primary};
     }}
+    QRadioButton::indicator {{
+        width: 14px;
+        height: 14px;
+        border: 1px solid #8E8E93;
+        border-radius: 7px;
+        background: transparent;
+    }}
+    QRadioButton::indicator:hover {{
+        border-color: #C7C7CC;
+    }}
+    QRadioButton::indicator:checked {{
+        border-color: {p.text_primary};
+        background: qradialgradient(
+            cx:0.5, cy:0.5, radius:0.5,
+            fx:0.5, fy:0.5,
+            stop:0 {p.text_primary},
+            stop:0.38 {p.text_primary},
+            stop:0.44 transparent,
+            stop:1 transparent
+        );
+    }}
 
     QScrollArea {{
         border: none;
