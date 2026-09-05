@@ -67,6 +67,8 @@ def test_default_destinations_are_stable_and_explicit():
     assert default_destination("open_agb_firm", "gba", "Metroid Fusion.gba") == "/roms/gba/Metroid Fusion.gba"
     assert default_destination("native_gba", "gba", "Metroid Fusion.gba") == "/cias/Metroid Fusion.cia"
     assert default_destination("vc_cia", "gba", "Metroid Fusion.gba") == "/cias/Metroid Fusion.cia"
+    assert default_destination("retroarch", "gba", "Metroid Fusion.gba") == "/roms/gba/Metroid Fusion.gba"
+    assert default_destination("retroarch", "n64", "Mario 64.z64") == "/roms/n64/Mario 64.z64"
     assert default_destination("twilight", "nds", "Mario Kart DS.nds") == "/roms/nds/Mario Kart DS.nds"
     assert default_destination("red_viper", "virtualboy", "Wario Land.vb") == "/roms/virtualboy/Wario Land.vb"
     assert default_destination("daedalusx64", "n64", "Mario 64.z64") == "/3ds/DaedalusX64/Roms/Mario 64.z64"
