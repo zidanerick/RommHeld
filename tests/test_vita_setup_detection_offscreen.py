@@ -5,7 +5,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton
 
 from romm_vita_manager import vita_setup as vita_setup_module
 from romm_vita_manager.vita_setup import VitaSetupDialog
@@ -23,6 +23,10 @@ def _app() -> QApplication:
 
 def _labels(dialog: VitaSetupDialog) -> list[str]:
     return [label.text() for label in dialog.findChildren(QLabel)]
+
+
+def _buttons(dialog: VitaSetupDialog) -> list[str]:
+    return [button.text() for button in dialog.findChildren(QPushButton)]
 
 
 def test_vita_setup_labels_usb_filesystem_evidence_as_detected(
@@ -43,6 +47,7 @@ def test_vita_setup_labels_usb_filesystem_evidence_as_detected(
     app.processEvents()
 
     labels = _labels(dialog)
+    buttons = _buttons(dialog)
 
     assert any(
         text.startswith("Detected · Preferred route for supported RetroAchievements systems")
@@ -53,6 +58,8 @@ def test_vita_setup_labels_usb_filesystem_evidence_as_detected(
         for text in labels
     )
     assert not any(text.startswith("Installed ·") for text in labels)
+    assert "Prepare package" in buttons
+    assert "Inspect package" not in buttons
 
     dialog.close()
     dialog.deleteLater()
