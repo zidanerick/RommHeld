@@ -36,8 +36,39 @@ def load_config() -> dict:
     return {}
 
 
+def _preserve_independent_device_fields(config: dict) -> dict:
+    """Preserve separately owned device settings omitted by focused editors.
+
+    The 3DS FTP manager historically replaces its own `devices.3ds` mapping.
+    Mounted-SD state is an independent transport setting, so an FTP-only save
+    must not erase it. Explicitly supplying `storage_root` still changes or
+    clears the value normally.
+    """
+    existing = _load_path(CONFIG_PATH)
+    existing_3ds = existing.get("devices", {}).get("3ds", {})
+    old_root = existing_3ds.get("storage_root") if isinstance(existing_3ds, dict) else None
+    if old_root is None:
+        return config
+
+    devices = config.get("devices")
+    if not isinstance(devices, dict):
+        return config
+    three_ds = devices.get("3ds")
+    if not isinstance(three_ds, dict) or "storage_root" in three_ds:
+        return config
+
+    updated = dict(config)
+    updated_devices = dict(devices)
+    updated_3ds = dict(three_ds)
+    updated_3ds["storage_root"] = old_root
+    updated_devices["3ds"] = updated_3ds
+    updated["devices"] = updated_devices
+    return updated
+
+
 def save_config(config: dict) -> None:
     APP_DIR.mkdir(parents=True, exist_ok=True)
+    config = _preserve_independent_device_fields(config)
     temporary = CONFIG_PATH.with_suffix(".tmp")
     temporary.write_text(json.dumps(config, indent=2), encoding="utf-8")
     temporary.replace(CONFIG_PATH)
