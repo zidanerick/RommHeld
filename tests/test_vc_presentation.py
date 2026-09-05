@@ -20,24 +20,37 @@ def test_remaining_vc_profiles_match_supplied_retail_donor_textures() -> None:
 
     assert nes.artwork_texture == "COMMON1"
     assert nes.badge_texture == "COMMON2"
+    assert nes.badge_size == (256, 64)
     assert nes.show_release_year
+
     assert snes.artwork_texture == "COMMON1"
-    assert snes.badge_texture is None
+    assert snes.badge_texture == "EUR_EN2"
+    assert snes.badge_size == (256, 64)
+    assert "EUR_RU2" in snes.badge_texture_alternates
+    assert snes.show_release_year
+
     assert gamegear.artwork_texture == "COMMON2"
     assert gamegear.badge_texture == "TitlePlate"
+    assert gamegear.badge_size == (256, 64)
     assert gamegear.show_release_year
     assert nes.icon_mode == "framed"
     assert snes.icon_mode == "framed"
     assert gamegear.icon_mode == "full"
 
 
-def test_snes_profile_has_no_separate_vc_badge() -> None:
-    assert presentation.prepare_official_vc_badge(
-        b"not-even-parsed",
-        "Synthetic Game",
-        "snes",
-        release_year=1994,
-    ) is None
+def test_snes_profile_patches_every_supplied_european_locale_plate() -> None:
+    names = presentation.badge_texture_names(presentation.presentation_profile("snes"))
+
+    assert names == (
+        "EUR_EN2",
+        "EUR_FR2",
+        "EUR_GE2",
+        "EUR_IT2",
+        "EUR_SP2",
+        "EUR_DU2",
+        "EUR_PO2",
+        "EUR_RU2",
+    )
 
 
 def test_rgb565_texture_decoder_handles_tiled_primary_mip() -> None:
@@ -51,9 +64,7 @@ def test_rgb565_texture_decoder_handles_tiled_primary_mip() -> None:
     assert result.getpixel((7, 7)) == (255, 0, 0)
 
 
-def test_l4_texture_decoder_handles_retail_nes_plaque_format() -> None:
-    # Renegade's localized COMMON2 title plaques use CGFX/PICA format 0x0A
-    # (L4), with the first swizzled texel in the low nibble.
+def test_l4_texture_decoder_handles_retail_nes_dummy_texture_format() -> None:
     raw = bytearray(32)
     raw[0] = 0xE1
     result = presentation._decode_l4(bytes(raw), 8, 8)
@@ -72,7 +83,7 @@ def test_gbc_front_artwork_preserves_donor_cartridge_frame(monkeypatch):
     monkeypatch.setattr(
         presentation,
         "_donor_texture_image",
-        lambda banner, name: donor.copy(),
+        lambda banner, name, **kwargs: donor.copy(),
     )
     result = Image.open(
         io.BytesIO(
@@ -94,7 +105,7 @@ def test_gamegear_front_artwork_uses_common2_game_texture(monkeypatch):
     artwork = Image.new("RGB", (120, 180), (30, 100, 220))
     seen: list[str] = []
 
-    def texture(_banner: bytes, name: str) -> Image.Image:
+    def texture(_banner: bytes, name: str, **_kwargs) -> Image.Image:
         seen.append(name)
         return donor.copy()
 
@@ -112,6 +123,27 @@ def test_gamegear_front_artwork_uses_common2_game_texture(monkeypatch):
     assert result.getpixel((64, 64))[:3] == (30, 100, 220)
 
 
+def test_donor_texture_selection_skips_wrong_size_same_name(monkeypatch) -> None:
+    common = b"common"
+    english = b"english"
+    monkeypatch.setattr(presentation, "_banner_cgfx_slots", lambda _banner: [common, english])
+
+    def texture(scene: bytes, name: str) -> Image.Image:
+        assert name == "COMMON2"
+        if scene == common:
+            return Image.new("L", (8, 8), 255)
+        return Image.new("LA", (256, 64), (220, 255))
+
+    monkeypatch.setattr(presentation, "_texture_image_from_cgfx", texture)
+    selected = presentation._donor_texture_image(
+        b"synthetic-donor",
+        "COMMON2",
+        expected_size=(256, 64),
+    )
+
+    assert selected.size == (256, 64)
+
+
 def test_official_badge_retains_left_vc_chrome_and_replaces_title(monkeypatch):
     donor = Image.new("LA", (256, 64), (220, 255))
     draw = ImageDraw.Draw(donor)
@@ -121,8 +153,8 @@ def test_official_badge_retains_left_vc_chrome_and_replaces_title(monkeypatch):
 
     monkeypatch.setattr(
         presentation,
-        "_donor_texture_image",
-        lambda banner, name: donor.copy(),
+        "_donor_badge_texture_image",
+        lambda banner, profile: donor.copy(),
     )
     badge = presentation.prepare_official_vc_badge(
         b"synthetic-donor",
@@ -138,17 +170,13 @@ def test_official_badge_retains_left_vc_chrome_and_replaces_title(monkeypatch):
     assert result.crop((100, 5, 250, 59)).getchannel("L").getextrema()[0] < 80
 
 
-def test_nes_badge_uses_localized_common2_template(monkeypatch) -> None:
-    # Retail Renegade has no COMMON2 in its common CGFX; every populated
-    # language scene contributes the 256x64 COMMON2 plaque that HOME Menu
-    # displays below the 3D NES/TV. This regression exists because dropping
-    # those localized slots produced a completely blank white panel on hardware.
+def test_nes_badge_uses_localized_256x64_template(monkeypatch) -> None:
     donor = Image.new("LA", (256, 64), (220, 255))
     ImageDraw.Draw(donor).rectangle((0, 0, 94, 63), fill=(90, 255))
-    seen: list[str] = []
+    seen: list[tuple[str, tuple[int, int] | None]] = []
 
-    def texture(_banner: bytes, name: str) -> Image.Image:
-        seen.append(name)
+    def texture(_banner: bytes, name: str, *, expected_size=None) -> Image.Image:
+        seen.append((name, expected_size))
         return donor.copy()
 
     monkeypatch.setattr(presentation, "_donor_texture_image", texture)
@@ -159,16 +187,17 @@ def test_nes_badge_uses_localized_common2_template(monkeypatch) -> None:
         release_year=1988,
     )
     assert badge is not None
-    assert seen == ["COMMON2"]
+    assert seen == [("COMMON2", (256, 64))]
+    assert Image.open(io.BytesIO(badge)).size == (256, 64)
 
 
 def test_gamegear_badge_uses_titleplate_template(monkeypatch) -> None:
     donor = Image.new("LA", (256, 64), (220, 255))
     ImageDraw.Draw(donor).rectangle((0, 0, 94, 63), fill=(90, 255))
-    seen: list[str] = []
+    seen: list[tuple[str, tuple[int, int] | None]] = []
 
-    def texture(_banner: bytes, name: str) -> Image.Image:
-        seen.append(name)
+    def texture(_banner: bytes, name: str, *, expected_size=None) -> Image.Image:
+        seen.append((name, expected_size))
         return donor.copy()
 
     monkeypatch.setattr(presentation, "_donor_texture_image", texture)
@@ -179,7 +208,30 @@ def test_gamegear_badge_uses_titleplate_template(monkeypatch) -> None:
         release_year=1992,
     )
     assert badge is not None
-    assert seen == ["TitlePlate"]
+    assert seen == [("TitlePlate", (256, 64))]
+
+
+def test_snes_badge_uses_english_plate_template_first(monkeypatch) -> None:
+    donor = Image.new("LA", (256, 64), (220, 255))
+    ImageDraw.Draw(donor).rectangle((0, 0, 94, 63), fill=(90, 255))
+    seen: list[str] = []
+
+    def texture(_banner: bytes, name: str, *, expected_size=None) -> Image.Image:
+        seen.append(name)
+        if name != "EUR_EN2":
+            raise ValueError("unexpected fallback")
+        assert expected_size == (256, 64)
+        return donor.copy()
+
+    monkeypatch.setattr(presentation, "_donor_texture_image", texture)
+    badge = presentation.prepare_official_vc_badge(
+        b"synthetic-donor",
+        "Synthetic SNES Game",
+        "snes",
+        release_year=1995,
+    )
+    assert badge is not None
+    assert seen == ["EUR_EN2"]
 
 
 def _synthetic_donor_icon(frame_colour=(20, 20, 20), interior_colour=(180, 30, 30)) -> tuple[bytes, Image.Image]:
