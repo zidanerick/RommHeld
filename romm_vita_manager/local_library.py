@@ -62,7 +62,7 @@ class LocalLibraryWidget(QWidget):
         self.search.setPlaceholderText("Search games")
         self.search.setClearButtonEnabled(True)
         self.platforms = QComboBox()
-        self.platforms.addItem("All platforms")
+        self.platforms.addItem("All platforms", None)
         self.status_filter = QComboBox()
         self.status_filter.addItems(
             [
@@ -252,30 +252,30 @@ class LocalLibraryWidget(QWidget):
         self._apply_filters()
 
     def _rebuild_platform_filter(self) -> None:
-        current = self.platforms.currentText() if self.platforms.count() else "All platforms"
+        current = self.platforms.currentData() if self.platforms.count() else None
         self.platforms.blockSignals(True)
         self.platforms.clear()
-        self.platforms.addItem("All platforms")
-        self.platforms.addItems(
-            sorted(
-                {game.source_platform for game in self.games},
-                key=lambda value: platform_label(value).lower(),
-            )
+        self.platforms.addItem("All platforms", None)
+        platform_keys = sorted(
+            {game.source_platform for game in self.games},
+            key=lambda value: platform_label(value).lower(),
         )
-        index = self.platforms.findText(current)
+        for key in platform_keys:
+            self.platforms.addItem(platform_label(key), key)
+        index = self.platforms.findData(current) if current is not None else 0
         self.platforms.setCurrentIndex(index if index >= 0 else 0)
         self.platforms.blockSignals(False)
 
     def _apply_filters(self) -> None:
         """Filter the in-memory scan without repeatedly walking the ROM tree."""
         query = self.search.text().strip().casefold()
-        platform = self.platforms.currentText()
+        platform = self.platforms.currentData()
         wanted = self.status_filter.currentText()
         filtered: list[Game] = []
         for game in self.games:
             if query and query not in game.name.casefold():
                 continue
-            if platform != "All platforms" and game.source_platform != platform:
+            if platform is not None and game.source_platform != platform:
                 continue
             if wanted != "All games":
                 state, _detail = self._game_status(game)
