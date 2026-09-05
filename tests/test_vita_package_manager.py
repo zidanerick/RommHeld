@@ -2,7 +2,7 @@ from pathlib import Path
 
 from romm_vita_manager import package_manager
 from romm_vita_manager.config import package_cache_dir
-from romm_vita_manager.emulators import detect_emulators
+from romm_vita_manager.emulators import EMULATORS, detect_emulators
 from romm_vita_manager.package_manager import (
     PACKAGES,
     RETROARCH_STABLE_VERSION,
@@ -21,6 +21,18 @@ def test_retroarch_uses_current_stable_vita_build():
     assert f"/stable/{RETROARCH_STABLE_VERSION}/playstation/vita/RetroArch.vpk" in PACKAGES["retroarch"].source
     assert f"/stable/{RETROARCH_STABLE_VERSION}/playstation/vita/RetroArch_data.7z" in PACKAGES["retroarch-data"].source
     assert PACKAGES["retroarch-data"].requires_archive_review is True
+
+
+def test_retroarch_app_and_data_are_separate_setup_components(tmp_path: Path):
+    definitions = {definition.key: definition for definition in EMULATORS}
+    assert definitions["retroarch"].package_keys == ("retroarch",)
+    assert definitions["retroarch-data"].package_keys == ("retroarch-data",)
+
+    (tmp_path / "data" / "retroarch").mkdir(parents=True)
+    detected = detect_emulators(tmp_path)
+
+    assert detected["retroarch"] is False
+    assert detected["retroarch-data"] is True
 
 
 def test_daedalus_uses_vita_native_upstream_vpk():
@@ -70,6 +82,7 @@ def test_retroarch_data_directory_does_not_claim_app_is_installed(tmp_path: Path
     detected = detect_emulators(tmp_path)
 
     assert detected["retroarch"] is False
+    assert detected["retroarch-data"] is True
 
 
 def test_additional_vita_runtime_title_ids_are_detected(tmp_path: Path):
