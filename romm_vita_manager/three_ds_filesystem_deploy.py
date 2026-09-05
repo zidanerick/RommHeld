@@ -21,8 +21,10 @@ from .library_sources import get_library_source
 from .mappings import normalize_platform_slug, platform_label
 from .models import Game
 from .romm_remote import RomMRemoteGame
+from .three_ds_apps import APP_BY_KEY
 from .three_ds_ftp import ThreeDSFtpSettings
 from .three_ds_manager import ThreeDSTransferWorker
+from .three_ds_readiness import TARGET_RUNTIME_APPS, evaluate_target_runtime
 from .three_ds_storage import configured_3ds_storage_root
 from .three_ds_storage_worker import ThreeDSMountedTransferWorker
 from .three_ds_targets import default_destination
@@ -79,8 +81,8 @@ class ThreeDSFilesystemDeployDialog(QDialog):
         )
 
         self.setWindowTitle("Deploy to Nintendo 3DS")
-        self.resize(720, 500)
-        self.setMinimumSize(620, 450)
+        self.resize(720, 540)
+        self.setMinimumSize(620, 480)
 
         header = SectionHeader(
             "Deploy to Nintendo 3DS",
@@ -94,6 +96,14 @@ class ThreeDSFilesystemDeployDialog(QDialog):
                 f"{_platform_name(game)} · {game.size:,} bytes\nDestination: {self.destination}"
             )
         )
+        self.runtime_status = StatusPill("Runtime", "Not checked")
+        self.runtime_detail = QLabel()
+        self.runtime_detail.setWordWrap(True)
+        self.runtime_detail.setStyleSheet(f"color:{DARK.text_secondary};")
+        runtime_form = QFormLayout()
+        runtime_form.setContentsMargins(0, 4, 0, 0)
+        runtime_form.addRow(self.runtime_status, self.runtime_detail)
+        summary.content.addLayout(runtime_form)
 
         route_card = SurfaceCard()
         route_card.content.addWidget(self._card_title("Transfer method"))
@@ -162,6 +172,7 @@ class ThreeDSFilesystemDeployDialog(QDialog):
         layout.addStretch(1)
         layout.addLayout(close_row)
 
+        self._refresh_runtime_preflight()
         self._transport_changed()
 
     def _card_title(self, text: str) -> QLabel:
@@ -178,6 +189,39 @@ class ThreeDSFilesystemDeployDialog(QDialog):
             f"color:{DARK.text_secondary};background:transparent;"
         )
         return label
+
+    def _refresh_runtime_preflight(self) -> None:
+        app_key = TARGET_RUNTIME_APPS.get(self.target_key)
+        if app_key is None:
+            self.runtime_status.set_value("Not required")
+            self.runtime_detail.setText(
+                "This filesystem target does not require a separately managed emulator/runtime."
+            )
+            return
+
+        app_name = APP_BY_KEY[app_key].name
+        root = configured_3ds_storage_root(self.config)
+        self.storage_root = root
+        if root is None:
+            self.runtime_status.set_value("Not checked")
+            self.runtime_detail.setText(
+                f"No mounted 3DS SD card is currently available to inspect {app_name}. "
+                "The file can still be transferred with ftpd, but confirm the selected runtime on the console before expecting it to launch."
+            )
+            return
+
+        preflight = evaluate_target_runtime(root, self.target_key)
+        if preflight is None:
+            self.runtime_status.set_value("Not required")
+            self.runtime_detail.setText("No separate runtime check is required for this target.")
+            return
+        if preflight.state == "detected":
+            self.runtime_status.set_value("Detected")
+        elif preflight.state == "confirm_on_console":
+            self.runtime_status.set_value("Confirm on console")
+        else:
+            self.runtime_status.set_value("Runtime missing")
+        self.runtime_detail.setText(preflight.note)
 
     def _selected_transport(self) -> str:
         return str(self.transport_combo.currentData() or "")
@@ -370,6 +414,7 @@ class ThreeDSFilesystemDeployDialog(QDialog):
             if answer == QMessageBox.StandardButton.Yes:
                 self.start_transfer(overwrite=True)
                 return
+        self._refresh_runtime_preflight()
         self._transport_changed(update_activity=False)
 
     def _reset_after_failure(self, message: str) -> None:
