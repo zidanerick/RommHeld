@@ -98,3 +98,11 @@ def test_runtime_preference_is_persisted_and_3ds_ra_remains_selectable() -> None
     assert 'if self.workspace_key == "3ds" and option.key == "retroachievements":' in source
     assert 'radio.setEnabled(False)' not in source
     assert 'Prefer RetroArch where the selected 3DS platform exposes a supported RetroArch route.' in source
+
+
+def test_shared_theme_keeps_keyboard_focus_visible() -> None:
+    source = _source("romm_vita_manager/theme.py")
+
+    assert "QPushButton:focus" in source
+    assert 'QPushButton[quiet="true"]:focus' in source
+    assert "QListWidget:focus, QListView:focus" in source
