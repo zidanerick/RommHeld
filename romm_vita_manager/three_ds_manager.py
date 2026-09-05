@@ -28,16 +28,43 @@ from PySide6.QtWidgets import (
 from .config import save_config
 from .design_tokens import DARK, brand_for_platform
 from .library_sources import get_library_source
+from .mappings import normalize_platform_slug
 from .preferences import get_device_preference
 from .romm import scan_games
 from .romm_remote import RomMRemoteGame, download_artwork, download_rom
 from .romm_remote_worker import RomMLibraryWorker
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
-from .three_ds_targets import available_targets, default_destination, preferred_target_key
+from .three_ds_targets import (
+    available_targets_for_file,
+    default_destination,
+    preferred_target_key,
+)
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 
 
 NINTENDO_RED = brand_for_platform("3ds").accent
+PACKAGE_GENERATION_TARGETS = frozenset({"native_gba", "vc_cia"})
+
+
+def _platform_slug(game) -> str:
+    if isinstance(game, RomMRemoteGame):
+        return str(game.platform_slug or game.platform).strip().lower()
+    return normalize_platform_slug(game.source_platform)
+
+
+def _filename(game) -> str:
+    return game.filename if isinstance(game, RomMRemoteGame) else game.path.name
+
+
+def _targets_for_game(game):
+    targets = available_targets_for_file(_platform_slug(game), _filename(game))
+    if not isinstance(game, RomMRemoteGame):
+        targets = tuple(
+            target
+            for target in targets
+            if target.key not in PACKAGE_GENERATION_TARGETS
+        )
+    return targets
 
 
 class ThreeDSConnectionWorker(QThread):
@@ -507,7 +534,7 @@ class ThreeDSManagerDialog(QDialog):
             self.status.setText("Local library unavailable.")
             self._update_controls()
             return
-        games = list(scan_games(root))
+        games = [game for game in scan_games(root) if _targets_for_game(game)]
         self._games = games
         self.library_status.set_value(f"{len(games)} games")
         self.source_label.setText(f"Local library • {root}")
@@ -571,53 +598,61 @@ class ThreeDSManagerDialog(QDialog):
             self._update_controls()
             return
 
-        if isinstance(game, RomMRemoteGame):
-            targets = available_targets(game.platform_slug)
-            self.details.setText(
-                f"{game.name}\n{game.platform} ({game.platform_slug}) • {game.size:,} bytes"
-            )
-            for target in targets:
-                self.target_combo.addItem(target.label, target.key)
-            self.target_combo.blockSignals(False)
-            if targets:
-                preference = get_device_preference(self.config, "3ds")
-                preferred = preferred_target_key(game.platform_slug, preference)
-                index = next(
-                    (
-                        i
-                        for i in range(self.target_combo.count())
-                        if self.target_combo.itemData(i) == preferred
-                    ),
-                    0,
-                )
-                self.target_combo.setCurrentIndex(index)
-            self._load_artwork(game)
-            self.target_changed()
-            return
-
-        self.target_combo.addItem("RetroArch ROM", "retroarch")
+        targets = _targets_for_game(game)
+        platform_slug = _platform_slug(game)
+        platform_name = (
+            game.platform if isinstance(game, RomMRemoteGame) else str(game.source_platform)
+        )
+        self.details.setText(
+            f"{game.name}\n{platform_name} ({platform_slug}) • {game.size:,} bytes"
+        )
+        for target in targets:
+            self.target_combo.addItem(target.label, target.key)
         self.target_combo.blockSignals(False)
-        self.artwork.clear()
-        self.artwork.setText("Local file")
-        self.details.setText(f"{game.name}\nLocal library file")
+
+        if targets:
+            preference = get_device_preference(self.config, "3ds")
+            preferred = preferred_target_key(platform_slug, preference)
+            index = next(
+                (
+                    i
+                    for i in range(self.target_combo.count())
+                    if self.target_combo.itemData(i) == preferred
+                ),
+                0,
+            )
+            self.target_combo.setCurrentIndex(index)
+        else:
+            self.destination_edit.clear()
+            self.details.setText(
+                f"{game.name}\n{platform_name} ({platform_slug}) • {game.size:,} bytes"
+                "\n\nNo safe deployment route is available for this file format. "
+                "An existing Nintendo 3DS application must be supplied as a .cia file."
+            )
+
+        if isinstance(game, RomMRemoteGame):
+            self._load_artwork(game)
+        else:
+            self.artwork.clear()
+            self.artwork.setText("Local file")
         self.target_changed()
 
     def target_changed(self) -> None:
         game = self._selected_game()
         if game is None or self.target_combo.count() == 0:
+            self.destination_edit.clear()
+            self._update_controls()
             return
         target_key = str(self.target_combo.currentData())
-        is_remote = isinstance(game, RomMRemoteGame)
-        platform_slug = (
-            game.platform_slug if is_remote else str(game.source_platform).lower()
+        platform_slug = _platform_slug(game)
+        platform_name = (
+            game.platform if isinstance(game, RomMRemoteGame) else str(game.source_platform)
         )
-        platform_name = game.platform if is_remote else str(game.source_platform)
-        filename = game.filename if is_remote else game.path.name
         self.destination_edit.setText(
-            default_destination(target_key, platform_slug, filename)
+            default_destination(target_key, platform_slug, _filename(game))
         )
         target = next(
-            (t for t in available_targets(platform_slug) if t.key == target_key),
+            (t for t in _targets_for_game(game) if t.key == target_key),
             None,
         )
         if target is not None:
@@ -691,12 +726,14 @@ class ThreeDSManagerDialog(QDialog):
         )
         library_busy = bool(self.library_worker and self.library_worker.isRunning())
         selected = self._selected_game() is not None
+        has_target = self.target_combo.count() > 0
         target_key = str(self.target_combo.currentData() or "")
-        target_uses_package_dialog = target_key in {"native_gba", "vc_cia"}
+        target_uses_package_dialog = target_key in PACKAGE_GENERATION_TARGETS
         self.connect_button.setEnabled(not ftp_busy)
         self.refresh_button.setEnabled(not library_busy and not ftp_busy)
         self.send_button.setEnabled(
             selected
+            and has_target
             and not ftp_busy
             and not library_busy
             and (self._connected or target_uses_package_dialog)
@@ -714,14 +751,23 @@ class ThreeDSManagerDialog(QDialog):
         ):
             widget.setEnabled(not ftp_busy)
         self.settings_toggle.setEnabled(not ftp_busy)
-        self.destination_edit.setEnabled(not ftp_busy and not library_busy)
-        self.target_combo.setEnabled(selected and not ftp_busy and not library_busy)
+        self.destination_edit.setEnabled(has_target and not ftp_busy and not library_busy)
+        self.target_combo.setEnabled(
+            selected and has_target and not ftp_busy and not library_busy
+        )
 
     def send_selected(self, _checked: bool = False, *, overwrite: bool = False) -> None:
         selected = self._selected_game()
         if selected is None:
             return
-        target_key = str(self.target_combo.currentData() or "retroarch")
+        target_key = str(self.target_combo.currentData() or "")
+        if not target_key:
+            QMessageBox.information(
+                self,
+                "No safe deployment route",
+                "This file format does not have a supported Nintendo 3DS deployment route.",
+            )
+            return
         if target_key == "native_gba":
             if isinstance(selected, RomMRemoteGame) and selected.platform_slug == "gba":
                 from .gba_vc_deploy import GbaVcDeployDialog
