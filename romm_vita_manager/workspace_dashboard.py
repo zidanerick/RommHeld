@@ -245,9 +245,8 @@ class WorkspaceDashboardWindow(QMainWindow):
             radio.setProperty("preference_key", option.key)
             radio.setChecked(selected == option.key)
             if self.workspace_key == "3ds" and option.key == "retroachievements":
-                radio.setEnabled(False)
                 radio.setToolTip(
-                    "Current 3DS achievement routes are not exposed as a supported recommendation."
+                    "Prefer RetroArch where the selected 3DS platform exposes a supported RetroArch route. Dedicated-only targets keep their available runtime."
                 )
             elif self.workspace_key == "ds" and option.key == "retroachievements":
                 radio.setToolTip(
@@ -477,7 +476,17 @@ class WorkspaceDashboardWindow(QMainWindow):
         key = str(radio.property("preference_key") or "")
         if not key:
             return
-        self.config = set_device_preference(self.config, self.workspace_key, key)
+        try:
+            updated = set_device_preference(self._reload_config(), self.workspace_key, key)
+            save_config(updated)
+        except (TypeError, ValueError, OSError) as exc:
+            self.statusBar().showMessage(f"Unable to save runtime preference: {exc}", 5000)
+            return
+        self.config = updated
+        self.local_library.set_config(updated)
+        if self.three_ds_library is not None:
+            self.three_ds_library.config = updated
+        self.statusBar().showMessage("Runtime preference saved.", 3000)
 
     def copy_selected(self) -> None:
         if self.workspace_key != "vita":
