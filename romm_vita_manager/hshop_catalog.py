@@ -100,6 +100,22 @@ def _title_score(query: str, candidate: str) -> int:
     return int(overlap * 70)
 
 
+def _platform_matches(expected: str, candidate: str) -> bool:
+    """Match one VC family without letting parent family names bleed across.
+
+    In particular, ``game boy`` must not match ``game boy color`` or
+    ``game boy advance``. hShop appends a New-3DS compatibility note to its
+    Super Nintendo label, so that known suffix is normalized away explicitly
+    instead of using a broad substring test for every family.
+    """
+    normalized = _normalise_title(candidate)
+    if expected == "super nintendo":
+        suffix = " compatible only with new 3ds systems"
+        if normalized.endswith(suffix):
+            normalized = normalized[: -len(suffix)].strip()
+    return normalized == expected
+
+
 def _parse_entry(href: str, text: str) -> HShopVcRelease | None:
     lower = text.casefold()
     if "content in virtual-console" not in lower:
@@ -171,8 +187,7 @@ def find_official_vc_release(
         release = _parse_entry(href, text)
         if release is None:
             continue
-        platform_text = _normalise_title(release.platform)
-        if expected not in platform_text:
+        if not _platform_matches(expected, release.platform):
             continue
         score = _title_score(title, release.title)
         if score >= 70:
