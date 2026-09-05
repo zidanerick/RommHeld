@@ -67,8 +67,10 @@ RETROARCH = DeploymentTarget(
     "retroarch",
 )
 
-# Platforms for which RommHeld intentionally exposes a RetroArch deployment
-# choice. Dedicated runtimes are tracked separately below.
+# Platforms for which the current official 3DS RetroArch builds publish a
+# usable core route that RommHeld intentionally exposes. Dedicated runtimes are
+# tracked separately below. N64 is intentionally absent: the current 3DS
+# buildbot does not publish a Mupen64Plus/ParaLLEl N64 core.
 RETROARCH_TARGET_PLATFORM_SLUGS = frozenset(
     {
         "3ds",
@@ -102,7 +104,6 @@ RETROARCH_TARGET_PLATFORM_SLUGS = frozenset(
         "neo-geo-pocket-color",
         "zxs",
         "turbografx-cd",
-        "n64",
     }
 )
 
@@ -113,7 +114,7 @@ THREE_DS_PLATFORM_SLUGS = RETROARCH_TARGET_PLATFORM_SLUGS | DIRECT_RUNTIME_PLATF
 # as the general set of platforms visible in the 3DS workspace, even though the
 # name implied RetroArch. Keep that code working while target selection itself
 # uses RETROARCH_TARGET_PLATFORM_SLUGS and therefore does not invent a
-# RetroArch route for dedicated-only platforms such as NDS and Virtual Boy.
+# RetroArch route for dedicated-only platforms such as NDS, Virtual Boy, or N64.
 RETROARCH_PLATFORM_SLUGS = THREE_DS_PLATFORM_SLUGS
 
 # Every slug listed here has a concrete family-specific package builder and
