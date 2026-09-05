@@ -9,6 +9,9 @@ _MARCHIVE_MAGIC = b"mdf\x00"
 _MARCHIVE_SEED = "25G/xpvTbsb+6"
 _MARCHIVE_KEY_LENGTH = 64
 _MASK32 = 0xFFFFFFFF
+_SEGA_HEADER_MAGIC = b"TMR SEGA"
+_SEGA_HEADER_OFFSETS = (0x7FF0, 0x3FF0, 0x1FF0)
+_GAME_GEAR_REGION_CODES = {0x5, 0x6, 0x7}
 
 
 class _Mt19937:
@@ -110,6 +113,53 @@ def _xor_marchive(data: bytes, key: bytes) -> bytes:
     return bytes(value ^ key[index % len(key)] for index, value in enumerate(data))
 
 
+def _sega_header_offset(data: bytes) -> int | None:
+    for offset in _SEGA_HEADER_OFFSETS:
+        if offset + 16 <= len(data) and data[offset : offset + 8] == _SEGA_HEADER_MAGIC:
+            return offset
+    return None
+
+
+def validate_gamegear_rom(rom: bytes) -> bytes:
+    """Return a raw Game Gear ROM after conservative Sega-header validation.
+
+    The Sega header may legally appear at 0x7FF0, 0x3FF0 or 0x1FF0. Some old
+    dumps carry a 512-byte copier header, so strip that only when the remaining
+    payload exposes a valid Sega header. The header checksum is intentionally
+    not enforced because known Game Gear releases frequently contain values
+    that are not valid under the export Master System checksum rules.
+    """
+    data = bytes(rom)
+    if not data:
+        raise ValueError("Game Gear ROM is empty.")
+    if len(data) > 0x800000 + 512:
+        raise ValueError("Game Gear ROM is larger than the supported 8 MiB limit.")
+
+    header_offset = _sega_header_offset(data)
+    if header_offset is None and len(data) > 512:
+        stripped = data[512:]
+        stripped_header = _sega_header_offset(stripped)
+        if stripped_header is not None:
+            data = stripped
+            header_offset = stripped_header
+
+    if header_offset is None:
+        raise ValueError(
+            "Game Gear ROM does not contain the required TMR SEGA cartridge header. "
+            "The file may be corrupted, headerless, or for another Sega platform."
+        )
+
+    region_code = data[header_offset + 0x0F] >> 4
+    if region_code not in _GAME_GEAR_REGION_CODES:
+        raise ValueError(
+            "ROM has a Sega cartridge header but is not identified as Game Gear. "
+            "Use the appropriate Master System/other Sega deployment route instead."
+        )
+    if len(data) > 0x800000:
+        raise ValueError("Game Gear ROM is larger than the supported 8 MiB limit.")
+    return data
+
+
 def unpack_gamegear_mdf(data: bytes, filename: str) -> bytes:
     """Decode the zlib/XOR MArchive wrapper used by Nintendo's Game Gear VC."""
     if len(data) < 8 or data[:4] != _MARCHIVE_MAGIC:
@@ -202,10 +252,10 @@ def install() -> None:
                 f"Expected one .GG.m ROM payload in the Game Gear donor, found {len(candidates)}."
             )
         rom_path = candidates[0]
-        # Validate the donor archive and preserve its exact path. The MArchive
-        # cipher derives its key from the basename, so changing this name would
-        # make an otherwise valid replacement unreadable by the emulator.
-        unpack_gamegear_mdf(files[rom_path], PurePosixPath(rom_path).name)
+        # Validate the archive, its embedded Game Gear identity, and preserve
+        # the exact path. The MArchive key is derived from this basename.
+        donor_rom = unpack_gamegear_mdf(files[rom_path], PurePosixPath(rom_path).name)
+        validate_gamegear_rom(donor_rom)
         files[rom_path] = b""
 
         code = vc._extract_ncch_exefs_entry(ncch, keys, ".code")
@@ -231,6 +281,7 @@ def install() -> None:
     def prepare_runtime_payload(data: bytes, family: str, rom_path: str) -> bytes:
         prepared = vc.prepare_classic_rom(data, family)
         if family.lower() == "gamegear":
+            prepared = validate_gamegear_rom(prepared)
             return pack_gamegear_mdf(prepared, PurePosixPath(rom_path).name)
         return prepared
 
