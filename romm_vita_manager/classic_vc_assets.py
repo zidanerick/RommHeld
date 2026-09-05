@@ -11,7 +11,8 @@ from .classic_vc_ncch_regions import (
 )
 from .config import package_cache_dir, save_config
 from .gba_vc import _primary_ncch_from_cia
-from .vc_donors import configure_boot9, configure_donor
+from .vc_donors import configure_boot9, configure_donor, configured_donor_info
+from .vc_runtime_profiles import build_classic_runtime_profile
 
 _SUPPORTED = {"gb", "gbc", "nes", "gamegear", "snes"}
 # Version 5 adds the donor's optional NCCH plain and dedicated launch-logo
@@ -193,6 +194,14 @@ def extract_and_cache_classic_runtime(
             f"{family.upper()} Virtual Console donor is missing its dedicated retail NCCH launch logo."
         )
     validate_retail_romfs(runtime.romfs_template)
+    runtime_profile = build_classic_runtime_profile(
+        family,
+        configured_donor_info(updated, family),
+        code=runtime.code,
+        exheader=runtime.exheader,
+        romfs_template=runtime.romfs_template,
+        rom_path=runtime.rom_path,
+    )
 
     cache = runtime_cache_dir(family)
     exheader = _write(cache / "exheader.bin", runtime.exheader)
@@ -217,6 +226,7 @@ def extract_and_cache_classic_runtime(
         "ncch_plain_path": str(ncch_plain) if ncch_plain is not None else "",
         "ncch_logo_path": str(ncch_logo) if ncch_logo is not None else "",
         "rom_path": runtime.rom_path,
+        "runtime_profile": runtime_profile,
     }
     updated["classic_vc"] = root
     save_config(updated)
