@@ -6,6 +6,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -17,11 +18,14 @@ from PySide6.QtWidgets import (
 )
 
 from .archive_utils import ArchiveEntry
+from .config import load_config
 from .design_tokens import DARK, brand_for_platform
 from .emulators import EMULATORS, detect_emulators
 from .package_manager import PACKAGES, download_package, inspect_package, package_path, stage_package
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 from .vita import free_space, total_space
+from .vita_ftp import VitaFtpSettings
+from .vita_package_transport import stage_package_via_ftp
 
 
 PLAYSTATION_BLUE = brand_for_platform("vita").accent
@@ -33,11 +37,21 @@ class PackageWorker(QThread):
     archive_ready = Signal(str, object)
     failed = Signal(str)
 
-    def __init__(self, package_key: str, action: str, vita: Path | None):
+    def __init__(
+        self,
+        package_key: str,
+        action: str,
+        vita: Path | None,
+        *,
+        transport: str = "usb",
+        ftp_settings: VitaFtpSettings | None = None,
+    ):
         super().__init__()
         self.package_key = package_key
         self.action = action
         self.vita = vita
+        self.transport = transport
+        self.ftp_settings = ftp_settings
         self.cancel_event = threading.Event()
 
     def run(self):
@@ -62,8 +76,31 @@ class PackageWorker(QThread):
                 entries = inspect_package(package)
                 self.archive_ready.emit(str(package_path(package)), entries)
                 return
+            if self.transport == "ftp":
+                if self.ftp_settings is None:
+                    raise RuntimeError("VitaShell FTP is not configured.")
+                source = package_path(package)
+                total = source.stat().st_size if source.is_file() else 0
+
+                def report_ftp(done: int):
+                    percent = int(done * 100 / total) if total else 0
+                    self.progress.emit(
+                        percent,
+                        f"Staging {package.name} over VitaShell FTP: {done / 1024**2:.1f} MiB",
+                    )
+
+                result, target = stage_package_via_ftp(
+                    package,
+                    self.ftp_settings,
+                    cancel_event=self.cancel_event,
+                    progress=report_ftp,
+                )
+                if result == "cancelled":
+                    raise InterruptedError(f"Staging {package.name} was cancelled.")
+                self.finished_ok.emit("stage", target)
+                return
             if self.vita is None:
-                raise RuntimeError("No Vita is connected.")
+                raise RuntimeError("No Vita USB filesystem is mounted.")
             target = stage_package(package, self.vita)
             self.finished_ok.emit("stage", str(target))
         except Exception as exc:
@@ -78,6 +115,14 @@ class VitaSetupDialog(QDialog):
         self.vita = vita
         self.worker: PackageWorker | None = None
         self.action_buttons: list[QPushButton] = []
+        saved_ftp = load_config().get("devices", {}).get("vita_ftp", {})
+        self._ftp_host = str(saved_ftp.get("host", "")).strip()
+        try:
+            self._ftp_port = int(saved_ftp.get("port", 1337))
+            if not 1 <= self._ftp_port <= 65535:
+                raise ValueError
+        except (TypeError, ValueError):
+            self._ftp_port = 1337
 
         self.setWindowTitle("PlayStation Vita Setup")
         self.resize(1040, 780)
@@ -85,7 +130,7 @@ class VitaSetupDialog(QDialog):
 
         installed = detect_emulators(vita) if vita is not None else {}
         free_text = "Unavailable"
-        storage_detail = "Storage cannot be read until VitaShell exposes the ux0 filesystem over USB."
+        storage_detail = "Storage capacity is available only while VitaShell exposes ux0 over USB."
         if vita is not None:
             try:
                 free = free_space(vita)
@@ -98,14 +143,19 @@ class VitaSetupDialog(QDialog):
 
         header = SectionHeader(
             "Prepare your PlayStation Vita",
-            "Confirm the mounted Vita first, then prepare only the runtime packages you actually need. RetroAchievements remains an explicit RetroArch/libretro choice rather than a frontend setting.",
+            "Choose the VitaShell transport, then prepare only the runtime packages you actually need. USB remains recommended on handheld Vita; FTP also supports wireless staging and PlayStation TV.",
         )
 
         status_row = QHBoxLayout()
         status_row.setSpacing(8)
-        self.device_status = StatusPill(
-            "Vita", "Connected" if vita is not None else "Not mounted"
+        device_state = (
+            "USB mounted"
+            if vita is not None
+            else "FTP configured"
+            if self._ftp_host
+            else "Not connected"
         )
+        self.device_status = StatusPill("Vita", device_state)
         self.storage_status = StatusPill("Storage", free_text)
         self.ra_status = StatusPill("Achievements", "RetroArch route")
         status_row.addWidget(self.device_status)
@@ -114,21 +164,33 @@ class VitaSetupDialog(QDialog):
         status_row.addStretch(1)
 
         device_card = SurfaceCard()
-        device_card.content.addWidget(self._card_title("1 · Check the Vita connection"))
+        device_card.content.addWidget(self._card_title("1 · Choose the VitaShell transport"))
+        device_card.content.addWidget(
+            self._secondary(
+                "USB is faster and exposes storage capacity, so it remains the recommended handheld path. FTP is useful for wireless transfers and PlayStation TV. FTP must already be configured from Device → Send file / configure FTP."
+            )
+        )
+        self.transport_combo = QComboBox()
+        self.transport_combo.addItem("VitaShell USB · Recommended", "usb")
+        self.transport_combo.addItem("VitaShell FTP · Wireless / PlayStation TV", "ftp")
+        if vita is None and self._ftp_host:
+            self.transport_combo.setCurrentIndex(1)
+        self.transport_combo.currentIndexChanged.connect(self._transport_changed)
+        device_card.content.addWidget(self.transport_combo)
+
         if vita is None:
-            device_card.content.addWidget(
-                self._secondary(
-                    "No Vita filesystem is mounted. On the Vita, open VitaShell and press START. Set SELECT button to USB, choose the USB device that contains ux0 (for example the memory card or SD2Vita), close Settings, press SELECT, then connect a USB data cable. Refresh or reopen RommHeld after the filesystem appears. Downloads can still be prepared in the local cache now."
-                )
+            usb_detail = (
+                "USB: not mounted. In VitaShell press START, set SELECT button to USB, choose the USB device that contains ux0, close Settings, press SELECT, then connect a USB data cable."
             )
-            device_path = QLabel("No mounted Vita path")
         else:
-            device_card.content.addWidget(
-                self._secondary(
-                    "RommHeld is using the mounted ux0 filesystem exposed by VitaShell USB. Keep VitaShell's USB session active while staging files. VPK installation still happens explicitly in VitaShell."
-                )
-            )
-            device_path = QLabel(str(vita))
+            usb_detail = f"USB: {vita}"
+        ftp_detail = (
+            f"FTP: {self._ftp_host}:{self._ftp_port}"
+            if self._ftp_host
+            else "FTP: not configured. Use Device → Send file / configure FTP."
+        )
+        device_path = QLabel(f"{usb_detail}\n{ftp_detail}")
+        device_path.setWordWrap(True)
         device_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         device_path.setStyleSheet(
             f"color:{DARK.text_primary};font-weight:600;background:transparent;"
@@ -140,10 +202,11 @@ class VitaSetupDialog(QDialog):
         software_card.content.addWidget(self._card_title("2 · Prepare runtime software"))
         software_card.content.addWidget(
             self._secondary(
-                "Detected software is shown as device evidence. Package actions verify SHA-256 when the upstream source provides a digest; staging is separate, and archive packages are never extracted blindly."
+                "Detected software is USB-side evidence only. Package actions verify SHA-256 when the upstream source provides a digest; staging is separate, and archive packages are never extracted blindly."
             )
         )
 
+        stage_available = vita is not None or bool(self._ftp_host)
         for emulator in EMULATORS:
             row = QFrame()
             row.setObjectName("vitaPackageRow")
@@ -182,7 +245,7 @@ class VitaSetupDialog(QDialog):
                     lambda checked=False, key=package_keys[0]: self.prepare_package(key)
                 )
             else:
-                label = "Download / stage" if vita is not None else "Download package"
+                label = "Download / stage" if stage_available else "Download package"
                 button = AccentButton(label, PLAYSTATION_BLUE)
                 button.clicked.connect(
                     lambda checked=False, key=package_keys[0]: self.prepare_package(key)
@@ -214,7 +277,7 @@ class VitaSetupDialog(QDialog):
         activity_card.content.addWidget(self.progress_bar)
         activity_card.content.addWidget(
             self._secondary(
-                "VPKs are staged for VitaShell installation. Archive packages are inspected before extraction, and RommHeld does not assume that a ZIP belongs in ux0:/data/."
+                "VPKs are staged for VitaShell installation. FTP staging uses the same verified temporary-upload and safe-replacement transport as other Vita FTP transfers. Archive packages are inspected before extraction."
             )
         )
 
@@ -235,6 +298,8 @@ class VitaSetupDialog(QDialog):
         layout.addWidget(activity_card)
         layout.addLayout(close_row)
 
+        self._transport_changed()
+
     def _card_title(self, text: str) -> QLabel:
         label = QLabel(text)
         label.setStyleSheet(
@@ -248,6 +313,45 @@ class VitaSetupDialog(QDialog):
         label.setStyleSheet(f"color:{DARK.text_secondary};background:transparent;")
         return label
 
+    def _selected_transport(self) -> str:
+        return str(self.transport_combo.currentData() or "usb")
+
+    def _ftp_settings(self) -> VitaFtpSettings | None:
+        if not self._ftp_host:
+            return None
+        return VitaFtpSettings(host=self._ftp_host, port=self._ftp_port)
+
+    def _can_stage(self) -> bool:
+        if self._selected_transport() == "ftp":
+            return self._ftp_settings() is not None
+        return self.vita is not None
+
+    def _transport_changed(self, _index: int | None = None) -> None:
+        if self._selected_transport() == "ftp":
+            if self._ftp_host:
+                self.device_status.set_value("FTP configured")
+                self.storage_status.set_value("Checked during transfer")
+                self.activity.setText(
+                    "FTP selected. Start VitaShell FTP with SELECT before staging a package."
+                )
+            else:
+                self.device_status.set_value("FTP setup required")
+                self.storage_status.set_value("Unavailable")
+                self.activity.setText(
+                    "Configure VitaShell FTP from Device → Send file / configure FTP before staging."
+                )
+        else:
+            self.device_status.set_value("USB mounted" if self.vita is not None else "Not mounted")
+            if self.vita is None:
+                self.storage_status.set_value("Unavailable")
+                self.activity.setText("USB selected. Mount ux0 through VitaShell before staging.")
+            else:
+                try:
+                    self.storage_status.set_value(f"{free_space(self.vita) / 1024**3:.1f} GiB free")
+                except OSError:
+                    self.storage_status.set_value("Mounted")
+                self.activity.setText("USB selected. Ready to prepare runtime packages.")
+
     def prepare_package(self, package_key: str) -> None:
         package = PACKAGES[package_key]
         if self.worker and self.worker.isRunning():
@@ -259,26 +363,42 @@ class VitaSetupDialog(QDialog):
 
     def _start_worker(self, package_key: str, action: str) -> None:
         package = PACKAGES[package_key]
-        if action == "stage" and not self.vita:
-            QMessageBox.warning(
-                self,
-                "Vita not connected",
-                "Open VitaShell, press START, set SELECT button to USB, close Settings, press SELECT, then connect the Vita with a USB data cable before staging files.",
-            )
+        transport = self._selected_transport()
+        ftp_settings = self._ftp_settings()
+        if action == "stage" and not self._can_stage():
+            if transport == "ftp":
+                message = (
+                    "VitaShell FTP is not configured. Open Device → Send file / configure FTP, "
+                    "enter the IP address and port shown by VitaShell, then retry."
+                )
+            else:
+                message = (
+                    "Open VitaShell, press START, set SELECT button to USB, close Settings, "
+                    "press SELECT, then connect the Vita with a USB data cable before staging files."
+                )
+            QMessageBox.warning(self, "Vita transport unavailable", message)
             return
         self.activity.setText(f"Preparing {package.name}…")
         self._set_actions_enabled(False)
+        self.transport_combo.setEnabled(False)
         self.progress_bar.setVisible(True)
-        if action == "download":
+        if action in {"download", "stage"}:
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
         else:
             self.progress_bar.setRange(0, 0)
-        self.worker = PackageWorker(package_key, action, self.vita)
+        self.worker = PackageWorker(
+            package_key,
+            action,
+            self.vita,
+            transport=transport,
+            ftp_settings=ftp_settings,
+        )
         self.worker.progress.connect(self._package_progress)
         self.worker.finished_ok.connect(self._package_finished)
         self.worker.archive_ready.connect(self._archive_ready)
         self.worker.failed.connect(self._package_failed)
+        self.worker.finished.connect(self._worker_finished)
         self.worker.start()
 
     def _package_progress(self, value: int, text: str) -> None:
@@ -296,16 +416,20 @@ class VitaSetupDialog(QDialog):
             if button.text() != "No package configured":
                 button.setEnabled(enabled)
 
+    def _worker_finished(self) -> None:
+        self.transport_combo.setEnabled(True)
+
     def _package_finished(self, action: str, path: str) -> None:
         self._set_actions_enabled(True)
         self._finish_activity()
         self.activity.setText(f"Ready: {path}")
         package = PACKAGES[self.worker.package_key] if self.worker else None
-        if action == "download" and package is not None and self.vita is not None:
+        if action == "download" and package is not None and self._can_stage():
+            transport_label = "VitaShell FTP" if self._selected_transport() == "ftp" else "VitaShell USB"
             reply = QMessageBox.question(
                 self,
                 "Download complete",
-                f"{package.name} was downloaded successfully. Stage it to the Vita now?",
+                f"{package.name} was downloaded successfully. Stage it using {transport_label} now?",
             )
             if reply == QMessageBox.StandardButton.Yes:
                 self._start_worker(package.key, "stage")
@@ -313,7 +437,7 @@ class VitaSetupDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Package staged",
-                f"Copied to:\n{path}\n\nInstall VPK packages with VitaShell.",
+                f"Staged to:\n{path}\n\nInstall VPK packages with VitaShell.",
             )
 
     def _archive_ready(self, path: str, entries: object) -> None:
@@ -341,13 +465,13 @@ class VitaSetupDialog(QDialog):
         self._maybe_stage_archive(package)
 
     def _maybe_stage_archive(self, package) -> None:
-        if package is None or self.vita is None:
+        if package is None:
             return
         reply = QMessageBox.information(
             self,
             "Archive requires review",
             f"{package.name} is an archive and its Vita extraction layout has not been verified by the manager.\n\n"
-            "It will not be extracted automatically. Leave it in the Linux cache until an explicit package rule is added.",
+            "It will not be extracted automatically. Leave it in the local cache until an explicit package rule is added."
         )
         _ = reply
 
