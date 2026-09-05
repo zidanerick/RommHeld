@@ -7,6 +7,7 @@ from romm_vita_manager.three_ds_apps import (
     recommended_runtime_keys,
     scan_three_ds_apps,
 )
+from romm_vita_manager.three_ds_targets import RETROARCH_TARGET_PLATFORM_SLUGS
 
 
 def test_app_detection_is_case_insensitive(tmp_path: Path):
@@ -90,6 +91,16 @@ def test_content_directories_do_not_false_positive_as_runtime_installations(tmp_
     assert not detect_three_ds_app(tmp_path, APP_BY_KEY["homebrew-launcher"]).detected
 
 
+def test_retroarch_app_metadata_matches_audited_3ds_target_set():
+    assert set(APP_BY_KEY["retroarch"].platform_slugs) == set(
+        RETROARCH_TARGET_PLATFORM_SLUGS
+    )
+    assert "virtualboy" in APP_BY_KEY["retroarch"].platform_slugs
+    assert "n64" not in APP_BY_KEY["retroarch"].platform_slugs
+    assert "amiga" not in APP_BY_KEY["retroarch"].platform_slugs
+    assert "scummvm" not in APP_BY_KEY["retroarch"].platform_slugs
+
+
 def test_runtime_recommendations_are_platform_specific():
     assert recommended_runtime_keys(["gba"]) == ("open-agb-firm", "retroarch")
     assert recommended_runtime_keys(["nds"]) == ("twilight",)
@@ -99,7 +110,6 @@ def test_runtime_recommendations_are_platform_specific():
         "twilight",
         "daedalusx64",
     )
-    assert "n64" not in APP_BY_KEY["retroarch"].platform_slugs
 
 
 def test_readiness_components_include_only_requested_transport_and_install_dependencies():
