@@ -182,30 +182,38 @@ class ThreeDSFilesystemDeployDialog(QDialog):
     def _selected_transport(self) -> str:
         return str(self.transport_combo.currentData() or "")
 
-    def _transport_changed(self, _index: int | None = None) -> None:
+    def _transport_changed(
+        self,
+        _index: int | None = None,
+        *,
+        update_activity: bool = True,
+    ) -> None:
         transport = self._selected_transport()
         if transport == "sd" and self.storage_root is not None:
             self.route_status.set_value("Mounted SD")
             self.route_detail.setText(str(self.storage_root))
-            self.status.setText(
-                "Ready for a safe direct copy. Keep the card mounted until the transfer completes, then eject it cleanly before returning it to the 3DS."
-            )
+            if update_activity:
+                self.status.setText(
+                    "Ready for a safe direct copy. Keep the card mounted until the transfer completes, then eject it cleanly before returning it to the 3DS."
+                )
             self.deploy_button.setEnabled(True)
         elif transport == "ftp" and self._ftp_host:
             self.route_status.set_value("ftpd")
             self.route_detail.setText(f"ftp://{self._ftp_host}:{self._ftp_port}")
-            self.status.setText(
-                "Ready to connect. Open ftpd on the Nintendo 3DS and leave it running during the transfer."
-            )
+            if update_activity:
+                self.status.setText(
+                    "Ready to connect. Open ftpd on the Nintendo 3DS and leave it running during the transfer."
+                )
             self.deploy_button.setEnabled(True)
         else:
             self.route_status.set_value("Setup required")
             self.route_detail.setText(
                 "Configure a mounted 3DS SD card or ftpd from the Device page first."
             )
-            self.status.setText(
-                "No Nintendo 3DS filesystem transfer route is currently available."
-            )
+            if update_activity:
+                self.status.setText(
+                    "No Nintendo 3DS filesystem transfer route is currently available."
+                )
             self.deploy_button.setEnabled(False)
 
     def _ftp_settings(self) -> ThreeDSFtpSettings:
@@ -362,7 +370,7 @@ class ThreeDSFilesystemDeployDialog(QDialog):
             if answer == QMessageBox.StandardButton.Yes:
                 self.start_transfer(overwrite=True)
                 return
-        self._transport_changed()
+        self._transport_changed(update_activity=False)
 
     def _reset_after_failure(self, message: str) -> None:
         self.worker = None
