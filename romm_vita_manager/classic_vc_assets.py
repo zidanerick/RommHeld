@@ -4,7 +4,7 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from .classic_vc import ClassicVcRuntime, extract_classic_vc_runtime
+from .classic_vc import ClassicVcRuntime, extract_classic_vc_runtime, parse_romfs_files
 from .classic_vc_hardware_fix import validate_retail_romfs
 from .classic_vc_ncch_regions import (
     auxiliary_cache_paths,
@@ -84,6 +84,19 @@ def _write_optional(path: Path, data: bytes) -> Path | None:
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+def _runtime_profile_metadata(romfs_template: bytes) -> tuple[str, str]:
+    """Extract stable emulator-build identifiers from a sanitized VC RomFS."""
+    files = parse_romfs_files(romfs_template)
+    normalized = {path.casefold(): data for path, data in files.items()}
+    build_raw = normalized.get("/buildtime.txt", b"")
+    config_raw = normalized.get("/config.ini", b"")
+    build_label = " ".join(
+        build_raw.decode("utf-8", errors="replace").replace("\x00", " ").split()
+    )[:80]
+    config_hash = _sha256(config_raw) if config_raw else ""
+    return build_label, config_hash
 
 
 def _optional_region_hash_matches(entry: dict, path: Path | None, field: str) -> bool:
@@ -233,6 +246,7 @@ def extract_and_cache_classic_runtime(
             f"{family.upper()} Virtual Console donor is missing its dedicated retail NCCH launch logo."
         )
     validate_retail_romfs(runtime.romfs_template)
+    emulator_build, config_hash = _runtime_profile_metadata(runtime.romfs_template)
     runtime_profile = build_classic_runtime_profile(
         family,
         configured_donor_info(updated, family),
@@ -243,6 +257,8 @@ def extract_and_cache_classic_runtime(
         donor_banner=runtime.donor_banner,
         donor_icon=runtime.donor_icon,
         logo=runtime.logo if runtime.logo else None,
+        emulator_build=emulator_build,
+        config_ini_sha256=config_hash,
     )
 
     cache = runtime_cache_dir(family)
