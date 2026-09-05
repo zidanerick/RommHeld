@@ -8,6 +8,7 @@ from .gba_vc import (
     extract_native_donor_banner,
     extract_native_donor_icon,
 )
+from .gba_vc_donor_validation import inspect_gba_vc_donor
 from .vc_donors import configure_boot9, configure_donor, configured_donor_info
 from .vc_runtime_profiles import build_gba_runtime_profile
 
@@ -148,6 +149,10 @@ def extract_and_cache_boot_logo(config: dict, donor_cia: Path, boot9: Path) -> P
     if not boot9.is_file():
         raise FileNotFoundError(f"boot9 dump does not exist: {boot9}")
 
+    # Do not accept an arbitrary CIA merely because it happens to expose a
+    # decryptable logo asset. Genuine GBA VC donors have the AGB_FIRM ROM +
+    # 0x360-byte .CAA footer layout in ExeFS .code.
+    inspect_gba_vc_donor(donor_cia, boot9)
     destination = _write_cached_asset(
         cached_boot_logo_path(), extract_native_boot_logo(donor_cia, boot9)
     )
@@ -170,6 +175,7 @@ def extract_and_cache_gba_donor_assets(
     updated = configure_boot9(config, boot9)
     updated = configure_donor(updated, "gba", donor_cia)
 
+    inspection = inspect_gba_vc_donor(donor_cia, boot9)
     logo_bytes = extract_native_boot_logo(donor_cia, boot9)
     banner_bytes = extract_native_donor_banner(donor_cia, boot9)
     icon_bytes = extract_native_donor_icon(donor_cia, boot9)
@@ -178,6 +184,8 @@ def extract_and_cache_gba_donor_assets(
         boot_logo=logo_bytes,
         donor_banner=banner_bytes,
         donor_icon=icon_bytes,
+        donor_code_sha256=inspection.code_sha256,
+        donor_rom_size=inspection.rom_size,
     )
 
     logo = _write_cached_asset(cached_boot_logo_path(), logo_bytes)
