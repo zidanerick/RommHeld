@@ -170,11 +170,9 @@ class LocalLibraryWidget(QWidget):
         self.vita = vita
         is_vita = target_key == "vita"
         self.vita_transport.setVisible(is_vita)
-        self.status_filter.setEnabled(is_vita and not self._using_ftp())
         self.status_filter.setVisible(is_vita)
         self.copy_button.setVisible(is_vita)
-        if not is_vita:
-            self.status_filter.setCurrentIndex(0)
+        self._sync_status_filter()
         self._apply_filters()
 
     def set_vita(self, vita: Path | None) -> None:
@@ -182,10 +180,34 @@ class LocalLibraryWidget(QWidget):
             self._status_cache.clear()
         self.vita = vita
         if self.target_key == "vita":
+            self._sync_status_filter()
             self._apply_filters()
 
     def _using_ftp(self) -> bool:
         return self.target_key == "vita" and self.vita_transport.currentData() == "ftp"
+
+    def _status_filter_available(self) -> bool:
+        return self.target_key == "vita" and not self._using_ftp() and self.vita is not None
+
+    def _sync_status_filter(self) -> None:
+        available = self._status_filter_available()
+        if not available and self.status_filter.currentIndex() != 0:
+            self.status_filter.blockSignals(True)
+            self.status_filter.setCurrentIndex(0)
+            self.status_filter.blockSignals(False)
+        worker_running = self.worker is not None and self.worker.isRunning()
+        self.status_filter.setEnabled(available and not worker_running)
+        if self.target_key != "vita":
+            tooltip = ""
+        elif self._using_ftp():
+            tooltip = (
+                "Install state is checked during FTP transfer because VitaShell FTP does not expose a cheap bulk-status query."
+            )
+        elif self.vita is None:
+            tooltip = "Connect the Vita through VitaShell USB to filter by installed state."
+        else:
+            tooltip = "Choose a status filter to inspect files detected on the mounted Vita filesystem."
+        self.status_filter.setToolTip(tooltip)
 
     def _ftp_settings(self) -> VitaFtpSettings:
         saved = load_config().get("devices", {}).get("vita_ftp", {})
@@ -214,16 +236,7 @@ class LocalLibraryWidget(QWidget):
             return
         self._status_cache.clear()
         using_ftp = self._using_ftp()
-        if using_ftp and self.status_filter.currentIndex() != 0:
-            self.status_filter.blockSignals(True)
-            self.status_filter.setCurrentIndex(0)
-            self.status_filter.blockSignals(False)
-        self.status_filter.setEnabled(not using_ftp)
-        self.status_filter.setToolTip(
-            "Install state is checked during FTP transfer because VitaShell FTP does not expose a cheap bulk-status query."
-            if using_ftp
-            else "Choose a status filter to inspect files detected on the mounted Vita filesystem."
-        )
+        self._sync_status_filter()
         self.copy_button.setText("Copy via VitaShell FTP" if using_ftp else "Copy to Vita")
         if refresh:
             self._apply_filters()
@@ -296,8 +309,7 @@ class LocalLibraryWidget(QWidget):
     def _render_games(self) -> None:
         self.game_list.clear()
         show_status = (
-            self.target_key == "vita"
-            and not self._using_ftp()
+            self._status_filter_available()
             and self.status_filter.currentText() != "All games"
         )
         for game in self.filtered_games:
@@ -309,6 +321,8 @@ class LocalLibraryWidget(QWidget):
                 detail = "Destination is managed from the Device workflow"
             elif self._using_ftp():
                 detail = "VitaShell FTP checks the remote file when transfer starts"
+            elif self.vita is None:
+                detail = "Connect the Vita through VitaShell USB to inspect installed state"
             else:
                 detail = "Choose a status filter to inspect the current Vita destination state"
             item = QListWidgetItem(f"{game.name}\n{metadata}")
@@ -596,9 +610,7 @@ class LocalLibraryWidget(QWidget):
         self.refresh_button.setEnabled(not running)
         self.search.setEnabled(not running)
         self.platforms.setEnabled(not running)
-        self.status_filter.setEnabled(
-            not running and self.target_key == "vita" and not self._using_ftp()
-        )
+        self.status_filter.setEnabled(not running and self._status_filter_available())
         self.vita_transport.setEnabled(not running)
         self.game_list.setEnabled(not running)
         self.progress.setVisible(running)
