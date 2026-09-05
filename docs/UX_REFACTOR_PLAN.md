@@ -74,7 +74,7 @@ The UI uses a neutral graphite base with restrained manufacturer accents:
 
 Platform color is an orientation/accent tool, not a full-screen background.
 
-Shared primary buttons now have distinct hover, pressed, disabled and keyboard-focus states rather than relying on a static accent fill.
+Shared primary buttons now have distinct hover, pressed, disabled and keyboard-focus states rather than relying on a static accent fill. Shared status pills use restrained semantic tones so connected/ready, busy/action-needed and actual error states remain distinguishable without colouring every surface.
 
 ## Phase 2: startup and handheld selection
 
@@ -102,23 +102,29 @@ Remaining validation:
 
 ### Vita / local library
 
-Status: functional simplification complete; presentation polish remains.
+Status: functional simplification complete; presentation polish remains desktop-driven.
 
 `LocalLibraryWidget` owns:
 
-- search
-- platform filter
-- Vita install-state filter
-- list/tile mode
+- search over the in-memory library scan
+- platform filtering with friendly display labels while preserving exact source keys internally
+- Vita install-state filtering when requested
+- cached mounted-Vita status checks for the current view
+- a single list presentation rather than a nonfunctional artwork-free tile mode
 - selection summary
 - automatic Vita destination summary
 - Vita copy workflow and cancellation
 - primary `Copy to Vita` action beside the selected games
 - inline routine transfer completion instead of a success-summary modal
+- VitaShell USB or VitaShell FTP transport selection
+
+The default `All games` browse path does not probe every mounted Vita destination merely to render rows. Exact install state is evaluated when the user selects a status filter or when selected games are evaluated for copying. The status cache is invalidated when device, configuration, transport or transfer state changes.
+
+DS and VitaShell FTP rows avoid claiming Vita-style pre-scanned destination state. DS destination choice remains in Device, while VitaShell FTP checks remote destinations when transfer work begins because that transport does not expose an efficient bulk-status query.
 
 Vita destination/status/copy helpers remain isolated in `vita_library_support.py` rather than living in an application window.
 
-Next visual pass should improve the text-heavy local-library presentation without changing its copy semantics. The 3DS master/detail library is the stronger reference pattern, but target-specific behavior should not be forced into a generic abstraction merely for visual consistency.
+Further local-library polish should be based on real desktop rendering with long names/paths and realistic library sizes. The 3DS master/detail library is the stronger visual reference pattern, but target-specific behavior should not be forced into a generic abstraction merely for consistency.
 
 ### Nintendo 3DS / RomM library
 
@@ -156,11 +162,13 @@ Each Device page should answer:
 
 The sidebar shows compact state for the active handheld only rather than unrelated disconnected devices.
 
+Existing Device actions now use state-aware primary emphasis rather than permanently highlighting the same control. A missing Vita/3DS route emphasizes connection/configuration first; once a route exists, the useful manager/setup action becomes primary. DS emphasizes storage selection before validation, then validation after a root is selected. This changes presentation only, not the underlying handlers or validation semantics.
+
 ### Vita
 
 - mount state and free storage
 - `Vita setup` launched contextually from Device
-- Send File retained as an advanced one-off transfer action
+- Send File retained as an advanced one-off transfer action and FTP configuration surface
 - normal selected-game copy moved to Library
 - redesigned Vita Setup with PlayStation-blue primary actions
 - explicit RetroArch/RetroAchievements route messaging
@@ -169,6 +177,7 @@ The sidebar shows compact state for the active handheld only rather than unrelat
 
 - FTP configuration state and endpoint
 - 3DS Setup launched contextually from Device
+- Runtime / FTP readiness available contextually from Device
 - 3DS Manager remains available for direct filesystem/deployment management
 - FTP connectivity kept separate from FBI Remote Install readiness
 - FBI Remote Install retained through package deployment flows
@@ -184,6 +193,8 @@ The sidebar shows compact state for the active handheld only rather than unrelat
 Status: simplification implemented.
 
 Settings owns the library source and runtime preference configuration. When RomM is selected, the same asynchronous `RomMConnectionWorker` used by onboarding can test the URL/token directly from Settings.
+
+RomM credentials that are new or changed emphasize `Test connection` as the next useful action. A successful test shifts primary emphasis to `Save library settings`. Verification is advisory rather than a save gate: users can still save after a failed or skipped test.
 
 The workspace cannot switch handhelds while that bounded test is active, and shutdown waits for it to finish, preserving Qt worker lifetime rules.
 
@@ -276,8 +287,12 @@ Current regression areas include:
 - core Library/Device/Settings navigation
 - contextual page subtitles
 - Vita copy action remaining in Library
-- RomM connection verification in Settings
+- local-library in-memory filtering, friendly platform labels and removal of the false tile mode
+- lazy/cached mounted-Vita status inspection and contextual DS/FTP metadata
+- Device primary-action emphasis following readiness state
+- RomM connection verification and test/save emphasis in Settings
 - direct configured startup bypassing onboarding
+- shared keyboard-focus styling
 
 CI is headless and does not provide the full desktop graphics environment, so the UX regression tests inspect source/architecture contracts without claiming that Qt widgets have rendered correctly. Runtime Qt validation remains a desktop responsibility.
 
@@ -294,12 +309,14 @@ CI is headless and does not provide the full desktop graphics environment, so th
 - quit while artwork/library workers are active
 - confirm Library, Device and Settings render correctly at target desktop scales/themes
 - verify local-library action/footer layout with long game names and paths
-- confirm keyboard focus is visible on primary actions
+- verify friendly platform labels and the reduced library filter row at realistic widths
+- verify semantic status tones and keyboard focus remain readable in the target desktop theme
+- verify Device and Settings primary-action emphasis changes are visually obvious but not excessive
 
 ### PlayStation Vita hardware
 
 - mount detection through VitaShell USB mode
-- local-library copy and cancellation from the new in-library action
+- local-library copy and cancellation from the in-library action
 - same-size skip behavior
 - storage-space failure path
 - redesigned Send File transfer and overwrite path
