@@ -50,16 +50,20 @@ def test_selected_runtime_becomes_required_without_requiring_alternatives():
     assert "retroarch" not in importance
 
 
-def test_red_viper_recommends_console_generated_dsp_firmware():
-    requirements = build_readiness_requirements(
-        ["red_viper"],
-        needs_ftp=False,
-        include_utilities=False,
-    )
-    importance = _importance(requirements)
+def test_red_viper_and_daedalus_recommend_console_generated_dsp_firmware():
+    for target_key, runtime_key in (
+        ("red_viper", "red-viper"),
+        ("daedalusx64", "daedalusx64"),
+    ):
+        requirements = build_readiness_requirements(
+            [target_key],
+            needs_ftp=False,
+            include_utilities=False,
+        )
+        importance = _importance(requirements)
 
-    assert importance["red-viper"] == "required"
-    assert importance["dsp-firmware"] == "recommended"
+        assert importance[runtime_key] == "required"
+        assert importance["dsp-firmware"] == "recommended"
 
 
 def test_report_distinguishes_definite_missing_from_installed_title_confirmation(tmp_path: Path):
@@ -75,6 +79,23 @@ def test_report_distinguishes_definite_missing_from_installed_title_confirmation
     assert "luma" in missing
     assert "red-viper" in unconfirmed
     assert report.state == "missing_required"
+
+
+def test_partial_twilight_sd_assets_are_definitely_missing_for_nds_route(tmp_path: Path):
+    (tmp_path / "boot.firm").write_bytes(b"firm")
+    (tmp_path / "_nds" / "TWiLightMenu").mkdir(parents=True)
+
+    report = evaluate_readiness(
+        tmp_path,
+        ["twilight"],
+        needs_ftp=False,
+        include_utilities=False,
+    )
+
+    missing = {item.requirement.app_key for item in report.missing_required}
+    unconfirmed = {item.requirement.app_key for item in report.unconfirmed_required}
+    assert "twilight" in missing
+    assert "twilight" not in unconfirmed
 
 
 def test_report_is_ready_when_required_sd_evidence_is_present(tmp_path: Path):
