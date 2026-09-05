@@ -24,6 +24,11 @@ from .open_agb_settings import OpenAgbSettingsDialog
 from .three_ds_apps import APP_BY_KEY, THREE_DS_APPS, ThreeDSAppStatus, scan_three_ds_apps
 from .three_ds_packages import download_package, package_for_app, resolve_package, stage_package
 from .three_ds_readiness import ReadinessRequirement, evaluate_readiness
+from .three_ds_runtime_details import (
+    RETROARCH_CORE_PROFILES,
+    scan_retroarch_route,
+    scan_twilight_runtime,
+)
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 
 
@@ -236,6 +241,45 @@ class ThreeDSReadinessDialog(QDialog):
             return "Not detected on SD"
         return "Not detected"
 
+    def _runtime_detail(self, app_key: str) -> str:
+        if app_key == "twilight":
+            return scan_twilight_runtime(self.sd_root).note
+        if app_key != "retroarch":
+            return ""
+
+        active_files: set[str] = set()
+        inactive_files: set[str] = set()
+        firmware_notes: list[str] = []
+        for slug in RETROARCH_CORE_PROFILES:
+            route = scan_retroarch_route(self.sd_root, slug)
+            active_files.update(path.name for path in route.active_core_files)
+            inactive_files.update(path.name for path in route.inactive_core_files)
+            if route.state in {"firmware_unverified", "missing_firmware"}:
+                firmware_notes.append(f"{slug}: {route.note}")
+
+        lines: list[str] = []
+        if active_files:
+            lines.append(
+                "SD-visible files in the active core directory: "
+                + ", ".join(sorted(active_files, key=str.casefold))
+                + ". CIA files are installer evidence, not proof that the core title is installed."
+            )
+        else:
+            lines.append(
+                "No audited core package/executable files are visible in the active core directory. CIA-installed cores may still exist on the console."
+            )
+        if inactive_files:
+            lines.append(
+                "Matching files in Cores-Notused: "
+                + ", ".join(sorted(inactive_files, key=str.casefold))
+                + ". These are treated as inactive."
+            )
+        lines.extend(firmware_notes)
+        lines.append(
+            "RetroAchievements recommendations are core-specific. Current 3DS SNES cores are not recommended for achievements, and the current official 3DS core bundle does not provide an audited N64 core."
+        )
+        return "\n".join(lines)
+
     def refresh(self) -> None:
         if self.worker is not None and self.worker.isRunning():
             return
@@ -309,8 +353,12 @@ class ThreeDSReadinessDialog(QDialog):
             "manual_bootstrap": "RommHeld can stage the upstream 3DSX bootstrap; use the application itself for broader homebrew management.",
         }
         policy = policy_notes.get(app.install_policy, app.install_policy)
+        runtime_detail = self._runtime_detail(app_key)
+        detail = f"{reason}\n\n{detection}\n\n{policy}"
+        if runtime_detail:
+            detail += f"\n\n{runtime_detail}"
         self.detail_title.setText(f"{app.name} · {importance} · {state}")
-        self.detail_text.setText(f"{reason}\n\n{detection}\n\n{policy}")
+        self.detail_text.setText(detail)
         self.open_upstream_button.setEnabled(bool(app.upstream_url))
         self.configure_button.setEnabled(
             app_key == "open-agb-firm" and self._open_agb_config_is_current()
