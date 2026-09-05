@@ -87,3 +87,14 @@ def test_configured_startup_skips_selector_without_requiring_library_online() ->
     assert 'ACTIVE_WORKSPACES = {"vita", "3ds", "ds"}' in source
     assert 'return bool(source.local_root.strip())' in source
     assert 'Path(source.local_root).expanduser().is_dir()' not in source
+
+
+def test_runtime_preference_is_persisted_and_3ds_ra_remains_selectable() -> None:
+    source = _source("romm_vita_manager/workspace_dashboard.py")
+
+    assert 'updated = set_device_preference(self._reload_config(), self.workspace_key, key)' in source
+    assert 'save_config(updated)' in source
+    assert 'self.statusBar().showMessage("Runtime preference saved.", 3000)' in source
+    assert 'if self.workspace_key == "3ds" and option.key == "retroachievements":' in source
+    assert 'radio.setEnabled(False)' not in source
+    assert 'Prefer RetroArch where the selected 3DS platform exposes a supported RetroArch route.' in source
