@@ -204,6 +204,18 @@ class VitaFtpBackend:
             pass
         self._rename(backup, remote)
 
+    def _recover_failed_backup_rename(self, backup: str, remote: str) -> None:
+        """Best-effort recovery when RNTO fails after a destination backup attempt."""
+        try:
+            remote_present = self.remote_size(remote) is not None
+            backup_present = self.remote_size(backup) is not None
+            if not remote_present and backup_present:
+                self._rename(backup, remote)
+        except Exception:
+            # Preserve the original rename failure. If VitaShell left a backup in
+            # place, it is safer to retain that recovery copy than mask the cause.
+            pass
+
     def upload(
         self,
         local_path: Path,
@@ -280,7 +292,12 @@ class VitaFtpBackend:
             backup = posixpath.join(
                 parent, f".{posixpath.basename(remote)}.rommheld-{token}.backup"
             )
-            self._rename(remote, backup)
+            try:
+                self._rename(remote, backup)
+            except Exception:
+                self._recover_failed_backup_rename(backup, remote)
+                self._cleanup_remote_file(temporary)
+                raise
 
         try:
             self._rename(temporary, remote)
