@@ -226,7 +226,7 @@ class LocalLibraryWidget(QWidget):
         self.status_filter.setToolTip(
             "Install state is checked during FTP transfer because VitaShell FTP does not expose a cheap bulk-status query."
             if using_ftp
-            else "Filter by files detected on the mounted Vita filesystem."
+            else "Choose a status filter to inspect files detected on the mounted Vita filesystem."
         )
         self.copy_button.setText("Copy via VitaShell FTP" if using_ftp else "Copy to Vita")
         if refresh:
@@ -299,11 +299,22 @@ class LocalLibraryWidget(QWidget):
 
     def _render_games(self) -> None:
         self.game_list.clear()
+        show_status = (
+            self.target_key == "vita"
+            and not self._using_ftp()
+            and self.status_filter.currentText() != "All games"
+        )
         for game in self.filtered_games:
-            state, detail = self._game_status(game)
             metadata = f"{platform_label(game.source_platform)} • {human_size(game.size)}"
-            if self.target_key == "vita" and not self._using_ftp():
+            if show_status:
+                state, detail = self._game_status(game)
                 metadata += f" • {STATUS_LABELS.get(state, state.title())}"
+            elif self.target_key != "vita":
+                detail = "Destination is managed from the Device workflow"
+            elif self._using_ftp():
+                detail = "VitaShell FTP checks the remote file when transfer starts"
+            else:
+                detail = "Choose a status filter to inspect the current Vita destination state"
             item = QListWidgetItem(f"{game.name}\n{metadata}")
             item.setData(Qt.ItemDataRole.UserRole, game)
             item.setToolTip(detail)
