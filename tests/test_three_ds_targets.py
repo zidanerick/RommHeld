@@ -1,5 +1,6 @@
 from romm_vita_manager.three_ds_targets import (
     THREE_DS_PLATFORM_SLUGS,
+    RETROARCH_TARGET_PLATFORM_SLUGS,
     available_targets,
     compatible_platform,
     default_destination,
@@ -26,7 +27,8 @@ def test_famicom_and_fds_remain_retroarch_only():
 def test_dedicated_runtime_platforms_are_exposed_without_forcing_retroarch():
     assert [target.key for target in available_targets("nds")] == ["twilight"]
     assert [target.key for target in available_targets("virtualboy")] == ["red_viper"]
-    assert [target.key for target in available_targets("n64")] == ["daedalusx64", "retroarch"]
+    assert [target.key for target in available_targets("n64")] == ["daedalusx64"]
+    assert "n64" not in RETROARCH_TARGET_PLATFORM_SLUGS
     for slug in ("nds", "virtualboy", "n64"):
         assert slug in THREE_DS_PLATFORM_SLUGS
         assert compatible_platform(slug)
@@ -47,7 +49,7 @@ def test_runtime_preference_chooses_dedicated_routes_by_default():
 
 def test_retroachievements_preference_uses_retroarch_only_when_exposed():
     assert preferred_target_key("gba", "retroachievements") == "retroarch"
-    assert preferred_target_key("n64", "retroachievements") == "retroarch"
+    assert preferred_target_key("n64", "retroachievements") == "daedalusx64"
     assert preferred_target_key("nds", "retroachievements") == "twilight"
     assert preferred_target_key("virtualboy", "retroachievements") == "red_viper"
 
@@ -67,11 +69,10 @@ def test_default_destinations_are_stable_and_explicit():
     assert default_destination("open_agb_firm", "gba", "Metroid Fusion.gba") == "/roms/gba/Metroid Fusion.gba"
     assert default_destination("native_gba", "gba", "Metroid Fusion.gba") == "/cias/Metroid Fusion.cia"
     assert default_destination("vc_cia", "gba", "Metroid Fusion.gba") == "/cias/Metroid Fusion.cia"
-    assert default_destination("retroarch", "gba", "Metroid Fusion.gba") == "/roms/gba/Metroid Fusion.gba"
-    assert default_destination("retroarch", "n64", "Mario 64.z64") == "/roms/n64/Mario 64.z64"
     assert default_destination("twilight", "nds", "Mario Kart DS.nds") == "/roms/nds/Mario Kart DS.nds"
     assert default_destination("red_viper", "virtualboy", "Wario Land.vb") == "/roms/virtualboy/Wario Land.vb"
     assert default_destination("daedalusx64", "n64", "Mario 64.z64") == "/3ds/DaedalusX64/Roms/Mario 64.z64"
+    assert default_destination("retroarch", "gba", "Metroid Fusion.gba") == "/roms/gba/Metroid Fusion.gba"
     assert default_destination("vc_cia", "gbc", "Oracle of Seasons.gbc") == "/cias/Oracle of Seasons.cia"
     assert default_destination("vc_cia", "nes", "Renegade.nes") == "/cias/Renegade.cia"
     assert default_destination("vc_cia", "gamegear", "Sonic.gg") == "/cias/Sonic.cia"
