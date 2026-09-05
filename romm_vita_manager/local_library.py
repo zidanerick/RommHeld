@@ -304,6 +304,7 @@ class LocalLibraryWidget(QWidget):
 
         jobs = []
         review: list[str] = []
+        replacements: list[str] = []
         for game in selected:
             state, _detail = self._game_status(game)
             if state == "INSTALLED":
@@ -312,6 +313,8 @@ class LocalLibraryWidget(QWidget):
             if mode == "unknown":
                 review.append(f"{game.name} ({game.source_platform})")
                 continue
+            if state == "DIFFERENT":
+                replacements.append(game.name)
             jobs.append((game, destination, mode, label))
 
         if review:
@@ -346,11 +349,20 @@ class LocalLibraryWidget(QWidget):
             )
             return
 
+        replacement_note = ""
+        if replacements:
+            replacement_note = (
+                f"\n\n{len(replacements)} destination file(s) have different sizes and will be replaced. "
+                "Each existing file is preserved until its replacement has copied successfully."
+            )
         if (
             QMessageBox.question(
                 self,
-                "Confirm copy",
-                f"Process {len(jobs)} game(s), {human_size(total)}?\n\nAlready-complete files will be skipped.",
+                "Confirm replacements" if replacements else "Confirm copy",
+                f"Process {len(jobs)} game(s), {human_size(total)}?"
+                f"{replacement_note}\n\nAlready-complete files will be skipped.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
             != QMessageBox.StandardButton.Yes
         ):
