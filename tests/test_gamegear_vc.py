@@ -2,16 +2,26 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
+
 from romm_vita_manager import classic_vc
 from romm_vita_manager.classic_vc_title_fix import hardware_safe_classic_title_id
 from romm_vita_manager.gamegear_vc import (
     _marchive_key,
     pack_gamegear_mdf,
     unpack_gamegear_mdf,
+    validate_gamegear_rom,
 )
 
 
 _DONOR_BASENAME = "GGSonic2_JUE_2012_09_12.GG.m"
+
+
+def _gamegear_rom(*, region: int = 0x6) -> bytes:
+    data = bytearray(0x8000)
+    data[0x7FF0:0x7FF8] = b"TMR SEGA"
+    data[0x7FFF] = (region << 4) | 0xC
+    return bytes(data)
 
 
 def test_marchive_key_matches_independent_marchivebatchtool_vector() -> None:
@@ -47,6 +57,22 @@ def test_gamegear_filename_is_part_of_archive_cipher() -> None:
         assert "decompress" in str(exc).lower()
     else:
         raise AssertionError("MArchive unexpectedly decoded with the wrong donor filename")
+
+
+def test_gamegear_validator_accepts_gamegear_header_and_strips_copier_header() -> None:
+    raw = _gamegear_rom(region=0x6)
+    assert validate_gamegear_rom(raw) == raw
+    assert validate_gamegear_rom(bytes(512) + raw) == raw
+
+
+def test_gamegear_validator_rejects_master_system_region() -> None:
+    with pytest.raises(ValueError, match="not identified as Game Gear"):
+        validate_gamegear_rom(_gamegear_rom(region=0x4))
+
+
+def test_gamegear_validator_rejects_headerless_payload() -> None:
+    with pytest.raises(ValueError, match="TMR SEGA"):
+        validate_gamegear_rom(bytes(0x8000))
 
 
 def test_gamegear_family_is_installed_in_validated_classic_backend() -> None:
