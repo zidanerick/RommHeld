@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -81,6 +82,26 @@ def _write_optional(path: Path, data: bytes) -> Path | None:
     return None
 
 
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _optional_region_hash_matches(entry: dict, path: Path | None, field: str) -> bool:
+    expected = str(entry.get(field, "")).strip().lower()
+    if not expected:
+        # Existing v5 caches predate persisted auxiliary hashes. Preserve that
+        # compatibility contract; newly prepared caches always store hashes.
+        return True
+    if path is None or not path.is_file():
+        return False
+    if len(expected) != 64 or any(ch not in "0123456789abcdef" for ch in expected):
+        return False
+    try:
+        return _sha256(path.read_bytes()) == expected
+    except OSError:
+        return False
+
+
 def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePaths | None:
     family = _family_key(family)
     root = config.get("classic_vc", {})
@@ -120,6 +141,10 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
     if ncch_logo is not None and not ncch_logo.is_file():
         return None
     if ncch_logo is not None and ncch_logo.stat().st_size != 0x2000:
+        return None
+    if not _optional_region_hash_matches(entry, ncch_plain, "ncch_plain_sha256"):
+        return None
+    if not _optional_region_hash_matches(entry, ncch_logo, "ncch_logo_sha256"):
         return None
     # A v5 NES/SNES cache must actually contain the dedicated retail launch
     # logo captured from its donor. Otherwise accepting the cache would defeat
@@ -235,7 +260,9 @@ def extract_and_cache_classic_runtime(
         "donor_banner_path": str(donor_banner),
         "donor_icon_path": str(donor_icon),
         "ncch_plain_path": str(ncch_plain) if ncch_plain is not None else "",
+        "ncch_plain_sha256": _sha256(auxiliary.plain) if auxiliary.plain else "",
         "ncch_logo_path": str(ncch_logo) if ncch_logo is not None else "",
+        "ncch_logo_sha256": _sha256(auxiliary.logo) if auxiliary.logo else "",
         "rom_path": runtime.rom_path,
         "runtime_profile": runtime_profile,
     }
