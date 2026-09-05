@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from typing import Mapping
 
 
+ROMM_LIBRARY_WORKSPACES = frozenset({"3ds"})
+
+
 @dataclass(frozen=True)
 class LibrarySource:
     mode: str
@@ -16,6 +19,23 @@ class LibrarySource:
         if self.mode == "romm_api":
             return "RomM Server"
         return "Local ROM directory"
+
+
+def workspace_supports_library_source(workspace_key: str, mode: str) -> bool:
+    """Return whether a workspace currently has a real browser for this source.
+
+    Local-library presentation is implemented for Vita, 3DS and DS. The RomM
+    browser/deployment path is currently implemented for 3DS only. Keeping this
+    capability explicit prevents onboarding or Settings from saving a source
+    that would produce an intentionally empty Library page.
+    """
+    normalized_workspace = str(workspace_key or "").strip().lower()
+    normalized_mode = str(mode or "").strip().lower()
+    if normalized_mode == "local":
+        return normalized_workspace in {"vita", "3ds", "ds"}
+    if normalized_mode == "romm_api":
+        return normalized_workspace in ROMM_LIBRARY_WORKSPACES
+    return False
 
 
 def get_library_source(config: Mapping[str, object]) -> LibrarySource:
