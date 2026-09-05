@@ -30,12 +30,14 @@ def test_3ds_filesystem_dialog_surfaces_runtime_readiness_without_blocking_trans
 
     assert "evaluate_target_runtime" in source
     assert 'StatusPill("Runtime", "Not checked")' in source
+    assert "evaluate_target_runtime(root, self.target_key, self.platform_slug)" in source
     assert 'self.runtime_status.set_value("Detected")' in source
     assert 'self.runtime_status.set_value("Confirm on console")' in source
-    assert 'self.runtime_status.set_value("Runtime missing")' in source
+    assert 'self.runtime_status.set_value("Needs setup")' in source
     assert "The file can still be transferred with ftpd" in source
     assert "The ROM can still " in readiness
     assert "be copied now, but this route will not be launchable" in readiness
+    assert "scan_retroarch_route" in readiness
 
 
 def test_3ds_package_generation_remains_separate_from_filesystem_transport():
