@@ -77,6 +77,15 @@ def test_local_library_status_checks_are_cached_and_contextual() -> None:
     assert '"Checked during FTP transfer"' not in source
 
 
+def test_local_library_only_exposes_real_view_controls() -> None:
+    source = _source("romm_vita_manager/local_library.py")
+
+    assert 'self.view_mode' not in source
+    assert '"Tiles"' not in source
+    assert 'QListWidget.ViewMode.IconMode' not in source
+    assert 'QSize' not in source
+
+
 def test_local_library_empty_states_are_actionable() -> None:
     source = _source("romm_vita_manager/local_library.py")
 
