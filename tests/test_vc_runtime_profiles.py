@@ -10,7 +10,7 @@ from romm_vita_manager.vc_runtime_profiles import (
 )
 
 
-def test_gba_guidance_accepts_any_genuine_agb_firm_donor():
+def test_gba_guidance_accepts_any_genuine_gba_vc_donor():
     guidance = guidance_for_family("gba")
     assert guidance.classification == "recommended"
     assert "AGB_FIRM" in guidance.recommendation
@@ -52,16 +52,16 @@ def test_classic_runtime_profile_is_deterministic_and_sensitive_to_runtime_code(
     assert first["classification"] == "hardware-retest-required"
 
 
-def test_gba_runtime_profile_records_donor_identity_and_asset_hashes():
+def test_gba_runtime_profile_records_retail_donor_identity_and_asset_hashes():
     profile = build_gba_runtime_profile(
-        {"title_id": "0004000000F12300"},
+        {"title_id": "0004000000075400"},
         boot_logo=b"logo",
         donor_banner=b"banner",
         donor_icon=b"icon",
     )
     assert profile["family"] == "gba"
     assert profile["classification"] == "recommended"
-    assert profile["donor_title_id"] == "0004000000f12300"
+    assert profile["donor_title_id"] == "0004000000075400"
     assert profile["boot_logo_sha256"] == hashlib.sha256(b"logo").hexdigest()
 
 
