@@ -8,7 +8,8 @@ from .gba_vc import (
     extract_native_donor_banner,
     extract_native_donor_icon,
 )
-from .vc_donors import configure_boot9, configure_donor
+from .vc_donors import configure_boot9, configure_donor, configured_donor_info
+from .vc_runtime_profiles import build_gba_runtime_profile
 
 
 BOOT_LOGO_FILENAME = "agb_firm_boot_logo.bin"
@@ -75,6 +76,7 @@ def save_gba_vc_asset_paths(
     boot_logo: Path | None = None,
     donor_banner: Path | None = None,
     donor_icon: Path | None = None,
+    runtime_profile: dict | None = None,
 ) -> dict:
     updated = dict(config)
     settings = (
@@ -88,6 +90,8 @@ def save_gba_vc_asset_paths(
         settings["donor_banner_path"] = str(donor_banner.expanduser())
     if donor_icon is not None:
         settings["donor_icon_path"] = str(donor_icon.expanduser())
+    if runtime_profile is not None:
+        settings["runtime_profile"] = dict(runtime_profile)
     updated["gba_vc"] = settings
     save_config(updated)
     return updated
@@ -166,20 +170,25 @@ def extract_and_cache_gba_donor_assets(
     updated = configure_boot9(config, boot9)
     updated = configure_donor(updated, "gba", donor_cia)
 
-    logo = _write_cached_asset(
-        cached_boot_logo_path(), extract_native_boot_logo(donor_cia, boot9)
+    logo_bytes = extract_native_boot_logo(donor_cia, boot9)
+    banner_bytes = extract_native_donor_banner(donor_cia, boot9)
+    icon_bytes = extract_native_donor_icon(donor_cia, boot9)
+    runtime_profile = build_gba_runtime_profile(
+        configured_donor_info(updated, "gba"),
+        boot_logo=logo_bytes,
+        donor_banner=banner_bytes,
+        donor_icon=icon_bytes,
     )
-    banner = _write_cached_asset(
-        cached_donor_banner_path(), extract_native_donor_banner(donor_cia, boot9)
-    )
-    icon = _write_cached_asset(
-        cached_donor_icon_path(), extract_native_donor_icon(donor_cia, boot9)
-    )
+
+    logo = _write_cached_asset(cached_boot_logo_path(), logo_bytes)
+    banner = _write_cached_asset(cached_donor_banner_path(), banner_bytes)
+    icon = _write_cached_asset(cached_donor_icon_path(), icon_bytes)
     updated = save_gba_vc_asset_paths(
         updated,
         boot_logo=logo,
         donor_banner=banner,
         donor_icon=icon,
+        runtime_profile=runtime_profile,
     )
     updated = _forget_gba_donor_sources(updated)
     return updated, logo, banner
