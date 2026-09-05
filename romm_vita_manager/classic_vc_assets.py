@@ -162,6 +162,9 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
             exheader=exheader.read_bytes(),
             romfs_template=romfs_bytes,
             rom_path=rom_path,
+            donor_banner=donor_banner.read_bytes(),
+            donor_icon=donor_icon.read_bytes(),
+            logo=logo.read_bytes() if logo is not None else None,
         ):
             return None
     except (OSError, ValueError):
@@ -237,6 +240,9 @@ def extract_and_cache_classic_runtime(
         exheader=runtime.exheader,
         romfs_template=runtime.romfs_template,
         rom_path=runtime.rom_path,
+        donor_banner=runtime.donor_banner,
+        donor_icon=runtime.donor_icon,
+        logo=runtime.logo if runtime.logo else None,
     )
 
     cache = runtime_cache_dir(family)
