@@ -2,12 +2,27 @@ from __future__ import annotations
 
 import pytest
 
+import romm_vita_manager.classic_vc as classic_vc
 import romm_vita_manager.classic_vc_donor_validation as donor_validation
 
 
 def _gb_rom(*, cgb_flag: int) -> bytes:
     data = bytearray(0x200)
     data[0x143] = cgb_flag
+    return bytes(data)
+
+
+def _valid_target_rom(*, cgb_flag: int) -> bytes:
+    data = bytearray(0x8000)
+    data[0x134:0x13C] = b"ROMMHELD"
+    data[0x143] = cgb_flag
+    data[0x147] = 0x00
+    data[0x148] = 0x00
+    data[0x149] = 0x00
+    checksum = 0
+    for value in data[0x134:0x14D]:
+        checksum = (checksum - value - 1) & 0xFF
+    data[0x14D] = checksum
     return bytes(data)
 
 
@@ -46,3 +61,37 @@ def test_gb_donor_rejects_colour_cartridge(monkeypatch: pytest.MonkeyPatch) -> N
 
     _payload(monkeypatch, _gb_rom(cgb_flag=0x00))
     donor_validation.validate_classic_donor_family("donor", "boot9", "gb", object())
+
+
+def test_gb_target_accepts_valid_monochrome_header():
+    rom = _valid_target_rom(cgb_flag=0x00)
+    assert donor_validation.validate_gameboy_target_rom(rom, "gb") == rom
+
+
+def test_gbc_target_accepts_valid_colour_header():
+    rom = _valid_target_rom(cgb_flag=0x80)
+    assert donor_validation.validate_gameboy_target_rom(rom, "gbc") == rom
+
+
+def test_gb_target_rejects_colour_cartridge():
+    with pytest.raises(ValueError, match="Game Boy Color target"):
+        donor_validation.validate_gameboy_target_rom(_valid_target_rom(cgb_flag=0xC0), "gb")
+
+
+def test_gbc_target_rejects_monochrome_cartridge():
+    with pytest.raises(ValueError, match="Game Boy target"):
+        donor_validation.validate_gameboy_target_rom(_valid_target_rom(cgb_flag=0x00), "gbc")
+
+
+def test_gameboy_target_rejects_bad_header_checksum():
+    rom = bytearray(_valid_target_rom(cgb_flag=0x00))
+    rom[0x134] ^= 0x01
+    with pytest.raises(ValueError, match="header checksum"):
+        donor_validation.validate_gameboy_target_rom(bytes(rom), "gb")
+
+
+def test_live_classic_prepare_path_applies_target_validation():
+    rom = _valid_target_rom(cgb_flag=0x80)
+    assert classic_vc.prepare_classic_rom(rom, "gbc") == rom
+    with pytest.raises(ValueError, match="Game Boy Color target"):
+        classic_vc.prepare_classic_rom(rom, "gb")
