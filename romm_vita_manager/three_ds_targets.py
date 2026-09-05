@@ -68,13 +68,13 @@ RETROARCH = DeploymentTarget(
     "retroarch",
 )
 
-# Platforms for which the current official 3DS RetroArch builds publish a
+# Platforms for which the current official 3DS RetroArch recipe builds a
 # usable core route that RommHeld intentionally exposes. Dedicated runtimes are
 # tracked separately below. N64 is intentionally absent: the current 3DS
-# buildbot does not publish a Mupen64Plus/ParaLLEl N64 core.
+# recipe does not build a Mupen64Plus/ParaLLEl N64 core. Amiga and ScummVM are
+# also absent from that recipe and must not be advertised as RetroArch routes.
 RETROARCH_TARGET_PLATFORM_SLUGS = frozenset(
     {
-        "3ds",
         "gba",
         "gb",
         "gbc",
@@ -95,9 +95,7 @@ RETROARCH_TARGET_PLATFORM_SLUGS = frozenset(
         "vectrex",
         "colecovision",
         "c64",
-        "amiga",
         "dos",
-        "scummvm",
         "wonderswan",
         "wonderswan-color",
         "neogeomvs",
@@ -120,15 +118,15 @@ RETROACHIEVEMENTS_RETROARCH_PLATFORM_SLUGS = frozenset(
         "nes",        # FCEUmm / QuickNES
         "famicom",    # FCEUmm
         "fds",        # FCEUmm
-        "gamegear",   # Genesis Plus GX / Gearsystem
-        "sms",        # Genesis Plus GX / PicoDrive / SMS Plus GX / Gearsystem
+        "gamegear",   # Genesis Plus GX
+        "sms",        # Genesis Plus GX / PicoDrive / SMS Plus GX
         "genesis",    # Genesis Plus GX / PicoDrive / ClownMDEmu
         "sega32",     # PicoDrive
         "segacd",     # Genesis Plus GX / PicoDrive
     }
 )
 
-DIRECT_RUNTIME_PLATFORM_SLUGS = frozenset({"gba", "nds", "virtualboy", "n64"})
+DIRECT_RUNTIME_PLATFORM_SLUGS = frozenset({"3ds", "gba", "nds", "virtualboy", "n64"})
 THREE_DS_PLATFORM_SLUGS = RETROARCH_TARGET_PLATFORM_SLUGS | DIRECT_RUNTIME_PLATFORM_SLUGS
 
 # Compatibility alias. Existing RomM library code historically used this name
