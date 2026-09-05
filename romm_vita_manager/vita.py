@@ -18,13 +18,20 @@ def is_vita_mount(mount: Path) -> bool:
         return False
 
 
-def find_vita_mounts() -> list[Path]:
+def find_vita_mount_candidates() -> list[Path]:
+    """Return every mounted filesystem with strong VitaShell/ux0 evidence."""
     return [mount for mount in writable_volumes() if is_vita_mount(mount)]
 
 
 def unique_vita_mount(mounts: list[Path]) -> Path | None:
     """Return a mount only when exactly one Vita USB candidate exists."""
     return mounts[0] if len(mounts) == 1 else None
+
+
+def find_vita_mounts() -> list[Path]:
+    """Return the single safe Vita USB mount, or none when detection is ambiguous."""
+    mount = unique_vita_mount(find_vita_mount_candidates())
+    return [mount] if mount is not None else []
 
 
 def free_space(path: Path) -> int:
@@ -43,6 +50,7 @@ def used_space(path: Path) -> int:
 __all__ = [
     "VITA_REQUIRED_MARKERS",
     "VITA_SUPPORTING_MARKERS",
+    "find_vita_mount_candidates",
     "find_vita_mounts",
     "free_space",
     "is_vita_mount",
