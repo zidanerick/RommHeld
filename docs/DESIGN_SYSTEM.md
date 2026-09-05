@@ -40,6 +40,8 @@ Examples:
 - Send with FTP
 - Save settings
 
+The primary action should live on the surface where the user made the relevant selection. Do not require a user to select a game in Library and then navigate elsewhere merely to begin its normal deployment flow.
+
 ### Progressive disclosure
 
 Show the common path first. Advanced packaging, runtime overrides, remote paths and troubleshooting controls should appear only when relevant.
@@ -118,25 +120,27 @@ Sidebar responsibilities:
 - RommHeld identity
 - active handheld identity
 - page navigation
-- compact device state
+- compact active-device state
 - change-handheld action
+
+The sidebar should not repeat unrelated disconnected handhelds while the user is already working inside one active handheld workspace.
 
 Content responsibilities:
 
 - page title
-- brief context subtitle
+- brief page-specific context subtitle
 - page-specific controls and data
 
-### Navigation order
+### Navigation model
 
-Preferred order for current workspaces:
+Current primary workspace navigation is:
 
 1. Library
 2. Device
 3. Setup
-4. Queue
-5. Tools
-6. Settings
+4. Settings
+
+`Queue` must not appear until RommHeld has a real persistent queue with useful per-item state. `Tools` must not appear merely to duplicate actions already available from Library or Device. When a tool is genuinely secondary or advanced, prefer a contextual action or progressive disclosure before adding another permanent navigation destination.
 
 Do not add pages for functionality that is merely planned. A disabled placeholder page is acceptable only when it materially explains the current product state and is temporary.
 
@@ -154,7 +158,7 @@ Recommended hierarchy:
 - Body: system default
 - Metadata/caption: 9–11 px, secondary or tertiary colour
 
-Avoid all-caps body copy. All-caps is reserved for very small structural labels such as `WORKSPACE` or `DEVICES`.
+Avoid all-caps body copy. All-caps is reserved for very small structural labels such as `WORKSPACE` or `DEVICE`.
 
 ## Spacing and geometry
 
@@ -186,6 +190,8 @@ Secondary actions use neutral raised surfaces.
 Tertiary actions use quiet/transparent buttons where appropriate.
 
 Destructive actions must use error semantics and should not be the most visually dominant control by default.
+
+Primary actions need visible hover, pressed, disabled and keyboard-focus states. A coloured button with no interaction feedback is not considered finished.
 
 ### Inputs
 
@@ -232,6 +238,8 @@ Avoid a bare `Loading…` when the operation is known.
 ### Error
 
 State the failing boundary and likely correction. Network, authentication, packaging, storage and device errors should not be collapsed into one generic message.
+
+Successful routine operations should generally finish inline rather than opening a modal summary. Reserve modal dialogs for decisions, destructive actions, unusual conditions and errors.
 
 ## Platform-specific behaviour
 
@@ -305,6 +313,7 @@ Before merging UI work, check:
 
 - Does the active platform use the correct manufacturer-family accent?
 - Is there one obvious primary action?
+- Is that primary action available where the user made the relevant selection?
 - Is important state visible without opening another dialog?
 - Are empty/loading/error states specific and actionable?
 - Did the change add another hardcoded colour or spacing system?
