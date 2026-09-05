@@ -24,6 +24,9 @@ def test_3ds_filesystem_dialog_exposes_mounted_sd_and_ftpd_routes():
 
 def test_3ds_filesystem_dialog_surfaces_runtime_readiness_without_blocking_transport():
     source = DEPLOY_PATH.read_text(encoding="utf-8")
+    readiness = (ROOT / "romm_vita_manager" / "three_ds_readiness.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "evaluate_target_runtime" in source
     assert 'StatusPill("Runtime", "Not checked")' in source
@@ -31,9 +34,8 @@ def test_3ds_filesystem_dialog_surfaces_runtime_readiness_without_blocking_trans
     assert 'self.runtime_status.set_value("Confirm on console")' in source
     assert 'self.runtime_status.set_value("Runtime missing")' in source
     assert "The file can still be transferred with ftpd" in source
-    assert "The ROM can still be copied now" in (
-        ROOT / "romm_vita_manager" / "three_ds_readiness.py"
-    ).read_text(encoding="utf-8")
+    assert "The ROM can still " in readiness
+    assert "be copied now, but this route will not be launchable" in readiness
 
 
 def test_3ds_package_generation_remains_separate_from_filesystem_transport():
