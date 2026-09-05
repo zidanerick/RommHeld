@@ -16,12 +16,23 @@ def test_placeholder_navigation_is_not_exposed() -> None:
     assert 'QPushButton("Switch handheld")' in source
 
 
+def test_workspace_only_exposes_core_destinations() -> None:
+    source = _source("romm_vita_manager/workspace_dashboard.py")
+
+    assert 'self.shell.add_section("Library"' in source
+    assert 'self.shell.add_section("Device"' in source
+    assert 'self.shell.add_section("Settings"' in source
+    assert 'self.shell.add_section("Setup"' not in source
+    assert 'self.shell.add_section("Queue"' not in source
+    assert 'self.shell.add_section("Tools"' not in source
+    assert 'setup = AccentButton("Vita setup", accent)' in source
+
+
 def test_page_subtitles_are_contextual() -> None:
     source = _source("romm_vita_manager/management_shell.py")
 
     assert 'if section == "library":' in source
     assert 'if section == "device":' in source
-    assert 'if section == "setup":' in source
     assert 'if section == "settings":' in source
     assert 'self.page_subtitle.setText(self._subtitle_for_section(key))' in source
 
