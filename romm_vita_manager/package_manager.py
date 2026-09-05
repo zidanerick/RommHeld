@@ -143,6 +143,11 @@ def download_package(package: PackageSpec, progress=None, cancel_event=None) -> 
 
         if cancel_event is not None and cancel_event.is_set():
             raise InterruptedError(f"Downloading {package.name} was cancelled.")
+        if total and completed != total:
+            raise IOError(
+                f"Download size verification failed for {package.name}: "
+                f"expected {total} bytes, got {completed} bytes"
+            )
 
         actual = hasher.hexdigest()
         if digest and actual.lower() != digest.lower():
