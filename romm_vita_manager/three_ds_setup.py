@@ -30,6 +30,7 @@ from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 
 
 NINTENDO_RED = brand_for_platform("3ds").accent
+FTPD_RELEASE_URL = "https://github.com/mtheall/ftpd/releases"
 
 
 @dataclass(frozen=True)
@@ -224,6 +225,11 @@ class ThreeDSSetupDialog(QDialog):
                 "FTP is only the transport used for filesystem transfers. A working FTP connection does not imply that FBI is installed or ready for Remote Install."
             )
         )
+        ftp_card.content.addWidget(
+            self._secondary(
+                "Recommended server: mtheall ftpd. Open ftpd on the 3DS and leave it running, then enter the IP address and port shown on its screen. Port 5000 is the normal default; username and password are only needed if you configured authentication in ftpd."
+            )
+        )
         ftp_row = QHBoxLayout()
         ftp_row.setSpacing(10)
         endpoint = QLabel(self._ftp_endpoint_text())
@@ -232,11 +238,14 @@ class ThreeDSSetupDialog(QDialog):
             f"color:{DARK.text_primary};font-weight:600;background:transparent;"
         )
         ftp_row.addWidget(endpoint, 1)
+        ftp_release = QPushButton("Open ftpd release")
+        ftp_release.clicked.connect(self.open_ftpd_upstream)
         ftp_open = AccentButton(
             "Open FTP Manager" if self._ftp_host else "Configure FTP",
             NINTENDO_RED,
         )
         ftp_open.clicked.connect(lambda: self.done(2))
+        ftp_row.addWidget(ftp_release)
         ftp_row.addWidget(ftp_open)
         ftp_card.content.addLayout(ftp_row)
 
@@ -439,6 +448,10 @@ class ThreeDSSetupDialog(QDialog):
             item.setToolTip(component.description)
             item.setData(Qt.ItemDataRole.UserRole, component.upstream_url)
             self.component_list.addItem(item)
+
+    def open_ftpd_upstream(self) -> None:
+        if is_web_url(FTPD_RELEASE_URL):
+            webbrowser.open(FTPD_RELEASE_URL)
 
     def open_fbi_upstream(self) -> None:
         url = COMPONENTS[0].upstream_url
