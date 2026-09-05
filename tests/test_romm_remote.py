@@ -65,11 +65,12 @@ def test_list_3ds_games_requires_the_3ds_platform(monkeypatch):
         raise AssertionError("Expected a RomMApiError")
 
 
-def test_list_compatible_games_maps_gba_and_skips_unknown_platform(monkeypatch):
+def test_list_compatible_games_maps_dedicated_runtime_platforms_and_skips_unknown(monkeypatch):
     responses = {
         "platforms": [
             {"id": 10, "name": "Game Boy Advance", "slug": "gba"},
             {"id": 20, "name": "Nintendo DS", "slug": "nds"},
+            {"id": 30, "name": "PlayStation 2", "slug": "ps2"},
         ],
         "roms": {
             "items": [
@@ -87,6 +88,13 @@ def test_list_compatible_games_maps_gba_and_skips_unknown_platform(monkeypatch):
                     "fs_name": "example.nds",
                     "platform_id": 20,
                     "size_bytes": 9000,
+                },
+                {
+                    "id": 9,
+                    "name": "Unsupported PS2 game",
+                    "fs_name": "unsupported.iso",
+                    "platform_id": 30,
+                    "size_bytes": 12345,
                 },
             ]
         },
@@ -108,7 +116,16 @@ def test_list_compatible_games_maps_gba_and_skips_unknown_platform(monkeypatch):
             4194304,
             "https://romm.example/assets/romm/resources/roms/10/7/cover.jpg",
             "gba",
-        )
+        ),
+        RomMRemoteGame(
+            8,
+            "Example DS game",
+            "example.nds",
+            "Nintendo DS",
+            9000,
+            None,
+            "nds",
+        ),
     ]
 
 
