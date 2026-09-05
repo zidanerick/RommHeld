@@ -2,13 +2,14 @@
 """RommHeld application launcher."""
 from __future__ import annotations
 
-from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from romm_vita_manager.config import load_config
 from romm_vita_manager.console_selector import PlatformSelectorDialog
-from romm_vita_manager.library_sources import get_library_source
-from romm_vita_manager.romm_startup import RomMStartupVerifier
+from romm_vita_manager.library_sources import (
+    get_library_source,
+    workspace_supports_library_source,
+)
 from romm_vita_manager.theme import apply_application_theme
 from romm_vita_manager.workspace_dashboard import WorkspaceDashboardWindow
 
@@ -20,14 +21,19 @@ def _workspace_is_configured(config: dict) -> bool:
     """Return whether normal startup can enter the saved workspace directly.
 
     A temporarily unavailable library path or service is runtime state, not a
-    reason to replay onboarding. The workspace can explain and recover from it.
+    reason to replay onboarding. An unsupported workspace/source pairing is a
+    configuration problem, however, so onboarding must repair it rather than
+    opening a Library surface that cannot use the saved provider.
     """
     if not bool(config.get("setup_complete")):
         return False
-    if str(config.get("active_console", "")).strip().lower() not in ACTIVE_WORKSPACES:
+    workspace = str(config.get("active_console", "")).strip().lower()
+    if workspace not in ACTIVE_WORKSPACES:
         return False
 
     source = get_library_source(config)
+    if not workspace_supports_library_source(workspace, source.mode):
+        return False
     if source.mode == "local":
         return bool(source.local_root.strip())
     if source.mode == "romm_api":
@@ -36,24 +42,12 @@ def _workspace_is_configured(config: dict) -> bool:
 
 
 def _run_selector(config: dict) -> bool:
+    # The selector owns explicit asynchronous RomM connection testing. Avoid a
+    # second startup verifier thread whose completion would have to be waited on
+    # when the dialog is dismissed, which can block the GUI during a network
+    # timeout.
     selector = PlatformSelectorDialog(config)
-    verifier: RomMStartupVerifier | None = None
-
-    source = get_library_source(config)
-    if source.mode == "romm_api" and source.romm_url.strip() and source.api_token.strip():
-        verifier = RomMStartupVerifier(source.romm_url, source.api_token, selector)
-        verifier.succeeded.connect(selector.source_status.setText)
-        verifier.failed.connect(
-            lambda message: selector.source_status.setText(f"RomM unavailable • {message}")
-        )
-        QTimer.singleShot(0, verifier.start)
-
-    accepted = selector.exec() == selector.DialogCode.Accepted
-    if verifier is not None and verifier.isRunning():
-        if not accepted:
-            verifier.requestInterruption()
-        verifier.wait()
-    return accepted
+    return selector.exec() == selector.DialogCode.Accepted
 
 
 def main() -> None:
