@@ -39,6 +39,19 @@ def test_missing_cia_capable_app_preserves_unknown_installed_title_state(tmp_pat
     assert "installed CIA title may still be present" in status.detection_note
 
 
+def test_staged_installer_cias_do_not_satisfy_app_readiness(tmp_path: Path):
+    (tmp_path / "FBI.cia").write_bytes(b"installer only")
+    (tmp_path / "Universal-Updater.cia").write_bytes(b"installer only")
+
+    fbi = detect_three_ds_app(tmp_path, APP_BY_KEY["fbi"])
+    updater = detect_three_ds_app(tmp_path, APP_BY_KEY["universal-updater"])
+
+    assert not fbi.detected
+    assert not updater.detected
+    assert "installed CIA title may still be present" in fbi.detection_note
+    assert "installed CIA title may still be present" in updater.detection_note
+
+
 def test_scan_detects_foundation_transfer_and_coherent_twilight_runtime(tmp_path: Path):
     (tmp_path / "boot.firm").write_bytes(b"firm")
     (tmp_path / "boot.3dsx").write_bytes(b"3dsx")
