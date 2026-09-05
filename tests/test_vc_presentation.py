@@ -127,6 +127,10 @@ def test_official_badge_retains_left_vc_chrome_and_replaces_title(monkeypatch):
 
 
 def test_nes_badge_uses_localized_common2_template(monkeypatch) -> None:
+    # Retail Renegade has no COMMON2 in its common CGFX; every populated
+    # language scene contributes the 256x64 COMMON2 plaque that HOME Menu
+    # displays below the 3D NES/TV. This regression exists because dropping
+    # those localized slots produced a completely blank white panel on hardware.
     donor = Image.new("LA", (256, 64), (220, 255))
     ImageDraw.Draw(donor).rectangle((0, 0, 94, 63), fill=(90, 255))
     seen: list[str] = []
