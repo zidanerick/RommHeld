@@ -33,7 +33,7 @@ from .three_ds_storage import ThreeDSMountedStorageBackend, configured_3ds_stora
 from .three_ds_targets import default_destination
 from .ui_components import AccentButton, SurfaceCard
 from .vc_donors import configured_boot9_path, configured_donor_path
-from .vc_runtime_profiles import guidance_for_family, runtime_guidance_summary
+from .vc_runtime_profiles import runtime_guidance_details, runtime_guidance_summary
 from .vc_title_id_registry import displayed_title_id, persist_registered_title_id
 
 
@@ -413,9 +413,10 @@ class ClassicVcDeployDialog(QDialog):
         self._start_hshop_lookup()
 
     def _refresh_runtime_guidance(self) -> None:
-        guidance = guidance_for_family(self.family)
         self.runtime_guidance.setText(runtime_guidance_summary(self.config, self.family))
-        self.runtime_guidance.setToolTip("\n".join(guidance.details))
+        self.runtime_guidance.setToolTip(
+            "\n".join(runtime_guidance_details(self.config, self.family))
+        )
 
     def _choose_donor(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select Virtual Console donor", "", "CIA files (*.cia)")
