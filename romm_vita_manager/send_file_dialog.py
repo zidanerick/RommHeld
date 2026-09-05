@@ -500,13 +500,31 @@ class SendFileDialog(QDialog):
             self.status.setText(message)
             self._settled_status = None
 
+    def _worker_active(self) -> bool:
+        return self.worker is not None and self.worker.isRunning()
+
+    def _show_transfer_in_progress(self) -> None:
+        QMessageBox.information(
+            self,
+            "Transfer in progress",
+            "Cancel the active transfer before closing this window.",
+        )
+
+    def accept(self) -> None:
+        if self._worker_active():
+            self._show_transfer_in_progress()
+            return
+        super().accept()
+
+    def reject(self) -> None:
+        if self._worker_active():
+            self._show_transfer_in_progress()
+            return
+        super().reject()
+
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self.worker is not None and self.worker.isRunning():
-            QMessageBox.information(
-                self,
-                "Transfer in progress",
-                "Cancel the active transfer before closing this window.",
-            )
+        if self._worker_active():
+            self._show_transfer_in_progress()
             event.ignore()
             return
         super().closeEvent(event)
