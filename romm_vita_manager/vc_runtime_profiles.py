@@ -25,7 +25,7 @@ _GUIDANCE: dict[str, VcDonorGuidance] = {
         details=(
             "Nintendo's original GBA VC donor title IDs are not in the generated-inject F??? namespace.",
             "Donor choice is not used to emulate the target GBA game; AGB_FIRM provides the runtime.",
-            "RommHeld fingerprints the selected donor so presentation changes remain traceable.",
+            "RommHeld validates the donor's ROM + 0x360-byte .CAA footer structure before caching assets.",
         ),
     ),
     "gb": VcDonorGuidance(
@@ -156,19 +156,31 @@ def build_gba_runtime_profile(
     boot_logo: bytes,
     donor_banner: bytes,
     donor_icon: bytes,
+    donor_code_sha256: str,
+    donor_rom_size: int,
 ) -> dict:
     guidance = guidance_for_family("gba")
     logo_hash = _sha256(boot_logo)
     banner_hash = _sha256(donor_banner)
     icon_hash = _sha256(donor_icon)
     donor_title_id = str(donor_info.get("title_id", "")).strip().lower()
-    profile_id = _profile_id("gba", (donor_title_id, logo_hash, banner_hash, icon_hash))
+    code_hash = donor_code_sha256.strip().lower()
+    if len(code_hash) != 64 or any(ch not in "0123456789abcdef" for ch in code_hash):
+        raise ValueError("GBA donor .code SHA-256 must contain exactly 64 hexadecimal digits.")
+    if not 0 < donor_rom_size <= 0x2000000:
+        raise ValueError("GBA donor ROM size is outside the 32 MiB cartridge limit.")
+    profile_id = _profile_id(
+        "gba",
+        (donor_title_id, code_hash, str(donor_rom_size), logo_hash, banner_hash, icon_hash),
+    )
     return {
         "version": 1,
         "family": "gba",
         "profile_id": profile_id,
         "classification": guidance.classification,
         "donor_title_id": donor_title_id,
+        "donor_code_sha256": code_hash,
+        "donor_rom_size": donor_rom_size,
         "boot_logo_sha256": logo_hash,
         "donor_banner_sha256": banner_hash,
         "donor_icon_sha256": icon_hash,
