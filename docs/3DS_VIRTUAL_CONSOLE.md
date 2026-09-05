@@ -39,17 +39,35 @@ A donor is not treated as interchangeable merely because it belongs to the corre
 
 RommHeld records a runtime fingerprint when preparing a donor. Classic profiles include hashes of the emulator code, exheader and sanitized RomFS template plus the donor identity and ROM path. Newly prepared classic profiles also cover reusable donor banner/icon presentation and the optional ExeFS logo. Newly cached auxiliary NCCH plain/logo regions carry their own SHA-256 values. GBA profiles include the validated donor `.code` fingerprint/ROM size and hashes of the reusable boot-logo, banner and icon assets.
 
-For caches that contain these fingerprints, they are enforced before the cache is reported ready. Modified classic runtime, presentation or hashed auxiliary-region files invalidate readiness. Modified profiled GBA boot-logo, banner or SMDH files likewise invalidate readiness. The user must re-prepare the donor rather than silently building from modified cached assets. Older caches that predate a particular optional hash remain governed by their existing cache-version and structural compatibility rules.
+Newly prepared classic profiles also retain compatibility identifiers from the donor runtime when present:
+
+- the normalized `buildtime.txt` emulator build timestamp
+- a SHA-256 fingerprint of `config.ini`
+- the names of root-level donor `*.patch` files detected before the donor RomFS is sanitized
+
+The build timestamp and `config.ini` hash are diagnostic identifiers. They do not replace the core runtime hashes and are intentionally not folded into the existing profile ID, preserving compatibility with profiles created before these fields were added.
+
+Root-level donor patch names are also diagnostic only. Their presence indicates that Nintendo shipped game-specific patch data alongside that donor runtime, so RommHeld surfaces a caution in donor guidance. Patch presence alone does not prove that the underlying emulator build is unsuitable, and it therefore does not automatically change the runtime classification. The patch contents themselves are not retained in the reusable runtime.
+
+For caches that contain integrity fingerprints, they are enforced before the cache is reported ready. Modified classic runtime, presentation or hashed auxiliary-region files invalidate readiness. Modified profiled GBA boot-logo, banner or SMDH files likewise invalidate readiness. The user must re-prepare the donor rather than silently building from modified cached assets. Older caches that predate a particular optional hash remain governed by their existing cache-version and structural compatibility rules.
 
 Current guidance is:
 
 - **GBA:** any genuine GBA Virtual Console donor is suitable for reusable AGB_FIRM boot-logo/presentation extraction. The target game runs through AGB_FIRM, not a donor-specific GBA emulator runtime.
-- **GB/GBC:** prefer a standard later retail runtime. Special-purpose Pokemon VC runtimes should not be the general donor because their emulator behavior differs, including save-state/link behavior.
-- **NES:** prefer a later standard retail runtime rather than an early/Ambassador-era build. Unknown fingerprints remain unverified until hardware-tested.
+- **GB/GBC:** prefer a standard later retail runtime. Special-purpose Pokemon VC runtimes should not be the general donor because their emulator behavior differs, including save-state/link behavior. A detected donor `*.patch` is reported as an additional caution while its contents are stripped before reuse.
+- **NES:** prefer a later standard retail runtime rather than an early/Ambassador-era build. Unknown fingerprints remain unverified until hardware-tested. Donor-specific patch presence is recorded separately from the emulator-build classification.
 - **Game Gear:** accept structurally valid `.GG.m` donors, but do not label a fingerprint recommended until it has passed real-device validation.
 - **SNES:** a valid New Nintendo 3DS SNES donor is required, but donor choice does not replace per-game preset handling. The current generic simple-ROM path remains experimental.
 
-The guidance/profile policy remains separate from package-generation logic. The GBA and classic VC deployment cards surface that policy contextually, including the cached profile classification and profile ID when present, so users can see whether a runtime is recommended, unverified, awaiting hardware retest or experimental without opening a separate advanced settings surface.
+The guidance/profile policy remains separate from package-generation logic. The GBA and classic VC deployment cards surface that policy contextually, including the cached profile classification/profile ID and emulator build when available, so users can see whether a runtime is recommended, unverified, awaiting hardware retest or experimental without opening a separate advanced settings surface.
+
+### Promoting a runtime to known-good
+
+RommHeld should not hard-code a commercial donor game name as the primary compatibility key. A donor title name is useful for a human test record, but the runtime identity is the profile itself: family, profile ID, donor Title ID, emulator build metadata and the underlying runtime hashes.
+
+A classic runtime should be promoted to a known-good/recommended profile only after the exact fingerprint has passed the relevant real-device test. At minimum that means HOME Menu presentation, launch, save where supported, exit and relaunch. Until then the profile remains unverified, hardware-retest-required or experimental according to the family policy.
+
+This allows a future compatibility matrix to say that a tested runtime fingerprint is preferred without instructing users to download a specific copyrighted donor title.
 
 ## Family-specific behavior
 
@@ -65,13 +83,13 @@ RommHeld validates the donor's embedded ROM family before caching it. GB and GBC
 
 Target ROMs are also validated before injection. The CGB compatibility flag must match the selected GB/GBC family and the standard Game Boy header checksum must be valid. This prevents mislabeled, truncated or corrupt ROMs from becoming CIAs that fail only after installation.
 
-The target ROM replaces the sanitized `/rom/` placeholder while the donor emulator/runtime and retail presentation are retained.
+The target ROM replaces the sanitized `/rom/` placeholder while the donor emulator/runtime and retail presentation are retained. Root-level donor `*.patch` files are detected for compatibility metadata and then removed from the reusable RomFS template.
 
 ### NES
 
 Target iNES/NES2 ROMs are converted to Nintendo's TNES payload format only for mapper families represented by the Nintendo runtime. Unsupported mapper/submapper or unrepresentable sizing cases fail with a RetroArch recommendation.
 
-Donor-specific `.patch` contents are not applied to unrelated games. RommHeld retains only an inert matching patch lookup path where the retail runtime expects one.
+Donor-specific `.patch` contents are not applied to unrelated games. RommHeld records original root-level patch names as donor-profile metadata, strips the donor-specific contents, and retains only an inert matching patch lookup path where the retail runtime expects one for the generated target.
 
 The current cache contract preserves the donor's dedicated NCCH launch-logo region. NES caches created before that contract must be prepared again.
 
@@ -118,6 +136,7 @@ Classic VC builds are checked before deployment at multiple layers:
 - final serialized CIA/NCCH identity after assembly
 - family-specific target ROM/container rules, including GB/GBC cartridge headers and Game Gear Sega-family identification
 - profiled runtime-cache integrity where a fingerprint is available
+- donor runtime compatibility metadata such as emulator build/config fingerprints and original root-level patch names
 
 NES and SNES additionally preserve required donor NCCH auxiliary launch-logo regions rather than emitting a minimal NCCH layout that only passes local parser checks.
 
@@ -134,9 +153,9 @@ Keep these categories separate when reporting status:
 
 Current real-device work still required before the new routes are considered fully validated:
 
-- re-prepare the current NES donor, regenerate the CIA and confirm launch/save/relaunch after the latest launch fixes
-- launch and exercise a generated Game Gear CIA
-- launch a conservative SNES CIA and confirm SRAM/save/relaunch behavior
+- re-prepare the current NES donor, regenerate the CIA and confirm launch/save/relaunch after the latest launch fixes; record the resulting runtime profile ID/build metadata with the hardware result
+- launch and exercise a generated Game Gear CIA, then record the tested donor/runtime fingerprint before promoting any Game Gear profile to recommended
+- launch a conservative SNES CIA and confirm SRAM/save/relaunch behavior; donor validation does not replace per-game preset validation
 - verify icon, animated banner, title/publisher metadata and relaunch behavior for each newly validated family
 
 Do not describe those routes as hardware-validated solely because automated tests pass.
