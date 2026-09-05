@@ -8,3 +8,11 @@ def test_usb_planner_does_not_requeue_already_complete_vita_destinations() -> No
     source = SOURCE.read_text(encoding="utf-8")
 
     assert 'if state in {"INSTALLED", "STAGED"}:' in source
+
+
+def test_staged_vpk_state_is_visible_and_filterable_in_the_library() -> None:
+    source = SOURCE.read_text(encoding="utf-8")
+
+    assert '"STAGED": "Staged for install"' in source
+    assert '"Staged for install",' in source
+    assert 'if wanted == "Staged for install" and state != "STAGED":' in source
