@@ -9,6 +9,29 @@ def _classic(slot: int) -> bytes:
     return bytes.fromhex(f"00040000{((0x0E0000 + slot) << 8):08X}")
 
 
+def test_preferred_title_ids_are_pure_family_specific_candidates():
+    gba = registry.preferred_title_id("gba", 42)
+    gb = registry.preferred_title_id("gb", 42)
+    gbc = registry.preferred_title_id("gbc", 42)
+
+    assert gba.hex().startswith("0004000000f")
+    assert gba.endswith(b"\x00")
+    assert gb.hex().startswith("00040000")
+    assert gb.endswith(b"\x00")
+    assert gb != gbc
+    assert registry.preferred_title_id("gba", 42) == gba
+
+
+def test_displayed_title_id_does_not_persist_unallocated_candidate():
+    config = {"library_source": {"romm_url": "https://romm.example"}}
+    before = dict(config)
+    displayed = registry.displayed_title_id(config, "gba", 42)
+
+    assert displayed == registry.preferred_title_id("gba", 42)
+    assert config == before
+    assert "three_ds_vc" not in config
+
+
 def test_gba_allocation_preserves_preferred_slot_when_free():
     updated, title_id = registry.allocate_registered_title_id({}, "gba", 42, _gba(0x123))
     assert title_id == _gba(0x123)
@@ -24,6 +47,18 @@ def test_gba_allocation_probes_on_collision_and_stays_stable():
     same_config, repeated = registry.allocate_registered_title_id(config, "gba", 2, _gba(0x222))
     assert repeated == second
     assert same_config == config
+
+
+def test_allocation_skips_explicit_reserved_target_title_id():
+    updated, title_id = registry.allocate_registered_title_id(
+        {},
+        "gba",
+        2,
+        _gba(0x222),
+        reserved_title_ids=(_gba(0x222),),
+    )
+    assert title_id == _gba(0x223)
+    assert updated["three_ds_vc"]["title_id_allocations"]["gba:default:2"] == _gba(0x223).hex()
 
 
 def test_classic_families_share_one_collision_pool():
@@ -59,3 +94,18 @@ def test_invalid_persisted_duplicate_is_reallocated():
     updated, title_id = registry.allocate_registered_title_id(base, "gba", 2, _gba(0x300))
     assert title_id == _gba(0x301)
     assert updated["three_ds_vc"]["title_id_allocations"]["gba:default:2"] == _gba(0x301).hex()
+
+
+def test_persist_registered_title_id_is_the_explicit_write_boundary(monkeypatch):
+    saved = []
+    config = {"library_source": {"romm_url": "https://romm.example"}}
+    monkeypatch.setattr(registry, "load_config", lambda: config)
+    monkeypatch.setattr(registry, "save_config", lambda value: saved.append(value))
+
+    displayed = registry.displayed_title_id(config, "gba", 99)
+    assert saved == []
+
+    updated, persisted = registry.persist_registered_title_id("gba", 99)
+    assert persisted == displayed
+    assert saved == [updated]
+    assert registry.configured_title_id(updated, "gba", 99) == persisted
