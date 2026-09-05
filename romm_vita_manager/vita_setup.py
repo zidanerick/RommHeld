@@ -264,7 +264,7 @@ class VitaSetupDialog(QDialog):
                 button = QPushButton("No package configured")
                 button.setEnabled(False)
             elif installed.get(emulator.key):
-                button = QPushButton("Inspect package")
+                button = QPushButton("Prepare package")
                 button.clicked.connect(
                     lambda checked=False, key=package_keys[0]: self.prepare_package(key)
                 )
