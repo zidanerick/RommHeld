@@ -26,16 +26,16 @@ from .ui_components import AccentButton, SurfaceCard
 from .vita_library_support import CopyWorker, destination_for_game, game_status, human_size
 
 
-STATUS_SYMBOLS = {"INSTALLED": "✓", "NEW": "↓", "DIFFERENT": "↻", "UNKNOWN": "?"}
+STATUS_LABELS = {
+    "INSTALLED": "Installed",
+    "NEW": "Ready to copy",
+    "DIFFERENT": "Update available",
+    "UNKNOWN": "Destination unavailable",
+}
 
 
 class LocalLibraryWidget(QWidget):
-    """Standalone local-ROM library used by Vita and removable-storage workspaces.
-
-    The original library lived inside the Vita-specific MainWindow. This widget
-    keeps the same filtering and Vita copy semantics without requiring the
-    application shell to inherit from that legacy window.
-    """
+    """Standalone local-ROM library used by Vita and removable-storage workspaces."""
 
     def __init__(
         self,
@@ -52,9 +52,11 @@ class LocalLibraryWidget(QWidget):
         self.games: list[Game] = []
         self.filtered_games: list[Game] = []
         self.worker: CopyWorker | None = None
+        self._library_root: Path | None = None
 
         self.search = QLineEdit()
-        self.search.setPlaceholderText("Search games…")
+        self.search.setPlaceholderText("Search games")
+        self.search.setClearButtonEnabled(True)
         self.platforms = QComboBox()
         self.platforms.addItem("All platforms")
         self.status_filter = QComboBox()
@@ -64,6 +66,7 @@ class LocalLibraryWidget(QWidget):
         self.view_mode = QComboBox()
         self.view_mode.addItems(["List", "Tiles"])
         self.refresh_button = QPushButton("Refresh")
+        self.refresh_button.setToolTip("Rescan the configured local library")
 
         controls = QHBoxLayout()
         controls.setSpacing(8)
@@ -75,14 +78,15 @@ class LocalLibraryWidget(QWidget):
 
         self.source_label = QLabel()
         self.source_label.setWordWrap(True)
-        self.source_label.setStyleSheet(f"color:{DARK.text_secondary};")
+        self.source_label.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
 
         self.game_list = QListWidget()
         self.game_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.game_list.setSpacing(1)
 
         self.selection_label = QLabel("0 selected")
         self.selection_label.setStyleSheet(f"color:{DARK.text_secondary};")
-        self.destination_label = QLabel("Select a game to see its destination.")
+        self.destination_label = QLabel("Select a game to see where it will go.")
         self.destination_label.setWordWrap(True)
         self.destination_label.setStyleSheet(f"color:{DARK.text_secondary};")
         self.copy_button = AccentButton(
@@ -123,9 +127,9 @@ class LocalLibraryWidget(QWidget):
         root.addWidget(card, 1)
 
         self.refresh_button.clicked.connect(self.refresh_library)
-        self.search.textChanged.connect(self.refresh_library)
-        self.platforms.currentIndexChanged.connect(self.refresh_library)
-        self.status_filter.currentIndexChanged.connect(self.refresh_library)
+        self.search.textChanged.connect(self._apply_filters)
+        self.platforms.currentIndexChanged.connect(self._apply_filters)
+        self.status_filter.currentIndexChanged.connect(self._apply_filters)
         self.view_mode.currentIndexChanged.connect(self.apply_view_mode)
         self.game_list.itemSelectionChanged.connect(self.update_summary)
         self.copy_button.clicked.connect(self.copy_selected)
@@ -143,32 +147,38 @@ class LocalLibraryWidget(QWidget):
         self.vita = vita
         is_vita = target_key == "vita"
         self.status_filter.setEnabled(is_vita)
+        self.status_filter.setVisible(is_vita)
         self.copy_button.setVisible(is_vita)
         if not is_vita:
             self.status_filter.setCurrentIndex(0)
-        self.update_summary()
+        self._apply_filters()
 
     def set_vita(self, vita: Path | None) -> None:
         self.vita = vita
         if self.target_key == "vita":
-            self.refresh_library()
+            self._apply_filters()
 
     def refresh_library(self) -> None:
+        """Rescan the configured source, then render the current filters."""
         source = get_library_source(self.config)
         if source.mode != "local":
+            self._library_root = None
             self.games = []
             self.filtered_games = []
-            self.game_list.clear()
-            self.source_label.setText(
-                "RomM server selected • this workspace does not yet expose a remote library view."
-            )
-            self.destination_label.setText("No local library is substituted.")
+            self._render_games()
+            self.source_label.setText("This workspace is configured for RomM, not a local library.")
+            self.source_label.setToolTip("")
+            self.destination_label.setText("Choose a local source in Settings to browse local games here.")
             self.update_summary()
             return
 
         root = Path(source.local_root or self.config.get("romm_root", "")).expanduser()
+        self._library_root = root
         self.games = list(scan_games(root)) if root.is_dir() else []
+        self._rebuild_platform_filter()
+        self._apply_filters()
 
+    def _rebuild_platform_filter(self) -> None:
         current = self.platforms.currentText() if self.platforms.count() else "All platforms"
         self.platforms.blockSignals(True)
         self.platforms.clear()
@@ -183,12 +193,14 @@ class LocalLibraryWidget(QWidget):
         self.platforms.setCurrentIndex(index if index >= 0 else 0)
         self.platforms.blockSignals(False)
 
-        query = self.search.text().strip().lower()
+    def _apply_filters(self) -> None:
+        """Filter the in-memory scan without repeatedly walking the ROM tree."""
+        query = self.search.text().strip().casefold()
         platform = self.platforms.currentText()
         wanted = self.status_filter.currentText()
         filtered: list[Game] = []
         for game in self.games:
-            if query and query not in game.name.lower():
+            if query and query not in game.name.casefold():
                 continue
             if platform != "All platforms" and game.source_platform != platform:
                 continue
@@ -203,38 +215,64 @@ class LocalLibraryWidget(QWidget):
                 continue
             filtered.append(game)
         self.filtered_games = filtered
+        self._render_games()
+        self._update_source_summary()
+        self.update_summary()
 
+    def _render_games(self) -> None:
         self.game_list.clear()
-        for game in filtered:
+        for game in self.filtered_games:
             state, detail = self._game_status(game)
+            status = STATUS_LABELS.get(state, state.title())
             item = QListWidgetItem(
-                f"{STATUS_SYMBOLS[state]} {game.name}\n"
-                f"{platform_label(game.source_platform)} • {human_size(game.size)} • {detail}"
+                f"{game.name}\n"
+                f"{platform_label(game.source_platform)} • {human_size(game.size)} • {status}"
             )
             item.setData(Qt.ItemDataRole.UserRole, game)
+            item.setToolTip(detail)
+            self.game_list.addItem(item)
+
+        if not self.filtered_games:
+            item = QListWidgetItem(self._empty_message())
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.game_list.addItem(item)
 
         self.apply_view_mode()
+
+    def _empty_message(self) -> str:
+        if not self.games:
+            if self._library_root is None:
+                return "No local library is active."
+            if not self._library_root.is_dir():
+                return "The configured local library folder is unavailable."
+            return "No games were found in this local library."
+        return "No games match the current search and filters."
+
+    def _update_source_summary(self) -> None:
+        if self._library_root is None:
+            return
         target_label = "PlayStation Vita" if self.target_key == "vita" else "Nintendo DS"
-        self.source_label.setText(
-            f"{root} • {len(filtered)} games shown • {target_label} target"
-        )
-        self.update_summary()
+        shown = len(self.filtered_games)
+        total = len(self.games)
+        count = f"{shown} of {total} games" if shown != total else f"{total} games"
+        self.source_label.setText(f"Local library • {count} • {target_label}")
+        self.source_label.setToolTip(str(self._library_root))
 
     def _game_status(self, game: Game) -> tuple[str, str]:
         if self.target_key != "vita":
-            return "UNKNOWN", "Target status managed in Device"
+            return "UNKNOWN", "Destination is managed from the Device workflow"
         try:
             return game_status(self.vita, game, self.mappings)
         except Exception:
-            return "UNKNOWN", "Unable to inspect destination"
+            return "UNKNOWN", "Unable to inspect the current Vita destination"
 
     def apply_view_mode(self) -> None:
         if self.view_mode.currentText() == "Tiles":
             self.game_list.setViewMode(QListWidget.ViewMode.IconMode)
             self.game_list.setResizeMode(QListWidget.ResizeMode.Adjust)
             self.game_list.setMovement(QListWidget.Movement.Static)
-            self.game_list.setGridSize(QSize(250, 90))
+            self.game_list.setGridSize(QSize(250, 82))
             self.game_list.setIconSize(QSize(32, 32))
         else:
             self.game_list.setViewMode(QListWidget.ViewMode.ListMode)
@@ -258,26 +296,33 @@ class LocalLibraryWidget(QWidget):
         self.copy_button.setEnabled(
             is_vita and self.vita is not None and bool(selected) and not worker_running
         )
-        self.selection_label.setText(f"{len(selected)} selected • {human_size(total)}")
+        self.selection_label.setText(
+            f"{len(selected)} selected • {human_size(total)}" if selected else "No games selected"
+        )
+        self.destination_label.setToolTip("")
+
         if len(selected) != 1:
             if selected and is_vita:
                 if self.vita is None:
                     self.destination_label.setText("Connect the Vita to copy the selected games.")
                 else:
                     self.destination_label.setText(f"Ready to copy {len(selected)} games to the Vita.")
+            elif selected:
+                self.destination_label.setText("Destination is chosen from the Device workflow.")
             else:
-                self.destination_label.setText(
-                    "Multiple games selected." if selected else "Select a game to see its destination."
-                )
+                self.destination_label.setText("Select a game to see where it will go.")
             return
+
+        game = selected[0]
         if not is_vita:
-            self.destination_label.setText("Deployment destination is selected from the Device workflow.")
+            self.destination_label.setText("Destination is chosen from the Device workflow.")
             return
         if self.vita is None:
             self.destination_label.setText("Connect the Vita to copy this game.")
             return
-        label, path, _mode = destination_for_game(self.vita, selected[0], self.mappings)
-        self.destination_label.setText(f"{label} • {path}")
+        label, path, _mode = destination_for_game(self.vita, game, self.mappings)
+        self.destination_label.setText(f"Copies to {label}")
+        self.destination_label.setToolTip(str(path))
 
     def copy_selected(self) -> None:
         if self.target_key != "vita":
@@ -406,7 +451,7 @@ class LocalLibraryWidget(QWidget):
 
     def _copy_finished(self, copied: int, skipped: int, cancelled: int) -> None:
         self._set_transfer_running(False)
-        self.refresh_library()
+        self._apply_filters()
         self.transfer_status.setVisible(True)
         if cancelled:
             self.transfer_status.setText(
