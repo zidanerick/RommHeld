@@ -15,6 +15,7 @@ from .transfers import copy_file_chunked
 
 CACHE_DIR = package_cache_dir()
 USER_AGENT = "RommHeld/1.0"
+RETROARCH_STABLE_VERSION = "1.22.2"
 
 
 @dataclass(frozen=True)
@@ -62,13 +63,13 @@ PACKAGES = {
     "retroarch": PackageSpec(
         "retroarch", "RetroArch",
         "Libretro frontend and core platform. Preferred route for supported RetroAchievements systems.",
-        "direct:https://buildbot.libretro.com/stable/1.22.1/playstation/vita/RetroArch.vpk",
+        f"direct:https://buildbot.libretro.com/stable/{RETROARCH_STABLE_VERSION}/playstation/vita/RetroArch.vpk",
         "RetroArch.vpk", "RetroArch.vpk", "root", None,
         "Install the VPK with VitaShell. The companion data archive is handled separately.",
     ),
     "retroarch-data": PackageSpec(
         "retroarch-data", "RetroArch data", "RetroArch assets/data package used with the Vita build.",
-        "direct:https://buildbot.libretro.com/stable/1.22.1/playstation/vita/RetroArch_data.7z",
+        f"direct:https://buildbot.libretro.com/stable/{RETROARCH_STABLE_VERSION}/playstation/vita/RetroArch_data.7z",
         "RetroArch_data.7z", "RetroArch_data.7z", "root", None,
         "This is data, not a VPK. Inspect/extract it according to the upstream Vita installation layout.",
         package_type="archive", requires_archive_review=True,
