@@ -219,16 +219,15 @@ def _cached_classic_runtime_ready(config: dict, family_key: str) -> bool:
 
 
 def _cached_gba_runtime_ready(config: dict) -> bool:
-    settings = config.get("gba_vc", {})
-    if not isinstance(settings, dict):
+    # Use the same cache contract as the deployment path. In particular, the
+    # banner helper deliberately rejects legacy caches that do not also contain
+    # the donor SMDH icon frame.
+    try:
+        from .gba_assets import configured_boot_logo, configured_donor_banner
+
+        return configured_boot_logo(config) is not None and configured_donor_banner(config) is not None
+    except (OSError, ValueError):
         return False
-    return all(
-        raw and Path(raw).expanduser().is_file()
-        for raw in (
-            str(settings.get("boot_logo_path", "")).strip(),
-            str(settings.get("donor_banner_path", "")).strip(),
-        )
-    )
 
 
 def donor_readiness(config: dict, platform_slug: str) -> tuple[bool, str]:
