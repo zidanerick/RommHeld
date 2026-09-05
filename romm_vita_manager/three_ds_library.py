@@ -25,6 +25,7 @@ from .romm import scan_games
 from .romm_library_cache import load_cached_page, save_cached_page
 from .romm_remote import RomMRemoteGame
 from .romm_remote_worker import RomMLibraryWorker
+from .three_ds_filesystem_deploy import ThreeDSFilesystemDeployDialog
 from .three_ds_manager import RomMArtworkWorker
 from .three_ds_targets import available_targets, default_destination, preferred_target_key
 from .ui_components import AccentButton, SurfaceCard
@@ -689,8 +690,12 @@ class ThreeDSLibraryWidget(QWidget):
     def _open_manager(self) -> None:
         game = self._selected_game()
         target_key = str(self.target_combo.currentData() or "")
-        if game is not None and target_key:
+        if game is None or not target_key:
+            return
+        if target_key in PACKAGE_GENERATION_TARGETS:
             self.open_manager_callback(game, target_key)
+            return
+        ThreeDSFilesystemDeployDialog(self.config, game, target_key, self).exec()
 
     def closeEvent(self, event) -> None:
         self._filter_timer.stop()
