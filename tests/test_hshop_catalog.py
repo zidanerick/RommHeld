@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from romm_vita_manager.hshop_catalog import (
     _parse_entry,
+    _platform_matches,
     _title_score,
+    find_official_vc_release,
     find_vc_seed_by_title_id,
 )
 
@@ -49,6 +51,17 @@ def test_title_matching_tolerates_symbols_and_accents():
     assert _title_score("The Legend of Zelda Oracle of Seasons", "Legend of Zelda Oracle of Seasons") >= 85
 
 
+def test_platform_matching_keeps_game_boy_families_distinct():
+    assert _platform_matches("game boy", "Game Boy")
+    assert not _platform_matches("game boy", "Game Boy Color")
+    assert not _platform_matches("game boy", "Game Boy Advance")
+    assert _platform_matches("game boy color", "Game Boy Color")
+    assert _platform_matches(
+        "super nintendo",
+        "Super Nintendo Compatible only with New 3DS systems",
+    )
+
+
 class _Response:
     def __init__(self, data: str):
         self.data = data.encode("utf-8")
@@ -71,6 +84,27 @@ class _Opener:
     def open(self, req, timeout: float):
         self.urls.append(req.full_url)
         return _Response(self.responses.pop(0))
+
+
+def test_gb_official_lookup_does_not_return_gbc_release_with_same_title():
+    search = """
+    <html><body>
+    <a href="/t/1001">
+    Example Game content in virtual-console ➞ usa
+    Virtual Console: Game Boy Color 1001 ID Pirate Legit Content Type
+    0004000000111100 Title ID 4.00 MiB 32 Size 0.0.0 (0) Version CTR-N-ABCE Product Code
+    </a>
+    <a href="/t/1002">
+    Example Game content in virtual-console ➞ usa
+    Virtual Console: Game Boy 1002 ID Pirate Legit Content Type
+    0004000000222200 Title ID 4.00 MiB 32 Size 0.0.0 (0) Version CTR-N-ABCD Product Code
+    </a>
+    </body></html>
+    """
+    release = find_official_vc_release("Example Game", "gb", opener=_Opener([search]))
+    assert release is not None
+    assert release.platform == "Game Boy"
+    assert release.title_id == "0004000000222200"
 
 
 def test_snes_seed_lookup_uses_catalogue_metadata_only():
