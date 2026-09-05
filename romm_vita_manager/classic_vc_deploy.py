@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from .classic_vc import build_classic_vc_cia, classic_title_id_for_romm_id
+from .classic_vc import build_classic_vc_cia
 from .classic_vc_assets import configured_classic_runtime, extract_and_cache_classic_runtime
 from .config import save_config
 from .design_tokens import DARK, brand_for_platform
@@ -32,6 +32,7 @@ from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
 from .three_ds_targets import default_destination
 from .ui_components import AccentButton, SurfaceCard
 from .vc_donors import configured_boot9_path, configured_donor_path
+from .vc_title_id_registry import displayed_title_id, persist_registered_title_id
 
 
 _FAMILY_LABELS = {
@@ -140,6 +141,10 @@ class ClassicVcDeployWorker(QThread):
                 raise ValueError("No usable RomM artwork is available for this title.")
             self._check_cancelled()
 
+            self.status_changed.emit("Allocating a stable RommHeld Title ID…")
+            self.config, title_id = persist_registered_title_id(self.family, self.game.rom_id)
+            self._check_cancelled()
+
             self.status_changed.emit(
                 f"Packaging {_FAMILY_LABELS[self.family]} Nintendo Virtual Console CIA with retail donor presentation…"
             )
@@ -152,6 +157,7 @@ class ClassicVcDeployWorker(QThread):
                 long_title=self.display_title,
                 publisher=self.publisher,
                 release_year=self.game.release_year,
+                title_id_override=title_id,
             )
             self._check_cancelled()
 
@@ -319,8 +325,11 @@ class ClassicVcDeployDialog(QDialog):
         self.publisher_edit = QLineEdit(game.publisher)
         self.publisher_edit.setReadOnly(True)
         self.publisher_edit.setPlaceholderText("Not available in RomM metadata")
-        self.title_id_edit = QLineEdit(classic_title_id_for_romm_id(game.rom_id, self.family).hex())
+        self.title_id_edit = QLineEdit(displayed_title_id(config, self.family, game.rom_id).hex())
         self.title_id_edit.setReadOnly(True)
+        self.title_id_edit.setToolTip(
+            "Current RommHeld assignment, or the preferred candidate if this title has not been deployed yet."
+        )
         self.destination_edit = QLineEdit(default_destination("vc_cia", self.family, game.filename))
         self.destination_edit.setReadOnly(True)
         saved = config.get("devices", {}).get("3ds", {})
