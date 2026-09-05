@@ -66,7 +66,7 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         "FBI",
         "installer",
         "Title manager used by RommHeld's CIA and Remote Install workflows.",
-        ("3ds/FBI/FBI.3dsx", "3ds/fbi/fbi.3dsx", "FBI.3dsx", "FBI.cia"),
+        ("3ds/FBI/FBI.3dsx", "3ds/fbi/fbi.3dsx", "FBI.3dsx"),
         "https://github.com/Steveice10/FBI/releases",
         "manual_or_existing",
         installed_title_may_exist_without_sd_marker=True,
@@ -89,7 +89,6 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         (
             "3ds/Universal-Updater.3dsx",
             "3ds/Universal-Updater/Universal-Updater.3dsx",
-            "Universal-Updater.cia",
         ),
         "https://github.com/Universal-Team/Universal-Updater/releases",
         "manual_bootstrap",
