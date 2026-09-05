@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from .config import save_config
 from .design_tokens import DARK, brand_for_platform
-from .file_transfer import transfer_file
+from .file_transfer import required_transfer_space, transfer_file
 from .local_storage import resolve_destination, resolve_storage_root, storage_summary
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 
@@ -282,10 +282,16 @@ class MountedStorageDialog(QDialog):
             destination = resolve_destination(root, relative)
             required = source.stat().st_size
             _, free = storage_summary(root)
-            existing = destination.stat().st_size if destination.is_file() else 0
-            needed = max(0, required - existing)
+            needed = required_transfer_space(
+                required,
+                destination,
+                overwrite=self.overwrite,
+            )
             if free is not None and needed > free:
-                raise OSError(f"Not enough storage space for {_human_size(needed)}.")
+                raise OSError(
+                    f"Not enough storage space for the safe staged transfer. "
+                    f"{_human_size(needed)} is required."
+                )
 
             destination.parent.mkdir(parents=True, exist_ok=True)
             self.send_button.setEnabled(False)
@@ -309,6 +315,8 @@ class MountedStorageDialog(QDialog):
             self.worker.failed.connect(self.transfer_failed)
             self.worker.start()
         except Exception as exc:
+            self.overwrite = False
+            self._selection_changed()
             QMessageBox.warning(self, "Unable to send file", str(exc))
 
     def cancel_transfer(self) -> None:
@@ -327,19 +335,22 @@ class MountedStorageDialog(QDialog):
             answer = QMessageBox.question(
                 self,
                 "File already exists",
-                "The destination contains a different-size file. Overwrite it?",
+                "The destination contains a different-size file. Overwrite it? The existing file is kept until the replacement has copied successfully.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
             if answer == QMessageBox.StandardButton.Yes:
                 self.overwrite = True
                 self.start_transfer()
+            else:
+                self.overwrite = False
+                self._selection_changed()
             return
 
         message = {
             "copied": "Transfer completed and size verified.",
             "skipped": "Destination already contains the same-size file.",
-            "cancelled": "Transfer cancelled.",
+            "cancelled": "Transfer cancelled. Any existing destination was preserved.",
         }.get(result, result)
         self.status.setText(message)
         self.transfer_pill.set_value(
@@ -358,7 +369,8 @@ class MountedStorageDialog(QDialog):
         self.cancel_button.setEnabled(False)
         self.progress.setVisible(False)
         self.transfer_pill.set_value("Failed")
-        self.status.setText("Transfer failed.")
+        self.status.setText("Transfer failed. An existing destination was preserved.")
+        self.overwrite = False
         self._selection_changed()
         QMessageBox.critical(self, "Transfer failed", message)
 
