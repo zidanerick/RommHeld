@@ -52,8 +52,8 @@ COMPONENTS = (
     SetupComponent(
         "fbi",
         "FBI",
-        "3DS title manager and installer. SD evidence can show a homebrew 3DSX or theme directory; an installed CIA title cannot be reliably inferred from SD files alone.",
-        ("fbi/theme", "3ds/FBI/FBI.3dsx", "3ds/fbi/fbi.3dsx", "FBI.3dsx"),
+        "3DS title manager and installer. SD evidence can show a homebrew 3DSX executable; an installed CIA title cannot be reliably inferred from SD files alone.",
+        ("3ds/FBI/FBI.3dsx", "3ds/fbi/fbi.3dsx", "FBI.3dsx"),
         "https://github.com/Steveice10/FBI/releases",
     ),
     SetupComponent(
