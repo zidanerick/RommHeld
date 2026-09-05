@@ -78,10 +78,12 @@ def test_romm_connection_can_be_tested_from_settings() -> None:
     assert 'Finish the RomM connection test before switching handhelds.' in source
 
 
-def test_configured_startup_skips_selector() -> None:
+def test_configured_startup_skips_selector_without_requiring_library_online() -> None:
     source = _source("launcher.py")
 
     assert 'def _workspace_is_configured(config: dict) -> bool:' in source
     assert 'if not _workspace_is_configured(config):' in source
     assert 'window = WorkspaceDashboardWindow(config)' in source
     assert 'ACTIVE_WORKSPACES = {"vita", "3ds", "ds"}' in source
+    assert 'return bool(source.local_root.strip())' in source
+    assert 'Path(source.local_root).expanduser().is_dir()' not in source
