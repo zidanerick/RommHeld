@@ -189,9 +189,14 @@ class VitaFtpBackend:
         ftp.voidcmd(f"RNTO {destination}")
 
     def _restore_backup(self, backup: str | None, remote: str) -> None:
-        if backup is None:
-            return
         ftp = self._require_connection()
+        if backup is None:
+            try:
+                if self.remote_size(remote) is not None:
+                    self._delete(ftp, remote)
+            except Exception:
+                pass
+            return
         try:
             if self.remote_size(remote) is not None:
                 self._delete(ftp, remote)
@@ -297,7 +302,12 @@ class VitaFtpBackend:
             )
 
         if backup is not None:
-            self._delete(ftp, backup)
+            try:
+                self._delete(ftp, backup)
+            except Exception:
+                # The replacement is already verified and live. A stale hidden
+                # backup is preferable to reporting the successful transfer as failed.
+                pass
         return "copied", source_size
 
 
