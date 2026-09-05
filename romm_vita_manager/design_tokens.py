@@ -100,10 +100,73 @@ SIDEBAR_WIDTH = 238
 CONTENT_MAX_WIDTH = 1440
 
 
+_STATUS_ERROR_TERMS = (
+    "failed",
+    "failure",
+    "error",
+    "invalid",
+    "missing",
+)
+_STATUS_MUTED_TERMS = (
+    "not configured",
+    "not mounted",
+    "not detected",
+    "not selected",
+    "not checked",
+    "unavailable",
+)
+_STATUS_WARNING_TERMS = (
+    "needs ",
+    "required",
+    "waiting",
+    "checking",
+    "cancelling",
+    "transferring",
+    "preparing",
+    "confirm",
+    "action required",
+    "overwrite needed",
+    "endpoint required",
+)
+_STATUS_SUCCESS_TERMS = (
+    "ready",
+    "connected",
+    "mounted",
+    "detected",
+    "configured",
+    "complete",
+    "completed",
+    "copied",
+    "validated",
+)
+
+
 def brand_for_platform(platform_key: str | None) -> PlatformBrand:
     key = (platform_key or "").strip().lower()
     family = PLATFORM_FAMILIES.get(key, "neutral")
     return BRANDS[family]
+
+
+def status_tone(value: str) -> str:
+    """Classify common workflow text without importing Qt.
+
+    Absence states such as ``Not mounted`` remain muted rather than being
+    presented as failures. Explicit failure language wins over all other
+    matches, and warning/busy states are kept distinct from successful states.
+    """
+
+    text = value.strip().casefold()
+    if not text:
+        return "neutral"
+    if any(term in text for term in _STATUS_ERROR_TERMS):
+        return "error"
+    if any(term in text for term in _STATUS_MUTED_TERMS):
+        return "muted"
+    if any(term in text for term in _STATUS_WARNING_TERMS):
+        return "warning"
+    if any(term in text for term in _STATUS_SUCCESS_TERMS):
+        return "success"
+    return "neutral"
 
 
 __all__ = [
@@ -125,4 +188,5 @@ __all__ = [
     "SPACE_6",
     "SPACE_8",
     "brand_for_platform",
+    "status_tone",
 ]
