@@ -67,7 +67,10 @@ def test_local_library_status_checks_are_cached_and_contextual() -> None:
     assert 'if wanted != "All games":' in source
     assert 'cached = self._status_cache.get(game.path)' in source
     assert 'self._status_cache[game.path] = result' in source
-    assert 'if self.target_key == "vita" and not self._using_ftp():' in source
+    assert 'show_status = (' in source
+    assert 'and self.status_filter.currentText() != "All games"' in source
+    assert 'if show_status:' in source
+    assert 'Choose a status filter to inspect the current Vita destination state' in source
     assert '"Ready to copy"' in source
     assert '"Update available"' in source
     assert '"Destination unavailable"' in source
