@@ -37,7 +37,7 @@ from .three_ds_storage import ThreeDSMountedStorageBackend, configured_3ds_stora
 from .three_ds_targets import default_destination
 from .ui_components import AccentButton, SurfaceCard
 from .vc_donors import configured_boot9_path, configured_donor_path
-from .vc_runtime_profiles import guidance_for_family, runtime_guidance_summary
+from .vc_runtime_profiles import runtime_guidance_details, runtime_guidance_summary
 from .vc_title_id_registry import displayed_title_id, persist_registered_title_id
 
 
@@ -352,7 +352,7 @@ class GbaVcDeployDialog(QDialog):
         else:
             donor_note = QLabel(
                 "One-time setup: choose a genuine GBA Virtual Console donor CIA and your own boot9 dump. "
-                "RommHeld extracts only the two reusable assets it needs and then forgets the source paths."
+                "RommHeld extracts only the reusable presentation assets it needs and then forgets the source paths."
             )
             donor_note.setWordWrap(True)
             donor_note.setStyleSheet(f"color:{DARK.text_secondary};font-size:10px;")
@@ -488,9 +488,10 @@ class GbaVcDeployDialog(QDialog):
         self._start_hshop_lookup()
 
     def _refresh_donor_guidance(self) -> None:
-        guidance = guidance_for_family("gba")
         self.donor_guidance.setText(runtime_guidance_summary(self.config, "gba"))
-        self.donor_guidance.setToolTip("\n".join(guidance.details))
+        self.donor_guidance.setToolTip(
+            "\n".join(runtime_guidance_details(self.config, "gba"))
+        )
 
     def _start_hshop_lookup(self) -> None:
         self.hshop_worker = HShopLookupWorker(self.game.name, "gba")
