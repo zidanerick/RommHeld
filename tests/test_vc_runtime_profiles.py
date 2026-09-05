@@ -5,7 +5,9 @@ import pytest
 from romm_vita_manager.vc_runtime_profiles import (
     build_classic_runtime_profile,
     build_gba_runtime_profile,
+    classic_runtime_profile_matches,
     configured_runtime_profile,
+    gba_runtime_profile_matches,
     guidance_for_family,
 )
 
@@ -50,6 +52,22 @@ def test_classic_runtime_profile_is_deterministic_and_sensitive_to_runtime_code(
     assert first["profile_id"] != changed["profile_id"]
     assert first["code_sha256"] == hashlib.sha256(b"runtime-code-a").hexdigest()
     assert first["classification"] == "hardware-retest-required"
+    assert classic_runtime_profile_matches(
+        first,
+        "nes",
+        code=kwargs["code"],
+        exheader=kwargs["exheader"],
+        romfs_template=kwargs["romfs_template"],
+        rom_path=kwargs["rom_path"],
+    )
+    assert not classic_runtime_profile_matches(
+        first,
+        "nes",
+        code=b"tampered-runtime",
+        exheader=kwargs["exheader"],
+        romfs_template=kwargs["romfs_template"],
+        rom_path=kwargs["rom_path"],
+    )
 
 
 def test_gba_runtime_profile_records_retail_donor_identity_and_runtime_structure():
@@ -68,6 +86,18 @@ def test_gba_runtime_profile_records_retail_donor_identity_and_runtime_structure
     assert profile["donor_code_sha256"] == code_hash
     assert profile["donor_rom_size"] == 0x200000
     assert profile["boot_logo_sha256"] == hashlib.sha256(b"logo").hexdigest()
+    assert gba_runtime_profile_matches(
+        profile,
+        boot_logo=b"logo",
+        donor_banner=b"banner",
+        donor_icon=b"icon",
+    )
+    assert not gba_runtime_profile_matches(
+        profile,
+        boot_logo=b"changed-logo",
+        donor_banner=b"banner",
+        donor_icon=b"icon",
+    )
 
 
 def test_gba_runtime_profile_rejects_invalid_structural_fingerprint():
