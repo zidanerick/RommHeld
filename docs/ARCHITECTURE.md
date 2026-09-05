@@ -39,7 +39,7 @@ The former Vita-specific application modules `ui.py` and `app.py` have been remo
 For library presentation:
 
 - `LocalLibraryWidget` handles the current Vita/DS local-library surface.
-- `ThreeDSLibraryWidget` handles the current progressive RomM-backed 3DS surface.
+- `ThreeDSLibraryWidget` handles current 3DS-compatible browsing from either RomM or a configured local library.
 - `vita_library_support.py` owns reusable Vita destination, mounted-filesystem install-state and local copy-worker behavior.
 - `vita_ftp_library.py` reuses the same Vita destination mapping for VitaShell FTP batch deployment.
 
@@ -49,11 +49,11 @@ For library presentation:
 
 `romm.py` scans a configured local ROM root and produces `Game` records. `mappings.py` supplies platform labels and existing Vita/RetroFlow mapping data.
 
-`local_library.py` owns the active local library UI:
+`local_library.py` owns the active Vita/DS local library UI:
 
 - search
 - platform filtering with friendly mapped labels while retaining exact source keys internally
-- Vita install-state filtering when a Vita filesystem is mounted
+- Vita install-state filtering only when VitaShell USB storage is mounted
 - single-list presentation
 - selection summary
 - Vita destination summary
@@ -63,11 +63,13 @@ For library presentation:
 
 DS can reuse the same presentation without claiming Vita-style install-state knowledge.
 
-Mounted Vita storage supports cheap local install-state inspection, but the default `All games` browse path intentionally does not probe every destination while rendering rows. Status checks are performed when the user selects an install-state filter or when selected games are evaluated for copying, and results are cached for the current view. The cache is invalidated when device, configuration, transport or transfer state changes.
+Mounted Vita storage supports cheap local install-state inspection, but the default `All games` browse path intentionally does not probe every destination while rendering rows. Status checks are performed when the user selects an install-state filter or when selected games are evaluated for copying, and results are cached for the current view. The cache is invalidated when device, configuration, transport or transfer state changes. If the USB mount disappears, install-state filtering is disabled and a stale status selection is reset so the library does not appear empty merely because the device disconnected.
 
 VitaShell FTP does not expose an equivalent efficient bulk-status operation, so FTP mode checks individual remote destinations as transfers start rather than pretending the entire library has been pre-scanned remotely.
 
 `vita_library_support.py` contains the reusable local Vita copy worker, destination resolution, status checks and size formatting. `vita_ftp_library.py` maps those same destinations to `ux0:/...` and owns the FTP batch worker. Neither helper has application-shell responsibility.
+
+For the 3DS workspace, `three_ds_library.py` can consume the same local `Game` records through its target-specific master/detail surface. Local games are normalized to a platform slug, filtered to compatible direct targets, and presented through the same target/preference model used for RomM records. This keeps library-source choice separate from 3DS runtime/destination choice without forcing the 3DS workflow through the Vita/DS presentation widget.
 
 ### RomM server
 
@@ -77,7 +79,7 @@ Remote library work is split across:
 - `romm_remote.py`: game mapping, downloads and artwork URL handling
 - `romm_remote_worker.py`: background paginated library work
 - `romm_library_cache.py`: lightweight cached result pages
-- `three_ds_library.py`: progressive RomM browser for current 3DS-compatible targets
+- `three_ds_library.py`: progressive RomM browser for current 3DS-compatible targets and the shared 3DS master/detail presentation
 
 Remote queries are paginated and filtered. Artwork authentication is restricted to the configured RomM host.
 
@@ -102,7 +104,7 @@ Relevant modules:
 
 `three_ds_targets.py` now distinguishes dedicated/native runtime routes from package-generation routes. In particular, direct `open_agb_firm` GBA deployment is separate from generated HOME Menu GBA CIAs using AGB_FIRM. NDS/TWiLight, Virtual Boy/Red Viper, and N64/DaedalusX64 are modelled as explicit targets rather than being forced through RetroArch.
 
-Runtime preference is advisory. `preferred_target_key()` can recommend compatibility, native, or RetroAchievements-oriented routes only from targets the platform actually exposes. Per-title selection remains authoritative.
+Runtime preference is advisory. `preferred_target_key()` can recommend compatibility, native, or RetroAchievements-oriented routes only from targets the platform actually exposes. Per-title selection remains authoritative. `ThreeDSLibraryWidget` applies that preference using a normalized platform slug for both RomM and local records.
 
 ## Device and transport layer
 
@@ -129,6 +131,7 @@ PSP and PS1 retain their Adrenaline paths. Other supported systems can map to Re
 ### Nintendo 3DS
 
 - `three_ds_ftp.py`: FTP transport, remote-root enforcement, creation, skip/resume/cancellation and size verification
+- `three_ds_storage.py`: mounted 3DS SD-card root/configuration backend
 - `three_ds_manager.py`: direct 3DS transfer/management UI
 - `three_ds_setup.py`: guided storage/transport/FBI-readiness setup workflow
 - `three_ds_paths.py`: path helpers
@@ -138,13 +141,15 @@ PSP and PS1 retain their Adrenaline paths. Other supported systems can map to Re
 - `three_ds_packages.py`: narrow, verified mounted-SD staging for explicitly supported simple 3DSX packages
 - `three_ds_readiness_ui.py`: focused readiness/runtime-management dialog built on the non-UI services above
 
+The Device page treats a validated mounted SD/microSD card as a direct offline filesystem route and configured mtheall `ftpd` as the wireless live-console route. A card-reader mount is not labelled as USB because Nintendo 3DS systems do not expose a standard USB mass-storage mode. Either a validated mounted SD route or configured ftpd endpoint makes the filesystem route ready for Device-page emphasis.
+
 The recommended live filesystem server is mtheall `ftpd`. RommHeld defaults to port `5000`, tells users to open `ftpd` and leave it running, and translates common timeout/refusal/authentication errors into console-side remediation. The 3DS backend can use `MLSD` with fallback listing, `REST` resume where supported, `ABOR` cancellation, `SIZE` verification and the configured remote-root boundary. Failed connection setup closes partially opened FTP sockets.
 
 FTP transport does not choose runtime or package format. Setup keeps FTP connectivity and FBI Remote Install readiness explicit rather than treating them as one state. For installable CIA packages, FBI Remote Install remains the direct installation route; FTP is the filesystem-copy route.
 
 3DS readiness also does not equate “not visible in the SD filesystem” with “not installed”. Applications that may exist only as installed CIA titles are reported as needing on-console confirmation when required.
 
-The active Device page exposes both guided Connection setup and contextual Runtime / FTP readiness. The readiness dialog remains a focused secondary surface rather than another permanent navigation destination.
+The active Device page exposes guided Connection setup, Mounted SD files, and contextual Runtime readiness. The readiness dialog remains a focused secondary surface rather than another permanent navigation destination.
 
 ### 3DS runtime configuration
 
@@ -227,7 +232,7 @@ Configuration may include:
 
 - active handheld workspace
 - local library or RomM source
-- device connection settings, including 3DS ftpd and VitaShell FTP endpoints
+- device connection settings, including 3DS ftpd, mounted 3DS storage and VitaShell FTP endpoints
 - removable-storage roots
 - platform mappings
 - runtime preferences
@@ -266,7 +271,7 @@ It does not own transport, storage or package logic.
 
 `workspace_dashboard.py` is the composition root for the active desktop window. It exposes only Library, Device and Settings as permanent destinations. Console-specific setup and advanced device tools are launched contextually from those pages. Library behavior remains delegated to standalone widgets rather than inheriting a console-specific application window.
 
-Primary button emphasis can change with readiness state without changing handlers: Device highlights configuration before a usable route exists and the relevant next action afterward. Settings similarly emphasizes RomM connection testing when credentials are unverified or changed, then shifts emphasis to saving after a successful test. Verification remains advisory rather than a save gate.
+Primary button emphasis can change with readiness state without changing handlers: Device highlights configuration before a usable route exists and the relevant next action afterward. For 3DS, either configured ftpd or a validated mounted SD route counts as usable. Settings similarly emphasizes RomM connection testing when credentials are unverified or changed, then shifts emphasis to saving after a successful test. Verification remains advisory rather than a save gate.
 
 RomM credentials can be tested asynchronously from Settings using the same `RomMConnectionWorker` used by onboarding. Workspace switching is blocked while that bounded test is active so its Qt worker is not orphaned.
 
@@ -314,7 +319,8 @@ The structural refactor is complete enough that further broad restructuring shou
 
 - the unified workspace is a direct `QMainWindow`;
 - configured startup enters the saved workspace directly instead of replaying onboarding;
-- Vita/local library behavior is standalone and exposes its primary copy action in-context;
+- Vita/DS local library behavior is standalone and exposes its primary Vita copy action in-context;
+- the 3DS master/detail library can use either RomM or a configured local library without collapsing runtime/target logic into the source provider;
 - Vita library and explicit-file transfers support VitaShell USB as the preferred handheld path and VitaShell FTP as the wireless/PSTV path;
 - the useful Vita destination/status/local-copy helpers remain focused, while VitaShell FTP lives in its own protocol-specific transport module;
 - the permanent shell is reduced to Library, Device and Settings;
@@ -322,7 +328,7 @@ The structural refactor is complete enough that further broad restructuring shou
 - legacy `ui.py`, `app.py` and `platform_selector.py` surfaces are removed;
 - Send File, removable-storage, Vita Setup, 3DS Setup and 3DS Manager use the shared design language;
 - 3DS runtime/readiness/configuration/package-staging responsibilities are isolated from transport and package-generation code;
-- 3DS readiness is reachable contextually from Device without becoming another permanent page;
+- 3DS readiness and mounted-storage management are reachable contextually from Device without becoming permanent pages;
 - AST/source regression tests prevent removed legacy dependencies and placeholder navigation from returning.
 
 The remaining pre-merge UI work is primarily desktop rendering/lifecycle validation and defect-driven polish, while device-dependent behavior still requires real Vita and Nintendo 3DS regression testing. VitaShell FTP and the newer 3DS runtime/deployment routes cannot be considered hardware-validated from CI alone. New architecture work should require a concrete functional reason rather than continuing the refactor for its own sake.
