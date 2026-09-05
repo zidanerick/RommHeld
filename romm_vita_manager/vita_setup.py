@@ -14,7 +14,10 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
+    QWidget,
 )
 
 from .archive_utils import ArchiveEntry
@@ -182,6 +185,7 @@ class VitaSetupDialog(QDialog):
         status_row.addStretch(1)
 
         device_card = SurfaceCard()
+        device_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         device_card.content.addWidget(self._card_title("1 · Choose the VitaShell transport"))
         device_card.content.addWidget(
             self._secondary(
@@ -217,6 +221,7 @@ class VitaSetupDialog(QDialog):
         device_card.content.addWidget(self._secondary(storage_detail))
 
         software_card = SurfaceCard()
+        software_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         software_card.content.addWidget(self._card_title("2 · Prepare runtime software"))
         software_card.content.addWidget(
             self._secondary(
@@ -228,6 +233,7 @@ class VitaSetupDialog(QDialog):
         for emulator in EMULATORS:
             row = QFrame()
             row.setObjectName("vitaPackageRow")
+            row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             row.setStyleSheet(
                 f"QFrame#vitaPackageRow{{background:{DARK.surface_raised};"
                 f"border:1px solid {DARK.separator};border-radius:10px;}}"
@@ -279,6 +285,7 @@ class VitaSetupDialog(QDialog):
             software_card.content.addWidget(row)
 
         achievements_card = SurfaceCard()
+        achievements_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         achievements_card.content.addWidget(
             self._card_title("3 · Choose the achievement-capable route intentionally")
         )
@@ -289,6 +296,7 @@ class VitaSetupDialog(QDialog):
         )
 
         activity_card = SurfaceCard()
+        activity_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         activity_card.content.addWidget(self._card_title("Setup activity"))
         self.activity = QLabel("Ready.")
         self.activity.setWordWrap(True)
@@ -310,6 +318,24 @@ class VitaSetupDialog(QDialog):
             )
         )
 
+        scroll_content = QWidget()
+        scroll_content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(12)
+        scroll_layout.addWidget(device_card)
+        scroll_layout.addWidget(software_card)
+        scroll_layout.addWidget(achievements_card)
+        scroll_layout.addWidget(activity_card)
+        scroll_layout.addStretch(1)
+
+        self.setup_scroll = QScrollArea()
+        self.setup_scroll.setObjectName("vitaSetupScroll")
+        self.setup_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.setup_scroll.setWidgetResizable(True)
+        self.setup_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setup_scroll.setWidget(scroll_content)
+
         close_row = QHBoxLayout()
         close_row.addStretch(1)
         self.done_button = QPushButton("Done")
@@ -321,10 +347,7 @@ class VitaSetupDialog(QDialog):
         layout.setSpacing(12)
         layout.addWidget(header)
         layout.addLayout(status_row)
-        layout.addWidget(device_card)
-        layout.addWidget(software_card, 1)
-        layout.addWidget(achievements_card)
-        layout.addWidget(activity_card)
+        layout.addWidget(self.setup_scroll, 1)
         layout.addLayout(close_row)
 
         self._transport_changed()
