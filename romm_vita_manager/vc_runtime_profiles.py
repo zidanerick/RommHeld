@@ -150,6 +150,32 @@ def build_classic_runtime_profile(
     }
 
 
+def classic_runtime_profile_matches(
+    profile: dict,
+    family: str,
+    *,
+    code: bytes,
+    exheader: bytes,
+    romfs_template: bytes,
+    rom_path: str,
+) -> bool:
+    """Verify cached classic runtime bytes against a stored v1 fingerprint."""
+    key = family.strip().lower()
+    if profile.get("version") != 1 or str(profile.get("family", "")).lower() != key:
+        return False
+    code_hash = _sha256(code)
+    exheader_hash = _sha256(exheader)
+    romfs_hash = _sha256(romfs_template)
+    expected_profile_id = _profile_id(key, (code_hash, exheader_hash, rom_path, romfs_hash))
+    return (
+        profile.get("code_sha256") == code_hash
+        and profile.get("exheader_sha256") == exheader_hash
+        and profile.get("romfs_template_sha256") == romfs_hash
+        and profile.get("rom_path") == rom_path
+        and profile.get("profile_id") == expected_profile_id
+    )
+
+
 def build_gba_runtime_profile(
     donor_info: dict,
     *,
@@ -186,6 +212,23 @@ def build_gba_runtime_profile(
         "donor_icon_sha256": icon_hash,
         "recommendation": guidance.recommendation,
     }
+
+
+def gba_runtime_profile_matches(
+    profile: dict,
+    *,
+    boot_logo: bytes,
+    donor_banner: bytes,
+    donor_icon: bytes,
+) -> bool:
+    """Verify reusable GBA cache assets covered by the stored donor profile."""
+    if profile.get("version") != 1 or str(profile.get("family", "")).lower() != "gba":
+        return False
+    return (
+        profile.get("boot_logo_sha256") == _sha256(boot_logo)
+        and profile.get("donor_banner_sha256") == _sha256(donor_banner)
+        and profile.get("donor_icon_sha256") == _sha256(donor_icon)
+    )
 
 
 def configured_runtime_profile(config: dict, family: str) -> dict | None:
