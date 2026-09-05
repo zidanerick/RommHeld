@@ -105,17 +105,35 @@ class RefusedVitaFTP(FakeVitaFTP):
         raise ConnectionRefusedError("refused")
 
 
+class FailFinalRenameVitaFTP(FakeVitaFTP):
+    fail_final_rename = True
+
+    def voidcmd(self, command):
+        if command.startswith("RNTO "):
+            destination = normalize_vita_ftp_path(command[5:])
+            if (
+                type(self).fail_final_rename
+                and self.rename_from is not None
+                and ".part" in self.rename_from
+                and destination == "/ux0:/data/game.bin"
+            ):
+                type(self).fail_final_rename = False
+                raise ftplib.error_perm("550 simulated final rename failure")
+        return super().voidcmd(command)
+
+
 @pytest.fixture(autouse=True)
 def reset_fake():
     FakeVitaFTP.files = {}
     FakeVitaFTP.dirs = {"/", "/ux0:"}
     FakeVitaFTP.last_instance = None
+    FailFinalRenameVitaFTP.fail_final_rename = True
 
 
-def make_backend() -> VitaFtpBackend:
+def make_backend(ftp_factory=FakeVitaFTP) -> VitaFtpBackend:
     backend = VitaFtpBackend(
         VitaFtpSettings(host="192.0.2.20"),
-        ftp_factory=FakeVitaFTP,
+        ftp_factory=ftp_factory,
     )
     backend.connect()
     return backend
@@ -196,6 +214,20 @@ def test_overwrite_replaces_only_after_verified_temp_upload(tmp_path: Path):
 
     assert result == "copied"
     assert FakeVitaFTP.files["/ux0:/data/game.bin"] == b"new-content"
+    assert not any(".rommheld-" in path for path in FakeVitaFTP.files)
+
+
+def test_failed_final_rename_restores_existing_destination(tmp_path: Path):
+    source = tmp_path / "game.bin"
+    source.write_bytes(b"new-content")
+    FakeVitaFTP.dirs.add("/ux0:/data")
+    FakeVitaFTP.files["/ux0:/data/game.bin"] = b"old"
+    backend = make_backend(FailFinalRenameVitaFTP)
+
+    with pytest.raises(ftplib.error_perm, match="simulated final rename failure"):
+        backend.upload(source, "data/game.bin", overwrite=True)
+
+    assert FakeVitaFTP.files["/ux0:/data/game.bin"] == b"old"
     assert not any(".rommheld-" in path for path in FakeVitaFTP.files)
 
 
