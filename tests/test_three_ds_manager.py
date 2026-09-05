@@ -45,6 +45,19 @@ def test_manager_uses_shared_runtime_preference_policy_without_importing_qt():
     assert '"native_gba" if game.platform_slug == "gba" else "retroarch"' not in source
 
 
+def test_manager_routes_all_implemented_romm_vc_families_to_package_dialogs():
+    source = MANAGER_PATH.read_text(encoding="utf-8")
+
+    assert 'if target_key == "native_gba":' in source
+    assert 'if target_key == "vc_cia":' in source
+    assert 'if platform == "gba":' in source
+    assert 'if platform in {"gb", "gbc", "nes", "gamegear", "snes"}:' in source
+    assert "from .gba_vc_deploy import GbaVcDeployDialog" in source
+    assert "from .classic_vc_deploy import ClassicVcDeployDialog" in source
+    assert "ClassicVcDeployDialog(self.config, selected, self).exec()" in source
+    assert "available for RomM-backed GBA, GB, GBC, NES, Game Gear, and supported SNES titles" in source
+
+
 def test_manager_preflights_remote_destination_before_romm_download():
     source = MANAGER_PATH.read_text(encoding="utf-8")
 
