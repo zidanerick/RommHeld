@@ -21,6 +21,10 @@ def _app() -> QApplication:
     return _APP
 
 
+def _labels(dialog: VitaSetupDialog) -> list[str]:
+    return [label.text() for label in dialog.findChildren(QLabel)]
+
+
 def test_vita_setup_labels_usb_filesystem_evidence_as_detected(
     tmp_path: Path,
     monkeypatch,
@@ -38,7 +42,7 @@ def test_vita_setup_labels_usb_filesystem_evidence_as_detected(
     dialog.show()
     app.processEvents()
 
-    labels = [label.text() for label in dialog.findChildren(QLabel)]
+    labels = _labels(dialog)
 
     assert any(
         text.startswith("Detected · Preferred route for supported RetroAchievements systems")
@@ -49,6 +53,46 @@ def test_vita_setup_labels_usb_filesystem_evidence_as_detected(
         for text in labels
     )
     assert not any(text.startswith("Installed ·") for text in labels)
+
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_vita_setup_marks_runtime_state_not_checked_without_usb_inspection(
+    monkeypatch,
+) -> None:
+    app = _app()
+    monkeypatch.setattr(
+        vita_setup_module,
+        "load_config",
+        lambda: {
+            "devices": {
+                "vita_ftp": {
+                    "host": "192.0.2.10",
+                    "port": 1337,
+                }
+            }
+        },
+    )
+
+    dialog = VitaSetupDialog(None)
+    dialog.show()
+    app.processEvents()
+
+    labels = _labels(dialog)
+
+    assert dialog.transport_combo.currentData() == "ftp"
+    assert any(
+        text.startswith("Not checked · Preferred route for supported RetroAchievements systems")
+        for text in labels
+    )
+    assert any(
+        text.startswith("Not checked · Required companion data for RetroArch")
+        for text in labels
+    )
+    assert not any(text.startswith("Detected ·") for text in labels)
+    assert not any(text.startswith("Not detected ·") for text in labels)
 
     dialog.close()
     dialog.deleteLater()
