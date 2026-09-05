@@ -60,6 +60,28 @@ def test_local_library_filters_without_rescanning_each_keystroke() -> None:
     assert 'self.destination_label.setToolTip(str(path))' in source
 
 
+def test_local_library_status_checks_are_cached_and_contextual() -> None:
+    source = _source("romm_vita_manager/local_library.py")
+
+    assert 'self._status_cache: dict[Path, tuple[str, str]] = {}' in source
+    assert 'if wanted != "All games":' in source
+    assert 'cached = self._status_cache.get(game.path)' in source
+    assert 'self._status_cache[game.path] = result' in source
+    assert 'if self.target_key == "vita" and not self._using_ftp():' in source
+    assert '"Ready to copy"' in source
+    assert '"Update available"' in source
+    assert '"Destination unavailable"' in source
+    assert '"Checked during FTP transfer"' not in source
+
+
+def test_local_library_empty_states_are_actionable() -> None:
+    source = _source("romm_vita_manager/local_library.py")
+
+    assert 'No local library is active. Choose a local source in Settings.' in source
+    assert 'Reconnect it or choose another source in Settings.' in source
+    assert 'Clear the search or adjust the filters.' in source
+
+
 def test_vita_ftp_guidance_uses_current_device_navigation() -> None:
     source = _source("romm_vita_manager/local_library.py")
 
