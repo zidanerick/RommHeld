@@ -4,7 +4,7 @@ from __future__ import annotations
 _INSTALLED = False
 
 
-def _classic_donor_rom_payload(donor_cia, boot9, vc) -> tuple[str, bytes]:
+def _classic_donor_romfs_files(donor_cia, boot9, vc) -> dict[str, bytes]:
     donor = vc.read_asset(donor_cia)
     keys = vc.read_asset(boot9)
     ncch = vc._primary_ncch_from_cia(donor)
@@ -20,7 +20,37 @@ def _classic_donor_rom_payload(donor_cia, boot9, vc) -> tuple[str, bytes]:
         ncch_format.SECTION_ROMFS,
         extra=True,
     )
-    files = vc.parse_romfs_files(romfs)
+    return vc.parse_romfs_files(romfs)
+
+
+def donor_patch_names_from_files(files: dict[str, bytes]) -> tuple[str, ...]:
+    """Return root-level game patch names from an original classic VC RomFS.
+
+    Nintendo's NES/GB/GBC emulator looks for ``/<rom_name>.patch`` at RomFS
+    root. The files are game-specific and are removed from RommHeld's reusable
+    runtime, but their presence is useful compatibility metadata for warning
+    that a donor may have been tailored to its bundled game.
+    """
+    names = {
+        path.rsplit("/", 1)[-1]
+        for path in files
+        if path.count("/") == 1 and path.casefold().endswith(".patch")
+    }
+    return tuple(sorted(names, key=str.casefold))
+
+
+def classic_donor_patch_names(donor_cia, boot9, family: str) -> tuple[str, ...]:
+    key = family.strip().lower()
+    if key not in {"gb", "gbc", "nes"}:
+        return ()
+    from . import classic_vc as vc
+
+    files = _classic_donor_romfs_files(donor_cia, boot9, vc)
+    return donor_patch_names_from_files(files)
+
+
+def _classic_donor_rom_payload(donor_cia, boot9, vc) -> tuple[str, bytes]:
+    files = _classic_donor_romfs_files(donor_cia, boot9, vc)
     candidates = sorted(path for path in files if path.casefold().startswith("/rom/"))
     if len(candidates) != 1:
         raise ValueError(
