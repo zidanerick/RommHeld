@@ -90,29 +90,26 @@ def test_gb_readiness_accepts_configured_donor_and_boot9(tmp_path: Path, monkeyp
     assert "configured" in message
 
 
-def test_cached_gbc_runtime_is_ready_without_source_paths(tmp_path: Path):
-    exheader = tmp_path / "exheader.bin"
-    code = tmp_path / "code.bin"
-    romfs = tmp_path / "romfs.bin"
-    banner = tmp_path / "banner.bin"
-    icon = tmp_path / "icon.smdh"
-    for path in (exheader, code, romfs, banner, icon):
-        path.write_bytes(b"cached")
-    config = {
-        "classic_vc": {
-            "gbc": {
-                "exheader_path": str(exheader),
-                "code_path": str(code),
-                "romfs_template_path": str(romfs),
-                "donor_banner_path": str(banner),
-                "donor_icon_path": str(icon),
-                "rom_path": "/rom/game.gbc",
-            }
-        }
-    }
-    ready, message = vc_donors.donor_readiness(config, "gbc")
+def test_cached_gbc_runtime_is_ready_without_source_paths(monkeypatch: pytest.MonkeyPatch):
+    import romm_vita_manager.classic_vc_assets as assets
+
+    sentinel = object()
+    monkeypatch.setattr(assets, "configured_classic_runtime", lambda config, family: sentinel)
+    ready, message = vc_donors.donor_readiness({"classic_vc": {"gbc": {}}}, "gbc")
     assert ready
     assert "cached" in message
+
+
+def test_stale_classic_cache_is_not_reported_ready(monkeypatch: pytest.MonkeyPatch):
+    import romm_vita_manager.classic_vc_assets as assets
+
+    monkeypatch.setattr(assets, "configured_classic_runtime", lambda config, family: None)
+    ready, message = vc_donors.donor_readiness(
+        {"classic_vc": {"gbc": {"cache_version": 4}}},
+        "gbc",
+    )
+    assert not ready
+    assert "Configure a Game Boy Color Virtual Console donor CIA" in message
 
 
 def test_gba_readiness_requires_donor_and_boot9(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
