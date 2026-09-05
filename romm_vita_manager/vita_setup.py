@@ -35,6 +35,7 @@ class PackageWorker(QThread):
     progress = Signal(int, str)
     finished_ok = Signal(str, str)
     archive_ready = Signal(str, object)
+    cancelled = Signal(str)
     failed = Signal(str)
 
     def __init__(
@@ -54,6 +55,9 @@ class PackageWorker(QThread):
         self.ftp_settings = ftp_settings
         self.cancel_event = threading.Event()
 
+    def cancel(self) -> None:
+        self.cancel_event.set()
+
     def run(self):
         try:
             package = PACKAGES[self.package_key]
@@ -65,7 +69,11 @@ class PackageWorker(QThread):
                         f"Downloading {package.name}: {done / 1024**2:.1f} MiB",
                     )
 
-                path = download_package(package, progress=report)
+                path = download_package(
+                    package,
+                    progress=report,
+                    cancel_event=self.cancel_event,
+                )
                 if package.requires_archive_review:
                     entries = inspect_package(package)
                     self.archive_ready.emit(str(path), entries)
@@ -101,8 +109,14 @@ class PackageWorker(QThread):
                 return
             if self.vita is None:
                 raise RuntimeError("No Vita USB filesystem is mounted.")
-            target = stage_package(package, self.vita)
+            target = stage_package(
+                package,
+                self.vita,
+                cancel_event=self.cancel_event,
+            )
             self.finished_ok.emit("stage", str(target))
+        except InterruptedError as exc:
+            self.cancelled.emit(str(exc))
         except Exception as exc:
             self.failed.emit(str(exc))
 
@@ -276,6 +290,11 @@ class VitaSetupDialog(QDialog):
         self.progress_bar.setValue(0)
         self.progress_bar.setVisible(False)
         activity_card.content.addWidget(self.progress_bar)
+        self.cancel_button = QPushButton("Cancel current action")
+        self.cancel_button.setVisible(False)
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.clicked.connect(self._cancel_worker)
+        activity_card.content.addWidget(self.cancel_button)
         activity_card.content.addWidget(
             self._secondary(
                 "VPKs are staged for VitaShell installation. FTP staging uses the same verified temporary-upload and safe-replacement transport as other Vita FTP transfers. Archive packages are inspected before extraction."
@@ -284,9 +303,9 @@ class VitaSetupDialog(QDialog):
 
         close_row = QHBoxLayout()
         close_row.addStretch(1)
-        close = QPushButton("Done")
-        close.clicked.connect(self.accept)
-        close_row.addWidget(close)
+        self.done_button = QPushButton("Done")
+        self.done_button.clicked.connect(self.accept)
+        close_row.addWidget(self.done_button)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
@@ -382,8 +401,12 @@ class VitaSetupDialog(QDialog):
         self.activity.setText(f"Preparing {package.name}…")
         self._set_actions_enabled(False)
         self.transport_combo.setEnabled(False)
+        self.done_button.setEnabled(False)
         self.progress_bar.setVisible(True)
-        if action in {"download", "stage"}:
+        cancellable = action in {"download", "stage"}
+        self.cancel_button.setVisible(cancellable)
+        self.cancel_button.setEnabled(cancellable)
+        if cancellable:
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(0)
         else:
@@ -398,9 +421,18 @@ class VitaSetupDialog(QDialog):
         self.worker.progress.connect(self._package_progress)
         self.worker.finished_ok.connect(self._package_finished)
         self.worker.archive_ready.connect(self._archive_ready)
+        self.worker.cancelled.connect(self._package_cancelled)
         self.worker.failed.connect(self._package_failed)
         self.worker.finished.connect(self._worker_finished)
         self.worker.start()
+
+    def _cancel_worker(self) -> None:
+        if self.worker is None or not self.worker.isRunning():
+            return
+        self.worker.cancel()
+        self.cancel_button.setEnabled(False)
+        package = PACKAGES[self.worker.package_key]
+        self.activity.setText(f"Cancelling {package.name}…")
 
     def _package_progress(self, value: int, text: str) -> None:
         self.progress_bar.setRange(0, 100)
@@ -411,6 +443,8 @@ class VitaSetupDialog(QDialog):
         self.progress_bar.setVisible(False)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
+        self.cancel_button.setVisible(False)
+        self.cancel_button.setEnabled(False)
 
     def _set_actions_enabled(self, enabled: bool) -> None:
         for button in self.action_buttons:
@@ -422,6 +456,7 @@ class VitaSetupDialog(QDialog):
         self._pending_stage_key = None
         self.worker = None
         self.transport_combo.setEnabled(True)
+        self.done_button.setEnabled(True)
         self._set_actions_enabled(True)
 
         if pending_stage is None or not self._can_stage():
@@ -485,6 +520,11 @@ class VitaSetupDialog(QDialog):
         )
         _ = reply
 
+    def _package_cancelled(self, message: str) -> None:
+        self._pending_stage_key = None
+        self._finish_activity()
+        self.activity.setText(message or "Setup action cancelled.")
+
     def _package_failed(self, message: str) -> None:
         self._finish_activity()
         self.activity.setText("Setup action failed.")
@@ -495,7 +535,7 @@ class VitaSetupDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Setup action in progress",
-                "The current package action must finish before this window can close.",
+                "Cancel the current package action or allow it to finish before closing this window.",
             )
             event.ignore()
             return
