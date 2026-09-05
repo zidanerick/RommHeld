@@ -94,7 +94,9 @@ Relevant modules:
 - `preferences.py`
 - `emulators.py`
 
-Runtime preference is advisory. The selected route must still be supported by the platform and target.
+`three_ds_targets.py` now distinguishes dedicated/native runtime routes from package-generation routes. In particular, direct `open_agb_firm` GBA deployment is separate from generated HOME Menu GBA CIAs using AGB_FIRM. NDS/TWiLight, Virtual Boy/Red Viper, and N64/DaedalusX64 are modelled as explicit targets rather than being forced through RetroArch.
+
+Runtime preference is advisory. `preferred_target_key()` can recommend compatibility, native, or RetroAchievements-oriented routes only from targets the platform actually exposes. Per-title selection remains authoritative.
 
 ## Device and transport layer
 
@@ -116,8 +118,46 @@ PSP and PS1 retain their Adrenaline paths. Other supported systems can map to Re
 - `three_ds_setup.py`: guided storage/transport/FBI-readiness setup workflow
 - `three_ds_paths.py`: path helpers
 - `storage_validation.py`: mounted-storage validation
+- `three_ds_apps.py`: declarative 3DS runtime/homebrew inventory and conservative SD-marker detection
+- `three_ds_readiness.py`: required/recommended/optional workflow-readiness evaluation
+- `three_ds_packages.py`: narrow, verified mounted-SD staging for explicitly supported simple 3DSX packages
+- `three_ds_readiness_ui.py`: focused readiness/runtime-management dialog built on the non-UI services above
 
 FTP transport does not choose runtime or package format. Setup keeps FTP connectivity and FBI Remote Install readiness explicit rather than treating them as one state.
+
+3DS readiness also does not equate “not visible in the SD filesystem” with “not installed”. Applications that may exist only as installed CIA titles are reported as needing on-console confirmation when required.
+
+### 3DS runtime configuration
+
+Runtime configuration remains separate from transport and package installation.
+
+- `open_agb_config.py`: current-format open_agb_firm configuration parser/editor, validation, backup and atomic replacement
+- `open_agb_settings.py`: focused Qt settings dialog over that adapter
+
+The adapter edits only a documented subset of current open_agb_firm settings, preserves unknown keys/comments, and refuses legacy or unknown configuration formats. TWiLight Menu++, Red Viper, RetroArch, and DaedalusX64 settings remain owned by those applications until a concrete RommHeld workflow justifies a similarly narrow adapter.
+
+### 3DS homebrew staging boundary
+
+RommHeld is not a general homebrew package manager. `three_ds_packages.py` permits automatic mounted-SD staging only for explicitly whitelisted simple single-file packages whose upstream release asset can be resolved and audited predictably.
+
+The current direct-staging allowlist is:
+
+- ftpd 3DSX
+- Universal-Updater 3DSX
+- Red Viper 3DSX
+
+The staging service:
+
+1. resolves an exact asset from the latest stable upstream GitHub release;
+2. rejects unexpected download hosts and unreasonable package sizes;
+3. verifies published asset size;
+4. verifies SHA-256 when upstream publishes a digest;
+5. requires a high-confidence 3DS SD-card root before writing;
+6. backs up an existing target;
+7. stages through a temporary file and atomically replaces the target;
+8. supports cancellation during download.
+
+Complex or system-sensitive packages such as Luma3DS, TWiLight Menu++, RetroArch, DaedalusX64, GodMode9, and CFW/bootstrap components stay delegated to Universal-Updater or maintained upstream procedures. Console-specific DSP firmware is never downloaded by RommHeld.
 
 ### FBI Remote Install
 
@@ -141,7 +181,7 @@ FTP transport does not choose runtime or package format. Setup keeps FTP connect
 - `gba_vc_deploy.py`: package-and-deploy workflow
 - `three_ds_vc.py`: shared 3DS VC/package concepts
 
-Generated GBA CIAs target Nintendo's native AGB_FIRM runtime.
+Generated GBA CIAs target Nintendo's native AGB_FIRM runtime. This package-generation workflow is distinct from copying a `.gba` ROM for direct launch through open_agb_firm.
 
 RommHeld does not automatically download proprietary Nintendo donor assets or copyrighted official CIAs. User-supplied, lawfully obtained files remain explicit inputs where required.
 
@@ -153,6 +193,8 @@ RommHeld does not automatically download proprietary Nintendo donor assets or co
 - `local_storage_ui.py`: card-based removable-storage selection and transfer workflow
 
 Machine-specific paths, removable-media roots, IP addresses and credentials stay outside Git.
+
+Storage validation remains distinct from application detection. A ROM directory is content evidence, not proof that a matching runtime is installed.
 
 ## Configuration
 
@@ -216,6 +258,8 @@ Every worker follows these rules:
 3. bounded operations may finish during shutdown when immediate interruption is impossible;
 4. an owning widget must not be destroyed while a `QThread` is still running.
 
+The 3DS package-staging worker follows the same lifecycle. Package resolution is a bounded network operation and package download is cancellation-aware. Closing the readiness dialog requests cancellation and keeps the dialog alive until its worker finishes.
+
 A clean shutdown is preferred over arbitrary short waits that can leave live Qt threads behind.
 
 ## Safety and integrity rules
@@ -232,6 +276,9 @@ A clean shutdown is preferred over arbitrary short waits that can leave live Qt 
 10. Transport code does not silently choose runtime/package format.
 11. Package preparation does not silently install proprietary executable content from untrusted mirrors.
 12. UI refactors preserve overwrite, verification, cancellation and credential semantics.
+13. Runtime/homebrew detection is evidence-based and does not claim installed-title certainty from missing SD markers.
+14. Device-side configuration adapters must be narrow, version-aware, backed up before replacement, and preserve unrelated settings.
+15. Automatic homebrew staging must use an explicit allowlist and upstream release verification; it must not expand into CFW/bootstrap management.
 
 ## Architecture status
 
@@ -245,6 +292,7 @@ The structural refactor is complete enough that further broad restructuring shou
 - setup and advanced tools are contextual rather than placeholder navigation destinations;
 - legacy `ui.py`, `app.py` and `platform_selector.py` surfaces are removed;
 - Send File, removable-storage, Vita Setup, 3DS Setup and 3DS Manager use the shared design language;
+- 3DS runtime/readiness/configuration/package-staging responsibilities are isolated from transport and package-generation code;
 - AST/source regression tests prevent removed legacy dependencies and placeholder navigation from returning.
 
-The remaining pre-merge work is primarily runtime regression testing on real Vita and Nintendo 3DS hardware, plus fixes for defects found by those tests. New architecture work should require a concrete functional reason rather than continuing the refactor for its own sake.
+The remaining pre-merge work is primarily runtime regression testing on real Vita and Nintendo 3DS hardware, plus fixes for defects found by those tests. The new 3DS readiness dialog and open_agb_firm settings dialog still require desktop GUI validation and a minimal contextual integration point in the active Device/Setup UI. New architecture work should require a concrete functional reason rather than continuing the refactor for its own sake.
