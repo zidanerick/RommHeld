@@ -46,6 +46,14 @@ def test_scan_detects_foundation_transfer_and_runtime_markers(tmp_path: Path):
     assert not statuses["red-viper"].detected
 
 
+def test_content_directories_do_not_false_positive_as_runtime_installations(tmp_path: Path):
+    (tmp_path / "roms" / "virtualboy").mkdir(parents=True)
+    (tmp_path / "BOOT.NDS").write_bytes(b"unrelated nds homebrew")
+
+    assert not detect_three_ds_app(tmp_path, APP_BY_KEY["red-viper"]).detected
+    assert not detect_three_ds_app(tmp_path, APP_BY_KEY["twilight"]).detected
+
+
 def test_runtime_recommendations_are_platform_specific():
     assert recommended_runtime_keys(["gba"]) == ("open-agb-firm", "retroarch")
     assert recommended_runtime_keys(["nds"]) == ("twilight",)
