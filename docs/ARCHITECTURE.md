@@ -40,7 +40,8 @@ For library presentation:
 
 - `LocalLibraryWidget` handles the current Vita/DS local-library surface.
 - `ThreeDSLibraryWidget` handles the current progressive RomM-backed 3DS surface.
-- `vita_library_support.py` owns reusable Vita destination, install-state and copy-worker behavior that was previously embedded in the old window module.
+- `vita_library_support.py` owns reusable Vita destination, mounted-filesystem install-state and local copy-worker behavior.
+- `vita_ftp_library.py` reuses the same Vita destination mapping for VitaShell FTP batch deployment.
 
 ## Library providers
 
@@ -52,16 +53,19 @@ For library presentation:
 
 - search
 - platform filtering
-- Vita install-state filtering
+- Vita install-state filtering when a Vita filesystem is mounted
 - list/tile presentation
 - selection summary
 - Vita destination summary
 - Vita copy/cancel workflow
+- VitaShell USB or VitaShell FTP transport selection for normal Vita library deployment
 - the normal Vita copy action beside the current library selection
 
 DS can reuse the same presentation without claiming Vita-style install-state knowledge.
 
-`vita_library_support.py` contains the reusable Vita copy worker, destination resolution, status checks and size formatting. These helpers have no application-shell responsibility.
+Mounted Vita storage supports cheap local install-state inspection. VitaShell FTP does not expose an equivalent efficient bulk-status operation, so FTP mode checks individual remote destinations as transfers start rather than pretending the entire library has been pre-scanned remotely.
+
+`vita_library_support.py` contains the reusable local Vita copy worker, destination resolution, status checks and size formatting. `vita_ftp_library.py` maps those same destinations to `ux0:/...` and owns the FTP batch worker. Neither helper has application-shell responsibility.
 
 ### RomM server
 
@@ -102,14 +106,23 @@ Runtime preference is advisory. `preferred_target_key()` can recommend compatibi
 
 ### PlayStation Vita
 
-- `vita.py`: mount detection and storage information
-- `transfers.py` / `file_transfer.py`: cancellable local copying
-- `vita_library_support.py`: Vita destination/status/copy helpers
-- `local_library.py`: active library/deployment presentation
-- `send_file_dialog.py`: explicit single-file transfer workflow
+- `vita.py`: VitaShell USB mount detection and storage information
+- `transfers.py` / `file_transfer.py`: cancellable, destination-preserving local copying
+- `vita_paths.py`: canonical mapping from `ux0:/...` to the mounted ux0 root
+- `vita_library_support.py`: Vita destination/status/local-copy helpers
+- `vita_ftp.py`: protocol-specific VitaShell FTP transport
+- `vita_ftp_library.py`: VitaShell FTP batch deployment using the same destination mappings as USB
+- `local_library.py`: active library/deployment presentation and USB/FTP selection
+- `send_file_dialog.py`: explicit single-file transfer workflow over USB or FTP
 - `vita_setup.py`: Vita setup/runtime preparation
 
-PSP and PS1 retain their Adrenaline paths. Other supported systems can map to RetroFlow/runtime-specific destinations.
+VitaShell USB is the preferred default on handheld Vita systems because the mounted filesystem provides reliable capacity checks, cheap install-state inspection and direct local filesystem semantics. RommHeld treats the detected mount root as `ux0:` itself rather than adding another `ux0` directory.
+
+VitaShell FTP is the secondary wireless transport and the practical transport for PlayStation TV. The current VitaShell/ftpvitalib protocol uses port `1337` by default and exposes mountpoints with paths such as `/ux0:/data/...`. Its command set differs materially from the 3DS `ftpd` server: VitaShell does not provide `REST` resume, `MLSD` or usable `ABOR` semantics, and some replies are non-standard. For that reason `vita_ftp.py` is intentionally separate from `three_ds_ftp.py` instead of forcing both devices through one generic FTP implementation.
+
+Vita FTP uploads are confined to the configured `/ux0:` root. They stage into a temporary remote file, verify size, then replace the destination. Existing different-size destinations are first moved to a temporary backup and restored if the final swap or verification fails. Cancellation drops the VitaShell control connection when necessary and cleans the temporary upload through a fresh FTP session because the server does not implement `ABOR`.
+
+PSP and PS1 retain their Adrenaline paths. Other supported systems can map to RetroFlow/runtime-specific destinations. The chosen Vita transport changes only how bytes reach the device, not the destination/runtime decision.
 
 ### Nintendo 3DS
 
@@ -123,7 +136,9 @@ PSP and PS1 retain their Adrenaline paths. Other supported systems can map to Re
 - `three_ds_packages.py`: narrow, verified mounted-SD staging for explicitly supported simple 3DSX packages
 - `three_ds_readiness_ui.py`: focused readiness/runtime-management dialog built on the non-UI services above
 
-FTP transport does not choose runtime or package format. Setup keeps FTP connectivity and FBI Remote Install readiness explicit rather than treating them as one state.
+The recommended live filesystem server is mtheall `ftpd`. RommHeld defaults to port `5000`, tells users to open `ftpd` and leave it running, and translates common timeout/refusal/authentication errors into console-side remediation. The 3DS backend can use `MLSD` with fallback listing, `REST` resume where supported, `ABOR` cancellation, `SIZE` verification and the configured remote-root boundary. Failed connection setup closes partially opened FTP sockets.
+
+FTP transport does not choose runtime or package format. Setup keeps FTP connectivity and FBI Remote Install readiness explicit rather than treating them as one state. For installable CIA packages, FBI Remote Install remains the direct installation route; FTP is the filesystem-copy route.
 
 3DS readiness also does not equate “not visible in the SD filesystem” with “not installed”. Applications that may exist only as installed CIA titles are reported as needing on-console confirmation when required.
 
@@ -171,6 +186,10 @@ Complex or system-sensitive packages such as Luma3DS, TWiLight Menu++, RetroArch
 
 `firewall.py` can request narrowly scoped temporary Linux firewall access through Polkit and remove it during cleanup.
 
+### Nintendo DS
+
+Nintendo DS deployment remains removable-storage first. RommHeld validates the selected SD/flashcard root and copies to that storage rather than assuming an FTP server or one particular flashcard model. Optional DS-side FTP software is not a core transport dependency.
+
 ## Package preparation
 
 ### Native GBA / AGB_FIRM
@@ -204,7 +223,7 @@ Configuration may include:
 
 - active handheld workspace
 - local library or RomM source
-- device connection settings
+- device connection settings, including 3DS ftpd and VitaShell FTP endpoints
 - removable-storage roots
 - platform mappings
 - runtime preferences
@@ -260,6 +279,8 @@ Every worker follows these rules:
 
 The 3DS package-staging worker follows the same lifecycle. Package resolution is a bounded network operation and package download is cancellation-aware. Closing the readiness dialog requests cancellation and keeps the dialog alive until its worker finishes.
 
+VitaShell FTP workers use the same ownership rules. Since VitaShell does not support FTP `ABOR`, cancellation may require closing the current FTP control connection and using a short cleanup connection rather than waiting for a protocol-level abort response.
+
 A clean shutdown is preferred over arbitrary short waits that can leave live Qt threads behind.
 
 ## Safety and integrity rules
@@ -279,6 +300,7 @@ A clean shutdown is preferred over arbitrary short waits that can leave live Qt 
 13. Runtime/homebrew detection is evidence-based and does not claim installed-title certainty from missing SD markers.
 14. Device-side configuration adapters must be narrow, version-aware, backed up before replacement, and preserve unrelated settings.
 15. Automatic homebrew staging must use an explicit allowlist and upstream release verification; it must not expand into CFW/bootstrap management.
+16. Device-specific FTP capabilities are not assumed to be interchangeable. Resume, listing, cancellation and reply handling follow the actual server used by that console.
 
 ## Architecture status
 
@@ -287,7 +309,8 @@ The structural refactor is complete enough that further broad restructuring shou
 - the unified workspace is a direct `QMainWindow`;
 - configured startup enters the saved workspace directly instead of replaying onboarding;
 - Vita/local library behavior is standalone and exposes its primary copy action in-context;
-- the useful Vita copy/status helpers are in a focused module;
+- Vita library and explicit-file transfers support VitaShell USB as the preferred handheld path and VitaShell FTP as the wireless/PSTV path;
+- the useful Vita destination/status/local-copy helpers remain focused, while VitaShell FTP lives in its own protocol-specific transport module;
 - the permanent shell is reduced to Library, Device and Settings;
 - setup and advanced tools are contextual rather than placeholder navigation destinations;
 - legacy `ui.py`, `app.py` and `platform_selector.py` surfaces are removed;
@@ -295,4 +318,4 @@ The structural refactor is complete enough that further broad restructuring shou
 - 3DS runtime/readiness/configuration/package-staging responsibilities are isolated from transport and package-generation code;
 - AST/source regression tests prevent removed legacy dependencies and placeholder navigation from returning.
 
-The remaining pre-merge work is primarily runtime regression testing on real Vita and Nintendo 3DS hardware, plus fixes for defects found by those tests. The new 3DS readiness dialog and open_agb_firm settings dialog still require desktop GUI validation and a minimal contextual integration point in the active Device/Setup UI. New architecture work should require a concrete functional reason rather than continuing the refactor for its own sake.
+The remaining pre-merge work is primarily runtime regression testing on real Vita and Nintendo 3DS hardware, plus fixes for defects found by those tests. The new 3DS readiness dialog and open_agb_firm settings dialog still require desktop GUI validation and a minimal contextual integration point in the active Device/Setup UI. VitaShell FTP also requires real Vita/PlayStation TV validation because CI covers protocol behavior with fakes rather than physical VitaShell. New architecture work should require a concrete functional reason rather than continuing the refactor for its own sake.
