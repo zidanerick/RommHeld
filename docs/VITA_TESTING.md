@@ -2,7 +2,7 @@
 
 Status: real-device validation pending
 
-This document is the authoritative Vita hardware regression checklist for the active RommHeld integration branch. Unit tests and CI validate path handling, rollback semantics, package selection, and other deterministic behavior, but they do not validate VitaShell, the Vita USB mass-storage implementation, ftpvitalib, Vita filesystem behavior, emulator launch behavior, or physical-device lifecycle.
+This document is the authoritative Vita hardware regression checklist for the active RommHeld integration branch. Unit tests and CI validate path handling, rollback semantics, package selection, transport routing and other deterministic behavior, but they do not validate VitaShell, Vita USB mass storage, ftpvitalib, Vita filesystem behavior, emulator launch behavior or physical-device lifecycle.
 
 ## Scope
 
@@ -10,12 +10,13 @@ The current Vita regression pass covers:
 
 - VitaShell USB mount detection and storage reporting
 - VitaShell FTP connection and transfer behavior
-- local-library destinations
+- PlayStation TV operation without a USB mount
+- local-library destinations over USB and FTP
 - same-size skip and different-size replacement
 - cancellation and rollback
 - Send File over USB and FTP
-- Vita Setup package download and staging
-- emulator/frontend detection
+- Vita Setup package download and staging over USB and FTP
+- emulator/frontend detection where storage is mounted
 - close-during-worker and reconnect behavior
 
 Broad UI or architecture changes are out of scope unless a hardware failure demonstrates a concrete need.
@@ -43,7 +44,7 @@ On the Vita:
 1. Open VitaShell.
 2. Press `START`.
 3. Set `SELECT button` to `USB`.
-4. Select the USB device that currently backs `ux0:`. This may be the memory card, SD2Vita, or another configured storage device.
+4. Select the USB device that currently backs `ux0:`. This may be the memory card, SD2Vita or another configured storage device.
 5. Close Settings.
 6. Press `SELECT` to start USB mode.
 7. Connect the Vita to the desktop using a USB data cable.
@@ -80,7 +81,7 @@ There must not be an extra nested `ux0/` directory.
 
 - Put an existing destination file on the Vita with different contents and a different size.
 - Start a replacement through Send File or the local library.
-- Confirm RommHeld explicitly asks before replacing a different-size destination.
+- Confirm RommHeld explicitly asks before replacing a different-size destination where that workflow preflights local state.
 - Approve the replacement.
 - Confirm the old file remains in place until the replacement copy finishes.
 - Confirm final size matches the source.
@@ -114,15 +115,17 @@ Expected:
 
 ## 2. VitaShell FTP preparation
 
-On the Vita:
+On the Vita or PlayStation TV:
 
 1. Open VitaShell.
 2. Press `START`.
 3. Set `SELECT button` to `FTP`.
 4. Close Settings.
 5. Press `SELECT`.
-6. Enter the IP address and port shown by VitaShell into RommHeld.
-7. Keep the Vita and desktop on the same local network.
+6. Enter the IP address and port shown by VitaShell into RommHeld from **Device → Send file / configure FTP**.
+7. Keep the Vita/PSTV and desktop on the same trusted local network.
+
+The normal VitaShell/ftpvitalib port is `1337`, but use the endpoint actually displayed by VitaShell.
 
 ### FTP-01: connection lifecycle
 
@@ -133,7 +136,7 @@ On the Vita:
 
 ### FTP-02: path parity with USB
 
-For representative PSP, PS1, NDS, VPK, and RetroFlow-mapped inputs, compare the destination preview over USB and FTP.
+For representative PSP, PS1, NDS, VPK and RetroFlow-mapped inputs, compare the destination preview over USB and FTP.
 
 Expected: both transports resolve to the same logical `ux0:` destination.
 
@@ -142,9 +145,9 @@ Expected: both transports resolve to the same logical `ux0:` destination.
 - Upload a new file.
 - Repeat it and confirm same-size skip.
 - Change the local source size.
-- Confirm the batch-copy UI explicitly states that different-size destinations may be replaced before transfer starts.
-- Approve it.
+- In the library workflow, confirm the batch-copy confirmation states that different-size files can be safely replaced and that free space cannot be pre-checked over FTP.
 - Confirm the replacement is uploaded to a hidden temporary file, verified, and then swapped into place.
+- Confirm an existing destination remains in place until the new upload is verified.
 - Confirm no `.rommheld-*.part` or `.rommheld-*.backup` residue remains after a normal successful replacement.
 
 ### FTP-04: cancellation rollback
@@ -157,6 +160,8 @@ Expected:
 - temporary upload is removed using a fresh FTP session if cancellation desynchronizes the original control connection
 - the next connection/transfer succeeds
 
+VitaShell FTP does not implement usable `ABOR` semantics for this workflow, so RommHeld deliberately drops the affected control connection on cancellation and cleans the temporary upload through a new session.
+
 ### FTP-05: network interruption
 
 Interrupt Wi-Fi or stop VitaShell FTP during a transfer.
@@ -167,6 +172,19 @@ Expected:
 - it does not report success without final remote-size verification
 - an existing destination is not silently destroyed
 - reconnect is possible without restarting RommHeld
+
+### FTP-06: PlayStation TV without USB
+
+Run RommHeld with no Vita USB mount available and a saved VitaShell FTP endpoint.
+
+Expected:
+
+- Device shows the saved FTP endpoint without claiming that a USB filesystem is mounted
+- **Send file / configure FTP** opens even though there is no USB mount
+- Send File can transfer to `ux0:/...`
+- the normal Vita library can select VitaShell FTP and deploy mapped content
+- Vita Setup can select VitaShell FTP and stage supported VPK packages
+- unavailable USB capacity/install-state information is not fabricated
 
 ## 3. Library destination validation
 
@@ -186,7 +204,7 @@ If the source is already literally named `EBOOT.PBP`, RommHeld should use its so
 
 Expected: `ux0:/pspemu/PSP/GAME/<folder>/EBOOT.PBP`.
 
-Raw `.cue`, `.bin`, or `.chd` inputs must not be silently renamed to `EBOOT.PBP` for Adrenaline.
+Raw `.cue`, `.bin` or `.chd` inputs must not be silently renamed to `EBOOT.PBP` for Adrenaline.
 
 ### LIB-04: DSVita
 
@@ -219,25 +237,36 @@ Expected:
 - VitaShell can see the VPK and install it manually
 - after installation, the staged VPK remains a staging artifact unless the user removes it
 
+Run this once over USB and once over FTP when practical.
+
 ## 4. Vita Setup package validation
 
 RommHeld should never claim SHA-256 verification unless a trusted upstream digest was available. Successful download without an upstream digest is a successful download, not cryptographic provenance validation.
+
+Vita Setup now exposes two staging transports:
+
+- `VitaShell USB · Recommended`
+- `VitaShell FTP · Wireless / PlayStation TV`
+
+Package selection/download remains independent from transport. Archive packages remain review-only until an explicit extraction rule exists.
 
 ### SETUP-01: RetroFlow
 
 - Download current configured RetroFlow package.
 - Confirm digest verification succeeds when the configured/upstream digest is available.
-- Stage the VPK.
+- Stage the VPK over USB.
+- Stage it again over FTP and confirm the logical target remains `ux0:/RetroFlow_emu4vita.vpk`.
 - Install with VitaShell.
-- Reopen Vita Setup and confirm RetroFlow is detected.
+- Reopen Vita Setup with USB mounted and confirm RetroFlow is detected.
 
 ### SETUP-02: Adrenaline
 
 RommHeld currently targets the official `6.61 Adrenaline-7` release because that is the version explicitly supported by the current RetroFlow documentation.
 
 - Download and stage `Adrenaline.vpk`.
+- Exercise at least one staging transport, and FTP specifically on PSTV.
 - Install with VitaShell if needed.
-- Confirm detection through the expected Adrenaline application path.
+- Confirm detection through the expected Adrenaline application path when USB storage inspection is available.
 - Confirm PSP/PS1 library routes work.
 
 ### SETUP-03: DSVita
@@ -245,7 +274,7 @@ RommHeld currently targets the official `6.61 Adrenaline-7` release because that
 - Download current configured DSVita VPK.
 - Verify the configured SHA-256.
 - Stage/install it.
-- Confirm DSVita detection.
+- Confirm DSVita detection with USB inspection.
 - Complete LIB-04.
 
 Also confirm the user-facing prerequisite note remains accurate for the tested DSVita build, including any required plugins/runtime dependencies.
@@ -257,7 +286,7 @@ RommHeld uses the Vita-native `Rinnegatamante/DaedalusX64-vitaGL` release and st
 - Download the latest upstream VPK.
 - Confirm GitHub-provided SHA-256 verification when present.
 - Stage and install it.
-- Confirm the installed title ID `DEDALOX64` is detected by RommHeld.
+- Confirm the installed title ID `DEDALOX64` is detected by RommHeld when USB inspection is available.
 - Copy an N64 ROM through the normal RetroFlow mapping, rescan, and launch it through the configured RetroFlow/Daedalus route.
 
 ### SETUP-05: RetroArch
@@ -267,6 +296,32 @@ RommHeld uses the Vita-native `Rinnegatamante/DaedalusX64-vitaGL` release and st
 - Complete manual/upstream-required data installation.
 - Confirm a representative RetroFlow/libretro title launches.
 
+### SETUP-06: FTP package replacement safety
+
+With a supported VPK already staged at its target, stage a different-size replacement through Vita Setup FTP.
+
+Expected:
+
+- package preparation remains in the local cache until staging starts
+- FTP uses the Vita-specific package transport adapter
+- the replacement goes through VitaShell FTP's verified temporary-upload path
+- the existing VPK remains recoverable until the new upload verifies and swaps into place
+- final remote size matches the downloaded package
+- no ordinary-success `.part` or `.backup` residue remains
+
+### SETUP-07: download-to-stage worker lifecycle
+
+Start a package download and accept the prompt to stage it immediately after download.
+
+Run once with USB and once with FTP.
+
+Expected:
+
+- the download worker fully finishes before the stage worker starts
+- transport controls remain locked while each worker is active
+- there is no `QThread: Destroyed while thread is still running` warning or abort
+- closing is blocked while the current package worker is active
+
 ## 5. Worker and application lifecycle
 
 Run these after transfers work normally:
@@ -275,6 +330,7 @@ Run these after transfers work normally:
 - cancel an active FTP transfer
 - attempt to close Send File while a transfer is active
 - attempt to close Vita Setup during package download/staging
+- stage a package immediately after download using both transports
 - switch away from and back to the Vita workspace repeatedly
 - disconnect USB while the app is open, then reconnect and refresh
 - stop/restart VitaShell FTP and reconnect
@@ -285,21 +341,25 @@ Acceptance criteria:
 - no `QThread: Destroyed while thread is still running` abort
 - no orphaned local/remote temporary files after normal cancellation
 - no stale UI state claiming a disconnected Vita is connected after refresh
-- no silent overwrite of a different-size destination without an explicit user decision
+- no silent overwrite of a different-size destination where explicit confirmation is part of the workflow
+- FTP-only/PSTV operation never claims USB-derived capacity or install-state knowledge
 
 ## Validation record
 
 Record physical-device results here when executed. Do not mark a route validated solely from CI.
 
-| Area | Unit/CI | Desktop GUI | Real Vita | Notes |
+| Area | Unit/CI | Desktop GUI | Real Vita/PSTV | Notes |
 | --- | --- | --- | --- | --- |
 | USB mount detection | covered | pending | pending | Requires VitaShell USB |
 | USB copy/skip/replacement | covered | pending | pending | Atomic sibling staging |
 | USB cancellation rollback | covered | pending | pending | Existing destination must survive |
 | VitaShell FTP backend | covered | pending | pending | Requires real ftpvitalib behavior |
 | VitaShell FTP library copy | covered | pending | pending | Destination parity required |
+| PSTV FTP-only workflow | covered | pending | pending | No USB mount available |
 | PSP/PS1 Adrenaline routes | covered | pending | pending | Launch/rescan requires device |
 | DSVita route | covered | pending | pending | `ux0:/data/dsvita/` |
 | Vita VPK staging | covered | pending | pending | Staged is not installed |
-| Vita Setup packages | covered | pending | pending | Install/launch requires device |
+| Vita Setup package USB staging | covered | pending | pending | Install/launch requires device |
+| Vita Setup package FTP staging | covered | pending | pending | New PSTV-capable path |
+| Download-to-stage worker handoff | covered | pending | pending | Must fully finish old QThread first |
 | Lifecycle/shutdown | partial | pending | pending | Exercise worker close/reconnect cases |
