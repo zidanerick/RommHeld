@@ -76,6 +76,9 @@ def application_stylesheet() -> str:
         background: {p.surface_hover};
         border-color: #4A4A4D;
     }}
+    QPushButton:focus {{
+        border-color: #8E8E93;
+    }}
     QPushButton:pressed {{
         background: #323235;
     }}
@@ -92,6 +95,9 @@ def application_stylesheet() -> str:
     QPushButton[quiet="true"]:hover {{
         background: {p.surface};
         color: {p.text_primary};
+    }}
+    QPushButton[quiet="true"]:focus {{
+        border-color: #6E6E73;
     }}
     QPushButton[destructive="true"] {{
         color: {p.error};
@@ -120,6 +126,10 @@ def application_stylesheet() -> str:
         border: 1px solid {p.separator};
         border-radius: 11px;
         outline: none;
+    }}
+    QListWidget:focus, QListView:focus, QTreeWidget:focus, QTreeView:focus,
+    QTableWidget:focus, QTableView:focus {{
+        border-color: #5A5A5E;
     }}
     QListWidget::item, QListView::item, QTreeView::item {{
         padding: 8px;
