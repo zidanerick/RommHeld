@@ -42,3 +42,12 @@ def test_send_file_dialog_blocks_all_dismissal_paths_during_transfer():
     assert "super().accept()" in source
     assert "super().reject()" in source
     assert "super().closeEvent(event)" in source
+
+
+def test_send_file_revalidates_vita_usb_mount_before_writing():
+    source = source_text()
+
+    assert "from .vita import free_space, is_vita_mount" in source
+    assert "self.vita = vita if vita is not None and is_vita_mount(vita) else None" in source
+    assert "if self.vita is None or not is_vita_mount(self.vita):" in source
+    assert "The VitaShell USB mount is no longer available." in source
