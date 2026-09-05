@@ -2,8 +2,6 @@
 """RommHeld application launcher."""
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
@@ -19,7 +17,11 @@ ACTIVE_WORKSPACES = {"vita", "3ds", "ds"}
 
 
 def _workspace_is_configured(config: dict) -> bool:
-    """Return whether normal startup can enter the saved workspace directly."""
+    """Return whether normal startup can enter the saved workspace directly.
+
+    A temporarily unavailable library path or service is runtime state, not a
+    reason to replay onboarding. The workspace can explain and recover from it.
+    """
     if not bool(config.get("setup_complete")):
         return False
     if str(config.get("active_console", "")).strip().lower() not in ACTIVE_WORKSPACES:
@@ -27,7 +29,7 @@ def _workspace_is_configured(config: dict) -> bool:
 
     source = get_library_source(config)
     if source.mode == "local":
-        return bool(source.local_root) and Path(source.local_root).expanduser().is_dir()
+        return bool(source.local_root.strip())
     if source.mode == "romm_api":
         return bool(source.romm_url.strip() and source.api_token.strip())
     return False
