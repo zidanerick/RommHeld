@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from .design_tokens import DARK
@@ -73,20 +74,37 @@ class AccentButton(QPushButton):
         self.set_accent(accent)
 
     def set_accent(self, accent: str) -> None:
+        base = QColor(accent)
+        hover = base.lighter(112).name() if base.isValid() else accent
+        pressed = base.darker(112).name() if base.isValid() else accent
         self.setStyleSheet(
             f"""
             QPushButton {{
                 background:{accent};
                 color:#FFFFFF;
-                border:none;
+                border:1px solid transparent;
                 border-radius:9px;
                 padding:8px 14px;
                 min-height:22px;
                 font-weight:700;
             }}
-            QPushButton:hover {{ background:{accent}; border:none; }}
-            QPushButton:pressed {{ padding-top:9px; padding-bottom:7px; }}
-            QPushButton:disabled {{ background:#343437; color:#77777C; }}
+            QPushButton:hover {{
+                background:{hover};
+                border-color:transparent;
+            }}
+            QPushButton:focus {{
+                border-color:#FFFFFF;
+            }}
+            QPushButton:pressed {{
+                background:{pressed};
+                padding-top:9px;
+                padding-bottom:7px;
+            }}
+            QPushButton:disabled {{
+                background:#343437;
+                color:#77777C;
+                border-color:transparent;
+            }}
             """
         )
 
