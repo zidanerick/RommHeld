@@ -11,6 +11,20 @@ from romm_vita_manager.classic_vc import (
 )
 
 
+def _valid_gameboy_rom(*, cgb_flag: int = 0x00) -> bytes:
+    data = bytearray(0x8000)
+    data[0x134:0x13C] = b"ROMMHELD"
+    data[0x143] = cgb_flag
+    data[0x147] = 0x00
+    data[0x148] = 0x00
+    data[0x149] = 0x00
+    checksum = 0
+    for value in data[0x134:0x14D]:
+        checksum = (checksum - value - 1) & 0xFF
+    data[0x14D] = checksum
+    return bytes(data)
+
+
 def test_classic_title_ids_are_stable_and_family_specific():
     gb = classic_title_id_for_romm_id(42, "gb")
     gbc = classic_title_id_for_romm_id(42, "gbc")
@@ -81,12 +95,12 @@ def test_patch_exheader_updates_identity_without_touching_access_descriptor():
 
 
 def test_prepare_classic_rom_accepts_raw_rom():
-    rom = b"GB ROM" * 64
+    rom = _valid_gameboy_rom()
     assert prepare_classic_rom(rom, "gb") == rom
 
 
 def test_prepare_classic_rom_extracts_matching_file_from_zip():
-    expected = b"GBC ROM" * 64
+    expected = _valid_gameboy_rom(cgb_flag=0x80)
     archive_bytes = io.BytesIO()
     with zipfile.ZipFile(archive_bytes, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("readme.txt", "notes")
