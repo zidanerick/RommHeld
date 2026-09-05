@@ -389,15 +389,39 @@ class LocalLibraryWidget(QWidget):
                 result.append(game)
         return result
 
+    def _safe_destination_count(self, selected: list[Game]) -> int:
+        if self.target_key != "vita" or not selected:
+            return 0
+        if self._using_ftp():
+            count = 0
+            for game in selected:
+                _label, destination, mode = ftp_destination_target(game, self.mappings)
+                if mode != "unknown" and destination:
+                    count += 1
+            return count
+        if self.vita is None:
+            return 0
+        return sum(
+            1
+            for game in selected
+            if destination_for_game(self.vita, game, self.mappings)[2] != "unknown"
+        )
+
     def update_summary(self) -> None:
         selected = self.selected_games()
         total = sum(game.size for game in selected)
         is_vita = self.target_key == "vita"
         worker_running = self.worker is not None and self.worker.isRunning()
         transport_ready = self._ftp_ready() if self._using_ftp() else self.vita is not None
+        safe_destination_count = (
+            self._safe_destination_count(selected) if is_vita and transport_ready else 0
+        )
         self.copy_button.setVisible(is_vita)
         self.copy_button.setEnabled(
-            is_vita and transport_ready and bool(selected) and not worker_running
+            is_vita
+            and transport_ready
+            and safe_destination_count > 0
+            and not worker_running
         )
         self.selection_label.setText(
             f"{len(selected)} selected • {human_size(total)}" if selected else "No games selected"
@@ -412,10 +436,19 @@ class LocalLibraryWidget(QWidget):
                         if self._using_ftp()
                         else "Connect the Vita through VitaShell USB to copy the selected games."
                     )
-                else:
+                elif safe_destination_count == len(selected):
                     method = "VitaShell FTP" if self._using_ftp() else "VitaShell USB"
                     self.destination_label.setText(
                         f"Ready to copy {len(selected)} games through {method}."
+                    )
+                elif safe_destination_count:
+                    method = "VitaShell FTP" if self._using_ftp() else "VitaShell USB"
+                    self.destination_label.setText(
+                        f"{safe_destination_count} of {len(selected)} selected games have a safe {method} destination."
+                    )
+                else:
+                    self.destination_label.setText(
+                        "Selected games need destination review before they can be copied."
                     )
             elif selected:
                 self.destination_label.setText("Destination is chosen from the Device workflow.")
@@ -435,11 +468,19 @@ class LocalLibraryWidget(QWidget):
             )
             return
         if self._using_ftp():
-            label, target, _mode = ftp_destination_target(game, self.mappings)
+            label, target, mode = ftp_destination_target(game, self.mappings)
+            if mode == "unknown" or not target:
+                self.destination_label.setText(label)
+                self.destination_label.setToolTip("Destination review required")
+                return
             self.destination_label.setText(f"Copies to {label}")
-            self.destination_label.setToolTip(target or "Destination review required")
+            self.destination_label.setToolTip(target)
         else:
-            label, path, _mode = destination_for_game(self.vita, game, self.mappings)
+            label, path, mode = destination_for_game(self.vita, game, self.mappings)
+            if mode == "unknown":
+                self.destination_label.setText(label)
+                self.destination_label.setToolTip(str(path))
+                return
             self.destination_label.setText(f"Copies to {label}")
             self.destination_label.setToolTip(str(path))
 
