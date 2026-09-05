@@ -28,11 +28,12 @@ from PySide6.QtWidgets import (
 from .config import save_config
 from .design_tokens import DARK, brand_for_platform
 from .library_sources import get_library_source
+from .preferences import get_device_preference
 from .romm import scan_games
 from .romm_remote import RomMRemoteGame, download_artwork, download_rom
 from .romm_remote_worker import RomMLibraryWorker
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
-from .three_ds_targets import available_targets, default_destination
+from .three_ds_targets import available_targets, default_destination, preferred_target_key
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 
 
@@ -536,7 +537,8 @@ class ThreeDSManagerDialog(QDialog):
                 self.target_combo.addItem(target.label, target.key)
             self.target_combo.blockSignals(False)
             if targets:
-                preferred = "native_gba" if game.platform_slug == "gba" else "retroarch"
+                preference = get_device_preference(self.config, "3ds")
+                preferred = preferred_target_key(game.platform_slug, preference)
                 index = next(
                     (
                         i
