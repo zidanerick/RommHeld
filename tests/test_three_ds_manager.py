@@ -45,6 +45,28 @@ def test_manager_uses_shared_runtime_preference_policy_without_importing_qt():
     assert '"native_gba" if game.platform_slug == "gba" else "retroarch"' not in source
 
 
+def test_manager_uses_file_aware_targets_for_local_and_romm_records():
+    source = MANAGER_PATH.read_text(encoding="utf-8")
+
+    assert "available_targets_for_file" in source
+    assert "normalize_platform_slug" in source
+    assert "targets = available_targets_for_file(_platform_slug(game), _filename(game))" in source
+    assert 'PACKAGE_GENERATION_TARGETS = frozenset({"native_gba", "vc_cia"})' in source
+    assert "if target.key not in PACKAGE_GENERATION_TARGETS" in source
+    assert "games = [game for game in scan_games(root) if _targets_for_game(game)]" in source
+
+
+def test_manager_disables_deployment_without_a_safe_target():
+    source = MANAGER_PATH.read_text(encoding="utf-8")
+
+    assert "has_target = self.target_combo.count() > 0" in source
+    assert "and has_target" in source
+    assert 'target_key = str(self.target_combo.currentData() or "")' in source
+    assert 'target_key = str(self.target_combo.currentData() or "retroarch")' not in source
+    assert "No safe deployment route is available for this file format" in source
+    assert "This file format does not have a supported Nintendo 3DS deployment route" in source
+
+
 def test_manager_routes_all_implemented_romm_vc_families_to_package_dialogs():
     source = MANAGER_PATH.read_text(encoding="utf-8")
 
