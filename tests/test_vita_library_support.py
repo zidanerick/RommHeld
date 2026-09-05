@@ -1,10 +1,13 @@
 from pathlib import Path
 
+import pytest
+
 from romm_vita_manager.models import Game
 from romm_vita_manager.vita_library_support import (
     destination_for_game,
     destination_target,
     game_status,
+    validate_game_source,
 )
 
 
@@ -180,3 +183,28 @@ def test_explicit_none_mapping_disables_canonical_default(tmp_path: Path):
 
     assert label == "Needs destination review"
     assert mode == "unknown"
+
+
+def test_library_source_preflight_accepts_unchanged_file(tmp_path: Path):
+    source = tmp_path / "game.nds"
+    source.write_bytes(b"12345")
+    game = _game(source, "nds", size=5)
+
+    validate_game_source(game)
+
+
+def test_library_source_preflight_rejects_size_change_after_scan(tmp_path: Path):
+    source = tmp_path / "game.nds"
+    source.write_bytes(b"changed")
+    game = _game(source, "nds", size=5)
+
+    with pytest.raises(IOError, match="Refresh the library"):
+        validate_game_source(game)
+
+
+def test_library_source_preflight_rejects_missing_file(tmp_path: Path):
+    source = tmp_path / "missing.nds"
+    game = _game(source, "nds", size=5)
+
+    with pytest.raises(IOError, match="Refresh the library"):
+        validate_game_source(game)
