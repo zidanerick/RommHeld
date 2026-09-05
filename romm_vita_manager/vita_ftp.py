@@ -188,6 +188,17 @@ class VitaFtpBackend:
         ftp.sendcmd(f"RNFR {source}")
         ftp.voidcmd(f"RNTO {destination}")
 
+    def _restore_backup(self, backup: str | None, remote: str) -> None:
+        if backup is None:
+            return
+        ftp = self._require_connection()
+        try:
+            if self.remote_size(remote) is not None:
+                self._delete(ftp, remote)
+        except Exception:
+            pass
+        self._rename(backup, remote)
+
     def upload(
         self,
         local_path: Path,
@@ -197,7 +208,7 @@ class VitaFtpBackend:
         cancel_event=None,
         progress: ProgressCallback | None = None,
     ) -> tuple[str, int]:
-        """Upload atomically where possible; VitaShell does not support REST resume."""
+        """Upload safely without REST; verify a temporary file before replacing the destination."""
         ftp = self._require_connection()
         local_path = local_path.expanduser()
         if not local_path.is_file():
@@ -215,8 +226,10 @@ class VitaFtpBackend:
             return "cancelled", 0
 
         parent = posixpath.dirname(remote)
-        temp_name = f".{posixpath.basename(remote)}.rommheld-{uuid4().hex}.part"
-        temporary = posixpath.join(parent, temp_name)
+        token = uuid4().hex
+        temporary = posixpath.join(
+            parent, f".{posixpath.basename(remote)}.rommheld-{token}.part"
+        )
         transferred = 0
 
         def callback(chunk: bytes) -> None:
@@ -257,19 +270,34 @@ class VitaFtpBackend:
                 f"Vita FTP size verification failed for temporary upload: expected {source_size} bytes, got {temp_size}"
             )
 
+        backup = None
         if remote_existing is not None:
-            self._delete(ftp, remote)
+            backup = posixpath.join(
+                parent, f".{posixpath.basename(remote)}.rommheld-{token}.backup"
+            )
+            self._rename(remote, backup)
+
         try:
             self._rename(temporary, remote)
         except Exception:
-            self._cleanup_remote_file(temporary)
+            try:
+                self._restore_backup(backup, remote)
+            finally:
+                self._cleanup_remote_file(temporary)
             raise
 
         final_size = self.remote_size(remote)
         if final_size != source_size:
+            try:
+                self._restore_backup(backup, remote)
+            finally:
+                self._cleanup_remote_file(temporary)
             raise IOError(
                 f"Vita FTP size verification failed for {remote}: expected {source_size} bytes, got {final_size}"
             )
+
+        if backup is not None:
+            self._delete(ftp, backup)
         return "copied", source_size
 
 
