@@ -82,7 +82,12 @@ class WorkspaceDashboardWindow(QMainWindow):
         elif section == "device":
             self.refresh_device_page()
 
-    def _rebuild_workspace_sections(self) -> None:
+    def _rebuild_workspace_sections(self) -> bool:
+        # Rebuilding destroys the current page widgets. Never enter that path
+        # while a 3DS RomM/artwork QThread is still running: ask it to stop and
+        # let the event loop continue instead of blocking on QThread.wait().
+        if self._block_for_three_ds_library_activity("rebuilding the workspace"):
+            return False
         if self.three_ds_library is not None:
             self.three_ds_library.close()
             self.three_ds_library = None
@@ -112,6 +117,7 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.refresh_device_page()
         else:
             self.refresh_workspace()
+        return True
 
     def _rebuild_workspace_tabs(self) -> None:
         self._rebuild_workspace_sections()
@@ -157,7 +163,7 @@ class WorkspaceDashboardWindow(QMainWindow):
             card.content.addLayout(form)
             card.content.addWidget(
                 self._secondary(
-                    "VitaShell USB is preferred on a handheld Vita. VitaShell FTP is available for wireless transfers and PlayStation TV; configure its endpoint from Send file when USB is unavailable."
+                    "Use VitaShell USB when the handheld is mounted. Use FTP for wireless transfers or PlayStation TV."
                 )
             )
 
@@ -206,7 +212,7 @@ class WorkspaceDashboardWindow(QMainWindow):
             card.content.addLayout(form)
             card.content.addWidget(
                 self._secondary(
-                    "A mounted SD or microSD card is the direct, offline filesystem route and is useful for large transfers or initial setup. ftpd is the live-console wireless route. Nintendo 3DS systems do not expose a standard USB mass-storage mode, so RommHeld treats a card-reader mount as direct storage rather than calling it USB."
+                    "Mounted SD is the fastest offline route for large transfers and setup. ftpd is the live-console wireless route."
                 )
             )
             actions = QHBoxLayout()
@@ -240,7 +246,7 @@ class WorkspaceDashboardWindow(QMainWindow):
             card.content.addLayout(form)
             card.content.addWidget(
                 self._secondary(
-                    "DS deployment is removable-storage first. RommHeld validates the selected root conservatively instead of assuming a specific flashcard model."
+                    "Choose the mounted flashcard SD root. RommHeld validates it before writing."
                 )
             )
             actions = QHBoxLayout()
@@ -354,15 +360,15 @@ class WorkspaceDashboardWindow(QMainWindow):
         source_card.content.addLayout(save_row)
 
         reset_card = SurfaceCard()
-        reset_card.content.addWidget(self._card_title("Application setup"))
+        reset_card.content.addWidget(self._card_title("Reset setup"))
         reset_card.content.addWidget(
             self._secondary(
-                "Reset saved handheld, library, device connection/storage and runtime-preference settings and return to first-run setup. ROMs, files on devices, package caches, Virtual Console donor caches and generated Title ID allocations are kept."
+                "Return RommHeld to first-run setup. ROMs, device files, package caches, Virtual Console donor caches and generated Title IDs are kept."
             )
         )
         reset_row = QHBoxLayout()
         reset_row.addStretch()
-        reset_button = QPushButton("Reset RommHeld setup")
+        reset_button = QPushButton("Reset setup")
         reset_button.clicked.connect(self._reset_application_setup)
         reset_row.addWidget(reset_button)
         reset_card.content.addLayout(reset_row)
@@ -371,7 +377,7 @@ class WorkspaceDashboardWindow(QMainWindow):
         layout.addWidget(self._runtime_preference_box())
         layout.addWidget(
             self._secondary(
-                "Credentials are currently stored in local application configuration until secure credential-store migration is implemented."
+                "RomM credentials are stored in this user's local RommHeld configuration."
             )
         )
         layout.addWidget(reset_card)
@@ -419,6 +425,28 @@ class WorkspaceDashboardWindow(QMainWindow):
         )
         return True
 
+    def _three_ds_library_workers(self) -> tuple[QThread, ...]:
+        library = self.three_ds_library
+        if library is None:
+            return ()
+        return tuple(
+            worker
+            for worker in (library.library_worker, library.artwork_worker)
+            if worker is not None and worker.isRunning()
+        )
+
+    def _block_for_three_ds_library_activity(self, action: str) -> bool:
+        workers = self._three_ds_library_workers()
+        if not workers:
+            return False
+        for worker in workers:
+            worker.requestInterruption()
+        self.statusBar().showMessage(
+            f"Finishing the active 3DS library request before {action}. Try again when the refresh finishes.",
+            7000,
+        )
+        return True
+
     def _update_settings_action_emphasis(self) -> None:
         local = self.settings_local_radio.isChecked()
         if local:
@@ -463,15 +491,22 @@ class WorkspaceDashboardWindow(QMainWindow):
             return
         if self._block_for_library_transfer("resetting setup"):
             return
-        answer = QMessageBox.question(
-            self,
-            "Reset RommHeld setup",
-            "Reset saved handheld, library, device connection/storage and runtime-preference settings?\n\n"
-            "ROMs, files on devices, package caches, Virtual Console donor caches and generated Title ID allocations will not be deleted.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
+        if self._block_for_three_ds_library_activity("resetting setup"):
+            return
+
+        confirm = QMessageBox(self)
+        confirm.setIcon(QMessageBox.Icon.Warning)
+        confirm.setWindowTitle("Reset RommHeld setup")
+        confirm.setText("Return RommHeld to first-run setup?")
+        confirm.setInformativeText(
+            "Saved handheld, library, device connection/storage and runtime preferences will be reset. "
+            "ROMs, files on devices, package caches, Virtual Console donor caches and generated Title ID allocations will be kept."
         )
-        if answer != QMessageBox.StandardButton.Yes:
+        reset_button = confirm.addButton("Reset setup", QMessageBox.ButtonRole.DestructiveRole)
+        cancel_button = confirm.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        confirm.setDefaultButton(cancel_button)
+        confirm.exec()
+        if confirm.clickedButton() is not reset_button:
             return
         try:
             self.config = reset_config()
@@ -556,6 +591,8 @@ class WorkspaceDashboardWindow(QMainWindow):
         if self._settings_test_running():
             return
         if self._block_for_library_transfer("changing library settings"):
+            return
+        if self._block_for_three_ds_library_activity("changing library settings"):
             return
         mode = "local" if self.settings_local_radio.isChecked() else "romm_api"
         local_root = self.settings_local_edit.text().strip()
@@ -743,6 +780,8 @@ class WorkspaceDashboardWindow(QMainWindow):
             return
         if self._block_for_library_transfer("switching handhelds"):
             return
+        if self._block_for_three_ds_library_activity("switching handhelds"):
+            return
         dialog = PlatformSelectorDialog(self._reload_config(), self)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
@@ -904,10 +943,15 @@ class WorkspaceDashboardWindow(QMainWindow):
             )
             event.ignore()
             return
-        thread = self._settings_romm_thread
-        if thread is not None and thread.isRunning():
-            thread.quit()
-            thread.wait()
+        if self._settings_test_running():
+            self.statusBar().showMessage(
+                "Finish the RomM connection test before closing RommHeld.", 5000
+            )
+            event.ignore()
+            return
+        if self._block_for_three_ds_library_activity("closing RommHeld"):
+            event.ignore()
+            return
         if self.three_ds_library is not None:
             self.three_ds_library.close()
         super().closeEvent(event)
