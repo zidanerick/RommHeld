@@ -3,6 +3,7 @@ from __future__ import annotations
 import ftplib
 import posixpath
 import re
+import socket
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Callable
@@ -50,6 +51,33 @@ def join_remote_path(root: str, child: str) -> str:
     return target
 
 
+def describe_connection_error(exc: BaseException) -> str:
+    """Turn common 3DS FTP failures into actionable user-facing guidance."""
+    detail = str(exc).strip()
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return (
+            "The 3DS did not respond. Open ftpd on the console and leave it running, "
+            "then confirm the PC and 3DS are on the same local network and retry."
+        )
+    if isinstance(exc, ConnectionRefusedError):
+        return (
+            "The 3DS refused the FTP connection. Open ftpd on the console and leave it "
+            "running, then confirm the IP address and port shown by ftpd."
+        )
+    if isinstance(exc, ftplib.error_perm) and re.search(r"\b530\b", detail):
+        return (
+            "ftpd rejected the FTP login. Check the configured username and password, or "
+            "use ftpd's default anonymous/no-password settings."
+        )
+    if isinstance(exc, OSError):
+        return (
+            "Could not reach the 3DS FTP server. Open ftpd on the console, verify the IP "
+            "address and port it shows, and make sure both devices are on the same network."
+            + (f" System detail: {detail}" if detail else "")
+        )
+    return detail or exc.__class__.__name__
+
+
 class ThreeDSFtpBackend:
     """FTP transport for a Nintendo 3DS FTP server."""
 
@@ -70,11 +98,19 @@ class ThreeDSFtpBackend:
         if not self.settings.host.strip():
             raise ValueError("3DS FTP host is required.")
         ftp = self._ftp_factory(timeout=self.settings.timeout)
-        ftp.connect(self.settings.host.strip(), self.settings.port, timeout=self.settings.timeout)
-        ftp.login(self.settings.username or "anonymous", self.settings.password)
-        ftp.set_pasv(self.settings.passive)
+        try:
+            ftp.connect(self.settings.host.strip(), self.settings.port, timeout=self.settings.timeout)
+            ftp.login(self.settings.username or "anonymous", self.settings.password)
+            ftp.set_pasv(self.settings.passive)
+            cwd = ftp.pwd()
+        except Exception:
+            try:
+                ftp.close()
+            except Exception:
+                pass
+            raise
         self.ftp = ftp
-        return ftp.pwd()
+        return cwd
 
     def close(self) -> None:
         ftp, self.ftp = self.ftp, None
