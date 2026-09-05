@@ -69,6 +69,7 @@ class ManagementShell(QWidget):
         self.profile = profile
         self._sections: dict[str, tuple[QPushButton, QWidget, str]] = {}
         self._device_values: dict[str, QLabel] = {}
+        self._device_widgets: dict[str, QWidget] = {}
 
         self.setObjectName("managementShell")
         self.setStyleSheet(self._stylesheet())
@@ -117,7 +118,7 @@ class ManagementShell(QWidget):
         console_text.setSpacing(1)
         self.console_name = QLabel(profile.name)
         self.console_name.setObjectName("consoleName")
-        self.console_family = QLabel("Active workspace")
+        self.console_family = QLabel("Active handheld")
         self.console_family.setObjectName("consoleFamily")
         console_text.addWidget(self.console_name)
         console_text.addWidget(self.console_family)
@@ -136,13 +137,16 @@ class ManagementShell(QWidget):
         sidebar_layout.addWidget(self.nav_host)
         sidebar_layout.addStretch(1)
 
-        devices_heading = QLabel("DEVICES")
-        devices_heading.setObjectName("sidebarHeading")
-        sidebar_layout.addWidget(devices_heading)
+        device_heading = QLabel("DEVICE")
+        device_heading.setObjectName("sidebarHeading")
+        sidebar_layout.addWidget(device_heading)
         for key, label in (("vita", "Vita"), ("3ds", "Nintendo 3DS"), ("ds", "Nintendo DS")):
-            sidebar_layout.addWidget(self._make_device_status(label, key))
+            widget = self._make_device_status(label, key)
+            widget.setVisible(key == profile.key)
+            self._device_widgets[key] = widget
+            sidebar_layout.addWidget(widget)
 
-        change = QPushButton("Change handheld")
+        change = QPushButton("Switch handheld")
         change.setObjectName("changeButton")
         change.setProperty("quiet", True)
         change.clicked.connect(self.change_handheld_requested.emit)
@@ -166,7 +170,7 @@ class ManagementShell(QWidget):
         heading_layout.setSpacing(2)
         self.page_title = QLabel("Library")
         self.page_title.setObjectName("pageTitle")
-        self.page_subtitle = QLabel(profile.description)
+        self.page_subtitle = QLabel(self._subtitle_for_section("library"))
         self.page_subtitle.setObjectName("pageSubtitle")
         heading_layout.addWidget(self.page_title)
         heading_layout.addWidget(self.page_subtitle)
@@ -258,10 +262,23 @@ class ManagementShell(QWidget):
             return
         self.logo.clear()
 
+    def _subtitle_for_section(self, section: str) -> str:
+        if section == "library":
+            return f"Browse and deploy games for {self.profile.name}"
+        if section == "device":
+            return f"Connection, storage and transfer readiness for {self.profile.name}"
+        if section == "setup":
+            return f"Prepare {self.profile.name} software and connectivity"
+        if section == "settings":
+            return "Library source and deployment preferences"
+        return self.profile.description
+
     def set_profile(self, profile: WorkspaceProfile) -> None:
         self.profile = profile
         self.console_name.setText(profile.name)
-        self.page_subtitle.setText(profile.description)
+        self.page_subtitle.setText(self._subtitle_for_section("library"))
+        for key, widget in self._device_widgets.items():
+            widget.setVisible(key == profile.key)
         self._load_logo()
         self.setStyleSheet(self._stylesheet())
         for button, _widget, _display in self._sections.values():
@@ -279,9 +296,14 @@ class ManagementShell(QWidget):
                 widget.deleteLater()
         self._sections.clear()
         self.page_title.setText("Library")
+        self.page_subtitle.setText(self._subtitle_for_section("library"))
 
     def add_section(self, name: str, widget: QWidget, persistent: bool = False) -> None:
         key = name.strip().lower()
+        if key in {"queue", "tools"}:
+            widget.setParent(None)
+            widget.deleteLater()
+            return
         if persistent:
             widget.setObjectName("persistentLibrary")
 
@@ -308,7 +330,7 @@ class ManagementShell(QWidget):
             button.setChecked(button is selected_button)
         self.stack.setCurrentWidget(selected_widget)
         self.page_title.setText(display)
-        self.page_subtitle.setText(self.profile.description)
+        self.page_subtitle.setText(self._subtitle_for_section(key))
         self.navigation_requested.emit(key)
 
     def _stylesheet(self) -> str:
