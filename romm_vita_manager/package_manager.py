@@ -9,11 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .archive_utils import ArchiveEntry, list_archive
+from .config import package_cache_dir
 from .transfers import copy_file_chunked
 
 
-CACHE_DIR = Path.home() / ".cache" / "romm-vita-manager" / "packages"
-USER_AGENT = "RomM-Vita-Manager/0.9"
+CACHE_DIR = package_cache_dir()
+USER_AGENT = "RommHeld/1.0"
 
 
 @dataclass(frozen=True)
