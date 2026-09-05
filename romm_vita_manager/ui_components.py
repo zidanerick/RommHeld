@@ -84,10 +84,28 @@ class StatusPill(QFrame):
 class AccentButton(QPushButton):
     def __init__(self, text: str, accent: str, parent: QWidget | None = None):
         super().__init__(text, parent)
+        self._accent = accent
+        self._emphasized = True
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.set_accent(accent)
+        self._apply_accent_style()
 
     def set_accent(self, accent: str) -> None:
+        self._accent = accent
+        if self._emphasized:
+            self._apply_accent_style()
+
+    def set_emphasized(self, emphasized: bool) -> None:
+        """Toggle primary-action emphasis while retaining normal button behavior."""
+        self._emphasized = bool(emphasized)
+        if self._emphasized:
+            self._apply_accent_style()
+        else:
+            # Clearing the local stylesheet restores the shared neutral button
+            # styling from the application theme without replacing the widget.
+            self.setStyleSheet("")
+
+    def _apply_accent_style(self) -> None:
+        accent = self._accent
         base = QColor(accent)
         hover = base.lighter(112).name() if base.isValid() else accent
         pressed = base.darker(112).name() if base.isValid() else accent
