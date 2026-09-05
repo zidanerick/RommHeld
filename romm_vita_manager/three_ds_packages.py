@@ -159,6 +159,7 @@ def download_package(
     resolved: ResolvedThreeDSPackage,
     *,
     progress=None,
+    cancel_event=None,
 ) -> Path:
     destination = package_cache_path(resolved)
     temporary = destination.with_name(destination.name + ".part")
@@ -169,8 +170,12 @@ def download_package(
     completed = 0
     hasher = hashlib.sha256()
     try:
+        if cancel_event is not None and cancel_event.is_set():
+            raise InterruptedError("3DS package download cancelled.")
         with urllib.request.urlopen(request, timeout=60) as response, temporary.open("wb") as output:
             while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise InterruptedError("3DS package download cancelled.")
                 chunk = response.read(1024 * 1024)
                 if not chunk:
                     break
