@@ -31,6 +31,7 @@ from .vita_library_support import CopyWorker, destination_for_game, game_status,
 
 STATUS_LABELS = {
     "INSTALLED": "Installed",
+    "STAGED": "Staged for install",
     "NEW": "Ready to copy",
     "DIFFERENT": "Update available",
     "UNKNOWN": "Destination unavailable",
@@ -69,6 +70,7 @@ class LocalLibraryWidget(QWidget):
                 "All games",
                 "Ready to copy",
                 "Installed",
+                "Staged for install",
                 "Update available",
                 "Destination unavailable",
             ]
@@ -295,6 +297,8 @@ class LocalLibraryWidget(QWidget):
                 if wanted == "Ready to copy" and state != "NEW":
                     continue
                 if wanted == "Installed" and state != "INSTALLED":
+                    continue
+                if wanted == "Staged for install" and state != "STAGED":
                     continue
                 if wanted == "Update available" and state != "DIFFERENT":
                     continue
