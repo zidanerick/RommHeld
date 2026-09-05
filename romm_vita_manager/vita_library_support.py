@@ -25,20 +25,49 @@ def sanitize_name(name: str) -> str:
     return name or "Game"
 
 
+def adrenaline_game_folder_name(game: Game) -> str:
+    """Return the PSP/GAME folder name for an Adrenaline EBOOT.PBP deployment."""
+    if game.path.name.lower() == "eboot.pbp":
+        return sanitize_name(game.path.parent.name)
+    return sanitize_name(game.name)
+
+
 def destination_for_game(
     vita: Path,
     game: Game,
     mappings: dict[str, str | None],
 ) -> tuple[str, Path, str]:
     key = game.source_platform.lower()
+    suffix = game.path.suffix.lower()
+
     if key == "psp":
-        return "PSP / Adrenaline ISO", vita / "pspemu" / "ISO", "file"
-    if key in {"psx", "ps1", "playstation"}:
+        if suffix in {".iso", ".cso"}:
+            return "PSP / Adrenaline ISO", vita / "pspemu" / "ISO", "file"
+        if suffix == ".pbp":
+            return (
+                "PSP / Adrenaline GAME",
+                vita / "pspemu" / "PSP" / "GAME",
+                "game-folder",
+            )
         return (
-            "PS1 / Adrenaline GAME",
-            vita / "pspemu" / "PSP" / "GAME",
-            "game-folder",
+            "PSP requires ISO/CSO or EBOOT.PBP",
+            vita / "pspemu",
+            "unknown",
         )
+
+    if key in {"psx", "ps1", "playstation"}:
+        if suffix == ".pbp":
+            return (
+                "PS1 / Adrenaline GAME",
+                vita / "pspemu" / "PSP" / "GAME",
+                "game-folder",
+            )
+        return (
+            "PS1 requires an EBOOT.PBP for Adrenaline",
+            vita / "pspemu" / "PSP" / "GAME",
+            "unknown",
+        )
+
     if key == "vita":
         return (
             "PS Vita VPK staging",
@@ -66,7 +95,11 @@ def destination_target(
 ) -> tuple[str, Path, str]:
     label, destination, mode = destination_for_game(vita, game, mappings)
     if mode == "game-folder":
-        return label, destination / sanitize_name(game.name) / "EBOOT.PBP", mode
+        return (
+            label,
+            destination / adrenaline_game_folder_name(game) / "EBOOT.PBP",
+            mode,
+        )
     return label, destination / game.path.name, mode
 
 
@@ -114,7 +147,11 @@ class CopyWorker(QThread):
                     break
 
                 if mode == "game-folder":
-                    target = destination / sanitize_name(game.name) / "EBOOT.PBP"
+                    target = (
+                        destination
+                        / adrenaline_game_folder_name(game)
+                        / "EBOOT.PBP"
+                    )
                 else:
                     target = destination / game.path.name
 
@@ -158,6 +195,7 @@ class CopyWorker(QThread):
 
 __all__ = [
     "CopyWorker",
+    "adrenaline_game_folder_name",
     "destination_for_game",
     "destination_target",
     "game_status",
