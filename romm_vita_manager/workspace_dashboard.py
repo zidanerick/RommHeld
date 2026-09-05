@@ -42,9 +42,9 @@ from .vita_setup import VitaSetupDialog
 class WorkspaceDashboardWindow(QMainWindow):
     """Single-window RommHeld workspace with console-aware sections.
 
-    The active application shell is now independent of the original Vita
-    MainWindow. Vita/local library behavior lives in LocalLibraryWidget, while
-    target-specific device, setup and deployment pages are composed here.
+    The active application shell is independent of the original Vita MainWindow.
+    Library, device readiness and settings remain the stable top-level surfaces;
+    target-specific setup and advanced tools are launched contextually from them.
     """
 
     def __init__(self, config: dict):
@@ -75,8 +75,6 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.refresh_games()
         elif section == "device":
             self.refresh_device_page()
-        elif section == "setup":
-            self.refresh_setup_page()
 
     def _rebuild_workspace_sections(self) -> None:
         if self.three_ds_library is not None:
@@ -94,19 +92,18 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.shell.add_section("Library", self.three_ds_library)
         else:
             self.local_library.set_config(self.config)
-            self.local_library.set_target(self.workspace_key, self.vita if self.workspace_key == "vita" else None)
+            self.local_library.set_target(
+                self.workspace_key,
+                self.vita if self.workspace_key == "vita" else None,
+            )
             self.shell.add_section("Library", self.local_library, persistent=True)
 
         self.shell.add_section("Device", self._build_device_page())
-        self.shell.add_section("Setup", self._build_setup_page())
-        self.shell.add_section("Queue", self._build_queue_page())
-        self.shell.add_section("Tools", self._build_tools_page())
         self.shell.add_section("Settings", self._build_settings_page())
         self.shell.select_section("Library")
 
         if self.workspace_key == "3ds":
             self.refresh_device_page()
-            self.refresh_setup_page()
         else:
             self.refresh_workspace()
 
@@ -144,7 +141,7 @@ class WorkspaceDashboardWindow(QMainWindow):
             card.content.addLayout(form)
             card.content.addWidget(
                 self._secondary(
-                    "RommHeld detects mounted Vita storage and keeps VitaShell/RetroFlow deployment separate from emulator/runtime choices."
+                    "RommHeld detects mounted Vita storage. Use Setup for runtime preparation, or Send file for an advanced one-off transfer outside the library workflow."
                 )
             )
 
@@ -153,12 +150,12 @@ class WorkspaceDashboardWindow(QMainWindow):
             refresh.clicked.connect(self.refresh_device_page)
             send = QPushButton("Send file")
             send.clicked.connect(self.open_vita_send_file)
-            copy = AccentButton("Copy selected games", accent)
-            copy.clicked.connect(self.copy_selected)
+            setup = AccentButton("Vita setup", accent)
+            setup.clicked.connect(self.open_vita_setup)
             actions.addWidget(refresh)
             actions.addWidget(send)
             actions.addStretch()
-            actions.addWidget(copy)
+            actions.addWidget(setup)
             card.content.addLayout(actions)
 
         elif self.workspace_key == "3ds":
@@ -247,100 +244,6 @@ class WorkspaceDashboardWindow(QMainWindow):
             radio.toggled.connect(self._runtime_preference_changed)
             card.content.addWidget(radio)
         return card
-
-    def _build_setup_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-        profile = WORKSPACE_PROFILES[self.workspace_key]
-
-        setup_card = SurfaceCard()
-        setup_card.content.addWidget(self._card_title(f"{profile.name} setup"))
-        if self.workspace_key == "vita":
-            setup_card.content.addWidget(
-                self._secondary(
-                    "Detect Vita software and prepare supported runtime packages. Frontends, emulators and achievement support remain separate capabilities."
-                )
-            )
-            button = AccentButton("Open Vita Setup", profile.accent)
-            button.clicked.connect(self.open_vita_setup)
-        elif self.workspace_key == "3ds":
-            setup_card.content.addWidget(
-                self._secondary(
-                    "Configure the 3DS connection and inspect the target environment without mixing transport settings into runtime selection."
-                )
-            )
-            button = AccentButton("Open Nintendo 3DS Setup", profile.accent)
-            button.clicked.connect(self.open_3ds_setup)
-        else:
-            setup_card.content.addWidget(
-                self._secondary(
-                    "Choose and validate the DS/flashcard SD root before adding target-specific deployment mappings."
-                )
-            )
-            button = AccentButton("Validate DS Setup", profile.accent)
-            button.clicked.connect(self.validate_ds_root)
-        setup_card.content.addWidget(button)
-
-        layout.addWidget(setup_card)
-        layout.addWidget(self._runtime_preference_box())
-        layout.addStretch(1)
-        return page
-
-    def _build_queue_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        card = SurfaceCard()
-        card.content.addWidget(self._card_title("Transfer queue"))
-        card.content.addWidget(
-            self._secondary(
-                "Transfers currently execute immediately. A persistent queue will appear here when retry, per-item state and resume behavior are unified behind the common transport layer."
-            )
-        )
-        state = QLabel("Not available in this build")
-        state.setStyleSheet(f"color:{DARK.text_tertiary};font-size:11px;font-weight:600;")
-        card.content.addWidget(state)
-        layout.addWidget(card)
-        layout.addStretch(1)
-        return page
-
-    def _build_tools_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 0, 0, 0)
-        card = SurfaceCard()
-        card.content.addWidget(self._card_title("Tools"))
-
-        if self.workspace_key == "vita":
-            card.content.addWidget(
-                self._secondary("Send a file outside the normal library deployment workflow.")
-            )
-            button = AccentButton("Send file to Vita", WORKSPACE_PROFILES["vita"].accent)
-            button.clicked.connect(self.open_vita_send_file)
-            card.content.addWidget(button)
-        elif self.workspace_key == "3ds":
-            card.content.addWidget(
-                self._secondary(
-                    "Browse and transfer files directly through the configured Nintendo 3DS FTP connection."
-                )
-            )
-            button = AccentButton(
-                "Open 3DS file manager", WORKSPACE_PROFILES["3ds"].accent
-            )
-            button.clicked.connect(self.open_3ds)
-            card.content.addWidget(button)
-        else:
-            card.content.addWidget(
-                self._secondary(
-                    "DS tools currently operate on the selected flashcard/removable SD root. FTP is not assumed for DS targets."
-                )
-            )
-
-        layout.addWidget(card)
-        layout.addStretch(1)
-        return page
 
     def _build_settings_page(self) -> QWidget:
         page = QWidget()
@@ -479,7 +382,6 @@ class WorkspaceDashboardWindow(QMainWindow):
 
     def refresh_workspace(self) -> None:
         self.refresh_device_page()
-        self.refresh_setup_page()
         self.refresh_games()
 
     def refresh_device_page(self) -> None:
@@ -529,9 +431,6 @@ class WorkspaceDashboardWindow(QMainWindow):
             return find_vita_mounts()
         except OSError:
             return []
-
-    def refresh_setup_page(self) -> None:
-        return
 
     def change_workspace(self) -> None:
         dialog = PlatformSelectorDialog(self._reload_config(), self)
