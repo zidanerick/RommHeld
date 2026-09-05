@@ -119,12 +119,23 @@ def test_device_primary_actions_follow_readiness() -> None:
 def test_romm_connection_can_be_tested_from_settings() -> None:
     source = _source("romm_vita_manager/workspace_dashboard.py")
 
-    assert 'self.settings_test_button = QPushButton("Test connection")' in source
+    assert 'self.settings_test_button = AccentButton("Test connection", accent)' in source
     assert 'self.settings_test_button.clicked.connect(self._test_settings_romm)' in source
     assert 'RomMConnectionWorker(normalized, token)' in source
     assert 'worker.finished.connect(thread.quit)' in source
     assert 'worker.finished.connect(worker.deleteLater)' in source
     assert 'Finish the RomM connection test before switching handhelds.' in source
+
+
+def test_settings_primary_action_follows_romm_verification_state() -> None:
+    source = _source("romm_vita_manager/workspace_dashboard.py")
+
+    assert 'self._settings_romm_verified = False' in source
+    assert 'def _update_settings_action_emphasis(self) -> None:' in source
+    assert 'self.settings_test_button.set_emphasized(not self._settings_romm_verified)' in source
+    assert 'self.settings_save_button.set_emphasized(self._settings_romm_verified)' in source
+    assert 'self._settings_romm_verified = True' in source
+    assert 'self.settings_save_button.setEnabled(not testing)' in source
 
 
 def test_configured_startup_skips_selector_without_requiring_library_online() -> None:
