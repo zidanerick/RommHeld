@@ -70,6 +70,45 @@ def test_classic_runtime_profile_is_deterministic_and_sensitive_to_runtime_code(
     )
 
 
+def test_classic_profile_can_cover_reusable_presentation_assets_compatibly():
+    profile = build_classic_runtime_profile(
+        "gbc",
+        {"title_id": "0004000001234500"},
+        code=b"code",
+        exheader=b"exheader",
+        romfs_template=b"romfs",
+        rom_path="/rom/game.gbc",
+        donor_banner=b"banner",
+        donor_icon=b"icon",
+        logo=b"logo",
+    )
+    assert profile["donor_banner_sha256"] == hashlib.sha256(b"banner").hexdigest()
+    assert profile["donor_icon_sha256"] == hashlib.sha256(b"icon").hexdigest()
+    assert profile["logo_sha256"] == hashlib.sha256(b"logo").hexdigest()
+    assert classic_runtime_profile_matches(
+        profile,
+        "gbc",
+        code=b"code",
+        exheader=b"exheader",
+        romfs_template=b"romfs",
+        rom_path="/rom/game.gbc",
+        donor_banner=b"banner",
+        donor_icon=b"icon",
+        logo=b"logo",
+    )
+    assert not classic_runtime_profile_matches(
+        profile,
+        "gbc",
+        code=b"code",
+        exheader=b"exheader",
+        romfs_template=b"romfs",
+        rom_path="/rom/game.gbc",
+        donor_banner=b"tampered-banner",
+        donor_icon=b"icon",
+        logo=b"logo",
+    )
+
+
 def test_gba_runtime_profile_records_retail_donor_identity_and_runtime_structure():
     code_hash = hashlib.sha256(b"retail-gba-code").hexdigest()
     profile = build_gba_runtime_profile(
