@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from .three_ds_targets import RETROARCH_TARGET_PLATFORM_SLUGS
+
 
 @dataclass(frozen=True)
 class ThreeDSAppDefinition:
@@ -141,18 +143,7 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         ("RetroArch", "RetroArch/Cores", "retroarch/retroarch.cfg"),
         "https://www.retroarch.com/?page=platforms",
         "manual_bundle_or_updater",
-        (
-            "gba",
-            "gb",
-            "gbc",
-            "nes",
-            "famicom",
-            "fds",
-            "snes",
-            "gamegear",
-            "sms",
-            "genesis",
-        ),
+        tuple(sorted(RETROARCH_TARGET_PLATFORM_SLUGS)),
         installed_title_may_exist_without_sd_marker=True,
     ),
     ThreeDSAppDefinition(
@@ -197,6 +188,10 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
 APP_BY_KEY = {app.key: app for app in THREE_DS_APPS}
 
 
+# Compatibility-style runtime recommendations for broad readiness views. This
+# is deliberately not the full set of selectable runtime targets. Per-title
+# preference logic in three_ds_targets.py decides between alternatives such as
+# Red Viper and RetroArch/Beetle VB for Virtual Boy.
 RUNTIME_RECOMMENDATIONS: dict[str, tuple[str, ...]] = {
     "gba": ("open-agb-firm", "retroarch"),
     "nds": ("twilight",),
