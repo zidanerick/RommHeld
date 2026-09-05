@@ -77,6 +77,63 @@ TARGET_RUNTIME_APPS = {
 }
 
 
+@dataclass(frozen=True)
+class TargetRuntimePreflight:
+    target_key: str
+    app_key: str
+    app_name: str
+    state: str
+    note: str
+
+
+def evaluate_target_runtime(
+    root: Path,
+    target_key: str,
+) -> TargetRuntimePreflight | None:
+    """Summarize SD-visible readiness for the runtime required by a target.
+
+    This is deliberately non-blocking. Some runtimes can be installed as CIA
+    titles without leaving a reliable SD marker, so absence can mean either a
+    definite missing runtime or a console-confirmation state.
+    """
+    normalized_target = str(target_key).strip()
+    app_key = TARGET_RUNTIME_APPS.get(normalized_target)
+    if app_key is None:
+        return None
+
+    definition = APP_BY_KEY[app_key]
+    status = detect_three_ds_app(root.expanduser(), definition)
+    if status.detected:
+        return TargetRuntimePreflight(
+            normalized_target,
+            app_key,
+            definition.name,
+            "detected",
+            f"{definition.name} was detected from the mounted 3DS SD card.",
+        )
+    if definition.installed_title_may_exist_without_sd_marker:
+        return TargetRuntimePreflight(
+            normalized_target,
+            app_key,
+            definition.name,
+            "confirm_on_console",
+            (
+                f"{definition.name} was not detected from SD files. It may be installed "
+                "as a CIA title, so confirm it on the console before expecting this ROM to launch."
+            ),
+        )
+    return TargetRuntimePreflight(
+        normalized_target,
+        app_key,
+        definition.name,
+        "missing",
+        (
+            f"{definition.name} was not detected on the mounted 3DS SD card. The ROM can still "
+            "be copied now, but this route will not be launchable until that runtime is installed."
+        ),
+    )
+
+
 def _append_requirement(
     result: list[ReadinessRequirement],
     app_key: str,
