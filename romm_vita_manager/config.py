@@ -11,12 +11,27 @@ LEGACY_CONFIG_PATH = LEGACY_APP_DIR / "config.json"
 
 CONFIG_PATH = config_path()
 APP_DIR = CONFIG_PATH.parent
+# Before application identity was established ahead of QStandardPaths lookups,
+# Qt could resolve AppConfigLocation to the generic config root. Keep a guarded
+# migration for that development-era location so existing settings are not lost.
+LEGACY_UNSCOPED_CONFIG_PATH = CONFIG_PATH.parent.parent / "config.json"
 DEFAULT_ROMM_ROOT = Path.home() / "RomM" / "roms" / "roms"
 
 # Preserve deployment identity/cache metadata across a first-run setup reset.
 # In particular, Virtual Console title-ID allocations must remain stable so a
 # settings reset cannot silently break upgrade/save continuity.
 _RESET_PRESERVED_KEYS = ("three_ds_vc", "gba_vc")
+_ROMMHELD_CONFIG_KEYS = {
+    "setup_complete",
+    "active_console",
+    "library_source",
+    "devices",
+    "romm_root",
+    "platform_mappings",
+    "runtime_preferences",
+    "three_ds_vc",
+    "gba_vc",
+}
 
 
 def _load_path(path: Path) -> dict:
@@ -27,12 +42,25 @@ def _load_path(path: Path) -> dict:
         return {}
 
 
+def _looks_like_rommheld_config(value: dict) -> bool:
+    return any(key in value for key in _ROMMHELD_CONFIG_KEYS)
+
+
 def load_config() -> dict:
     value = _load_path(CONFIG_PATH)
     if value:
         return value
 
-    # One-time migration from the old Linux-only location.
+    # One-time migration from the pre-identity app-config location. This path
+    # can be a generic per-user directory, so migrate only recognisable
+    # RommHeld configuration rather than consuming an arbitrary config.json.
+    if LEGACY_UNSCOPED_CONFIG_PATH != CONFIG_PATH:
+        legacy_unscoped = _load_path(LEGACY_UNSCOPED_CONFIG_PATH)
+        if legacy_unscoped and _looks_like_rommheld_config(legacy_unscoped):
+            save_config(legacy_unscoped)
+            return legacy_unscoped
+
+    # One-time migration from the old Linux-only application directory.
     if LEGACY_CONFIG_PATH != CONFIG_PATH:
         legacy = _load_path(LEGACY_CONFIG_PATH)
         if legacy:
