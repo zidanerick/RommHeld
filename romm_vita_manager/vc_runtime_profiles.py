@@ -126,6 +126,9 @@ def build_classic_runtime_profile(
     exheader: bytes,
     romfs_template: bytes,
     rom_path: str,
+    donor_banner: bytes | None = None,
+    donor_icon: bytes | None = None,
+    logo: bytes | None = None,
 ) -> dict:
     guidance = guidance_for_family(family)
     code_hash = _sha256(code)
@@ -136,7 +139,7 @@ def build_classic_runtime_profile(
         guidance.family,
         (code_hash, exheader_hash, rom_path, romfs_hash),
     )
-    return {
+    profile = {
         "version": 1,
         "family": guidance.family,
         "profile_id": profile_id,
@@ -148,6 +151,25 @@ def build_classic_runtime_profile(
         "rom_path": rom_path,
         "recommendation": guidance.recommendation,
     }
+    # These fields were added after the v1 core fingerprint shipped. Keep them
+    # optional so existing v1 profiles remain readable while newly prepared
+    # caches cover every reusable presentation asset as well.
+    if donor_banner is not None:
+        profile["donor_banner_sha256"] = _sha256(donor_banner)
+    if donor_icon is not None:
+        profile["donor_icon_sha256"] = _sha256(donor_icon)
+    if logo is not None:
+        profile["logo_sha256"] = _sha256(logo)
+    return profile
+
+
+def _optional_hash_matches(profile: dict, field: str, data: bytes | None) -> bool:
+    expected = profile.get(field)
+    if expected is None:
+        return True
+    if not isinstance(expected, str) or data is None:
+        return False
+    return expected == _sha256(data)
 
 
 def classic_runtime_profile_matches(
@@ -158,6 +180,9 @@ def classic_runtime_profile_matches(
     exheader: bytes,
     romfs_template: bytes,
     rom_path: str,
+    donor_banner: bytes | None = None,
+    donor_icon: bytes | None = None,
+    logo: bytes | None = None,
 ) -> bool:
     """Verify cached classic runtime bytes against a stored v1 fingerprint."""
     key = family.strip().lower()
@@ -173,6 +198,9 @@ def classic_runtime_profile_matches(
         and profile.get("romfs_template_sha256") == romfs_hash
         and profile.get("rom_path") == rom_path
         and profile.get("profile_id") == expected_profile_id
+        and _optional_hash_matches(profile, "donor_banner_sha256", donor_banner)
+        and _optional_hash_matches(profile, "donor_icon_sha256", donor_icon)
+        and _optional_hash_matches(profile, "logo_sha256", logo)
     )
 
 
