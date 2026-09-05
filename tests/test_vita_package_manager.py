@@ -1,4 +1,7 @@
+import threading
 from pathlib import Path
+
+import pytest
 
 from romm_vita_manager import package_manager
 from romm_vita_manager.config import package_cache_dir
@@ -7,6 +10,7 @@ from romm_vita_manager.package_manager import (
     PACKAGES,
     RETROARCH_STABLE_VERSION,
     PackageSpec,
+    download_package,
     stage_package,
 )
 
@@ -97,6 +101,80 @@ def test_additional_vita_runtime_title_ids_are_detected(tmp_path: Path):
         detected = detect_emulators(vita)
 
         assert detected[key] is True
+
+
+def test_cancelled_download_removes_partial_cache_file(monkeypatch, tmp_path: Path):
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(package_manager, "CACHE_DIR", cache)
+    package = PackageSpec(
+        key="download",
+        name="Download test",
+        description="test",
+        source="direct:https://example.invalid/test.vpk",
+        asset_name="test.vpk",
+        stage_name="test.vpk",
+        destination="root",
+    )
+    cancel = threading.Event()
+
+    class FakeResponse:
+        headers = {"Content-Length": "6"}
+
+        def __init__(self):
+            self.chunks = [b"abc", b"def", b""]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, _size):
+            return self.chunks.pop(0)
+
+    monkeypatch.setattr(
+        package_manager.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: FakeResponse(),
+    )
+
+    with pytest.raises(InterruptedError, match="cancelled"):
+        download_package(
+            package,
+            progress=lambda _done, _total: cancel.set(),
+            cancel_event=cancel,
+        )
+
+    assert not (cache / "test.vpk").exists()
+    assert not (cache / "test.vpk.part").exists()
+
+
+def test_cancelled_usb_stage_preserves_existing_destination(monkeypatch, tmp_path: Path):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    monkeypatch.setattr(package_manager, "CACHE_DIR", cache)
+    package = PackageSpec(
+        key="stage",
+        name="Stage test",
+        description="test",
+        source="direct:https://example.invalid/test.vpk",
+        asset_name="test.vpk",
+        stage_name="test.vpk",
+        destination="root",
+    )
+    (cache / "test.vpk").write_bytes(b"new-package-content")
+    vita = tmp_path / "vita"
+    vita.mkdir()
+    target = vita / "test.vpk"
+    target.write_bytes(b"old-package")
+    cancel = threading.Event()
+    cancel.set()
+
+    with pytest.raises(InterruptedError, match="cancelled"):
+        stage_package(package, vita, cancel_event=cancel)
+
+    assert target.read_bytes() == b"old-package"
+    assert not list(vita.glob(".*.rommheld-*.part"))
 
 
 def test_stage_package_replaces_existing_file_after_safe_copy(monkeypatch, tmp_path: Path):
