@@ -1,6 +1,11 @@
 from pathlib import Path
 
-from romm_vita_manager.vita import find_vita_mounts, is_vita_mount, unique_vita_mount
+from romm_vita_manager.vita import (
+    find_vita_mount_candidates,
+    find_vita_mounts,
+    is_vita_mount,
+    unique_vita_mount,
+)
 
 
 def _mkdirs(root: Path, *relative_paths: str) -> None:
@@ -36,6 +41,7 @@ def test_find_vita_mounts_filters_candidates(monkeypatch, tmp_path: Path):
         lambda: [other, vita],
     )
 
+    assert find_vita_mount_candidates() == [vita]
     assert find_vita_mounts() == [vita]
 
 
@@ -46,3 +52,17 @@ def test_unique_vita_mount_requires_exactly_one_candidate(tmp_path: Path):
     assert unique_vita_mount([]) is None
     assert unique_vita_mount([first]) == first
     assert unique_vita_mount([first, second]) is None
+
+
+def test_multiple_valid_vita_mounts_are_not_auto_selected(monkeypatch, tmp_path: Path):
+    first = tmp_path / "vita-memory-card"
+    second = tmp_path / "vita-sd2vita"
+    _mkdirs(first, "app/VITASHELL", "VitaShell", "data")
+    _mkdirs(second, "app/VITASHELL", "VitaShell", "pspemu")
+    monkeypatch.setattr(
+        "romm_vita_manager.vita.writable_volumes",
+        lambda: [first, second],
+    )
+
+    assert find_vita_mount_candidates() == [first, second]
+    assert find_vita_mounts() == []
