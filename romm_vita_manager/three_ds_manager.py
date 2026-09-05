@@ -130,6 +130,8 @@ class ThreeDSTransferWorker(QThread):
             self.romm_token,
             self.remote_game,
             self._temporary_path,
+            cancel_event=self.cancel_event,
+            progress=lambda done, _total: self.progress.emit(done),
         )
 
     def run(self) -> None:
@@ -179,6 +181,8 @@ class ThreeDSTransferWorker(QThread):
                 progress=self.progress.emit,
             )
             self.completed.emit(result)
+        except InterruptedError:
+            self.completed.emit("cancelled")
         except Exception as exc:
             self.failed.emit(str(exc))
         finally:
