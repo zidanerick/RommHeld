@@ -9,9 +9,13 @@ Visual and interaction rules live in `DESIGN_SYSTEM.md`. Current refactor and va
 ```text
 launcher.py
     |
-    +--> PlatformSelectorDialog
-    |       +--> local library source
-    |       +--> RomM server source / connection check
+    +--> if first setup / invalid saved configuration:
+    |       PlatformSelectorDialog
+    |           +--> handheld workspace
+    |           +--> local library source
+    |           +--> RomM server source / connection check
+    |
+    +--> otherwise: reuse saved active workspace directly
     |
     v
 WorkspaceDashboardWindow (QMainWindow)
@@ -27,6 +31,8 @@ ManagementShell
 ```
 
 `run.sh` executes `launcher.py`. The root `romm_vita_manager.py` script is only a compatibility entry point and forwards to the same launcher.
+
+A valid completed setup opens directly into the saved workspace on normal launches. `PlatformSelectorDialog` remains the onboarding/reconfiguration surface and is also reachable through `Switch handheld` from the shell.
 
 The former Vita-specific application modules `ui.py` and `app.py` have been removed. The active workspace has no legacy `MainWindow` inheritance or compatibility dependency.
 
@@ -195,6 +201,8 @@ It does not own transport, storage or package logic.
 
 `workspace_dashboard.py` is the composition root for the active desktop window. It exposes only Library, Device and Settings as permanent destinations. Console-specific setup and advanced device tools are launched contextually from those pages. Library behavior remains delegated to standalone widgets rather than inheriting a console-specific application window.
 
+RomM credentials can be tested asynchronously from Settings using the same `RomMConnectionWorker` used by onboarding. Workspace switching is blocked while that bounded test is active so its Qt worker is not orphaned.
+
 The obsolete `platform_selector.py` compatibility shim has been removed. All current callers use `console_selector.py` directly.
 
 ## Worker and thread rules
@@ -230,6 +238,7 @@ A clean shutdown is preferred over arbitrary short waits that can leave live Qt 
 The structural refactor is complete enough that further broad restructuring should stop before merge:
 
 - the unified workspace is a direct `QMainWindow`;
+- configured startup enters the saved workspace directly instead of replaying onboarding;
 - Vita/local library behavior is standalone and exposes its primary copy action in-context;
 - the useful Vita copy/status helpers are in a focused module;
 - the permanent shell is reduced to Library, Device and Settings;
