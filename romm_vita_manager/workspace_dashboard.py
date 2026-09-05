@@ -407,6 +407,18 @@ class WorkspaceDashboardWindow(QMainWindow):
     def _settings_test_running(self) -> bool:
         return bool(self._settings_romm_thread and self._settings_romm_thread.isRunning())
 
+    def _library_transfer_active(self) -> bool:
+        worker = self.local_library.worker
+        return worker is not None and worker.isRunning()
+
+    def _block_for_library_transfer(self, action: str) -> bool:
+        if not self._library_transfer_active():
+            return False
+        self.statusBar().showMessage(
+            f"Cancel the active Library transfer before {action}.", 5000
+        )
+        return True
+
     def _update_settings_action_emphasis(self) -> None:
         local = self.settings_local_radio.isChecked()
         if local:
@@ -448,6 +460,8 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.statusBar().showMessage(
                 "Finish the RomM connection test before resetting setup.", 4000
             )
+            return
+        if self._block_for_library_transfer("resetting setup"):
             return
         answer = QMessageBox.question(
             self,
@@ -541,6 +555,8 @@ class WorkspaceDashboardWindow(QMainWindow):
     def _save_settings_source(self) -> None:
         if self._settings_test_running():
             return
+        if self._block_for_library_transfer("changing library settings"):
+            return
         mode = "local" if self.settings_local_radio.isChecked() else "romm_api"
         local_root = self.settings_local_edit.text().strip()
         romm_url = self.settings_url_edit.text().strip()
@@ -603,6 +619,8 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.three_ds_library.refresh_library()
             return
 
+        if self._library_transfer_active():
+            return
         self.local_library.set_config(self.config)
         self.local_library.set_target(
             self.workspace_key,
@@ -723,6 +741,8 @@ class WorkspaceDashboardWindow(QMainWindow):
                 "Finish the RomM connection test before switching handhelds.", 4000
             )
             return
+        if self._block_for_library_transfer("switching handhelds"):
+            return
         dialog = PlatformSelectorDialog(self._reload_config(), self)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
@@ -760,6 +780,8 @@ class WorkspaceDashboardWindow(QMainWindow):
         )
 
     def open_vita_send_file(self) -> None:
+        if self._block_for_library_transfer("opening Send file"):
+            return
         if self.vita is None:
             self.refresh_device_page()
         SendFileDialog(self.vita, self).exec()
@@ -805,6 +827,8 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.three_ds_library.refresh_library()
 
     def open_vita_setup(self) -> None:
+        if self._block_for_library_transfer("opening Vita Setup"):
+            return
         VitaSetupDialog(self.vita, self).exec()
         self.refresh_device_page()
         self.refresh_games()
@@ -872,6 +896,14 @@ class WorkspaceDashboardWindow(QMainWindow):
         return load_config()
 
     def closeEvent(self, event) -> None:
+        if self._library_transfer_active():
+            QMessageBox.information(
+                self,
+                "Transfer in progress",
+                "Cancel the active Library transfer before closing RommHeld.",
+            )
+            event.ignore()
+            return
         thread = self._settings_romm_thread
         if thread is not None and thread.isRunning():
             thread.quit()
