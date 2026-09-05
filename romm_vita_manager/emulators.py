@@ -50,9 +50,9 @@ EMULATORS = (
     EmulatorDefinition(
         "daedalusx64",
         "DaedalusX64",
-        "Nintendo 64 emulator used by some RetroFlow setups.",
-        ("daedalus", "daedalusx64"),
-        (),
+        "Vita-native Nintendo 64 emulator used by RetroFlow setups.",
+        ("dedalox64", "daedalusx64", "daedalus"),
+        ("app/DEDALOX64",),
         ("daedalusx64",),
         "Do not assume achievement compatibility",
         "Keep this separate from an achievement-first RetroArch configuration.",
