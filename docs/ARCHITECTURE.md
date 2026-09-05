@@ -52,9 +52,9 @@ For library presentation:
 `local_library.py` owns the active local library UI:
 
 - search
-- platform filtering
+- platform filtering with friendly mapped labels while retaining exact source keys internally
 - Vita install-state filtering when a Vita filesystem is mounted
-- list/tile presentation
+- single-list presentation
 - selection summary
 - Vita destination summary
 - Vita copy/cancel workflow
@@ -63,7 +63,9 @@ For library presentation:
 
 DS can reuse the same presentation without claiming Vita-style install-state knowledge.
 
-Mounted Vita storage supports cheap local install-state inspection. VitaShell FTP does not expose an equivalent efficient bulk-status operation, so FTP mode checks individual remote destinations as transfers start rather than pretending the entire library has been pre-scanned remotely.
+Mounted Vita storage supports cheap local install-state inspection, but the default `All games` browse path intentionally does not probe every destination while rendering rows. Status checks are performed when the user selects an install-state filter or when selected games are evaluated for copying, and results are cached for the current view. The cache is invalidated when device, configuration, transport or transfer state changes.
+
+VitaShell FTP does not expose an equivalent efficient bulk-status operation, so FTP mode checks individual remote destinations as transfers start rather than pretending the entire library has been pre-scanned remotely.
 
 `vita_library_support.py` contains the reusable local Vita copy worker, destination resolution, status checks and size formatting. `vita_ftp_library.py` maps those same destinations to `ux0:/...` and owns the FTP batch worker. Neither helper has application-shell responsibility.
 
@@ -141,6 +143,8 @@ The recommended live filesystem server is mtheall `ftpd`. RommHeld defaults to p
 FTP transport does not choose runtime or package format. Setup keeps FTP connectivity and FBI Remote Install readiness explicit rather than treating them as one state. For installable CIA packages, FBI Remote Install remains the direct installation route; FTP is the filesystem-copy route.
 
 3DS readiness also does not equate “not visible in the SD filesystem” with “not installed”. Applications that may exist only as installed CIA titles are reported as needing on-console confirmation when required.
+
+The active Device page exposes both guided Connection setup and contextual Runtime / FTP readiness. The readiness dialog remains a focused secondary surface rather than another permanent navigation destination.
 
 ### 3DS runtime configuration
 
@@ -262,6 +266,8 @@ It does not own transport, storage or package logic.
 
 `workspace_dashboard.py` is the composition root for the active desktop window. It exposes only Library, Device and Settings as permanent destinations. Console-specific setup and advanced device tools are launched contextually from those pages. Library behavior remains delegated to standalone widgets rather than inheriting a console-specific application window.
 
+Primary button emphasis can change with readiness state without changing handlers: Device highlights configuration before a usable route exists and the relevant next action afterward. Settings similarly emphasizes RomM connection testing when credentials are unverified or changed, then shifts emphasis to saving after a successful test. Verification remains advisory rather than a save gate.
+
 RomM credentials can be tested asynchronously from Settings using the same `RomMConnectionWorker` used by onboarding. Workspace switching is blocked while that bounded test is active so its Qt worker is not orphaned.
 
 The obsolete `platform_selector.py` compatibility shim has been removed. All current callers use `console_selector.py` directly.
@@ -316,6 +322,7 @@ The structural refactor is complete enough that further broad restructuring shou
 - legacy `ui.py`, `app.py` and `platform_selector.py` surfaces are removed;
 - Send File, removable-storage, Vita Setup, 3DS Setup and 3DS Manager use the shared design language;
 - 3DS runtime/readiness/configuration/package-staging responsibilities are isolated from transport and package-generation code;
+- 3DS readiness is reachable contextually from Device without becoming another permanent page;
 - AST/source regression tests prevent removed legacy dependencies and placeholder navigation from returning.
 
-The remaining pre-merge work is primarily runtime regression testing on real Vita and Nintendo 3DS hardware, plus fixes for defects found by those tests. The new 3DS readiness dialog and open_agb_firm settings dialog still require desktop GUI validation and a minimal contextual integration point in the active Device/Setup UI. VitaShell FTP also requires real Vita/PlayStation TV validation because CI covers protocol behavior with fakes rather than physical VitaShell. New architecture work should require a concrete functional reason rather than continuing the refactor for its own sake.
+The remaining pre-merge UI work is primarily desktop rendering/lifecycle validation and defect-driven polish, while device-dependent behavior still requires real Vita and Nintendo 3DS regression testing. VitaShell FTP and the newer 3DS runtime/deployment routes cannot be considered hardware-validated from CI alone. New architecture work should require a concrete functional reason rather than continuing the refactor for its own sake.
