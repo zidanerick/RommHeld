@@ -1,9 +1,12 @@
 from pathlib import Path
 
+from romm_vita_manager.mappings import normalize_platform_slug
 from romm_vita_manager.romm import scan_games
 
 
-LIBRARY_PATH = Path(__file__).parents[1] / "romm_vita_manager" / "three_ds_library.py"
+ROOT = Path(__file__).parents[1]
+LIBRARY_PATH = ROOT / "romm_vita_manager" / "three_ds_library.py"
+DEPLOY_PATH = ROOT / "romm_vita_manager" / "three_ds_filesystem_deploy.py"
 
 
 def test_local_library_source_contract_stays_headless():
@@ -20,12 +23,12 @@ def test_local_library_source_contract_stays_headless():
 
 
 def test_local_platform_labels_are_normalized_before_target_selection():
-    source = LIBRARY_PATH.read_text(encoding="utf-8")
+    assert normalize_platform_slug("gba") == "gba"
+    assert normalize_platform_slug("Game Boy Advance") == "gba"
+    assert normalize_platform_slug("Nintendo 64") == "n64"
 
-    assert "def _local_platform_slug(value: str) -> str:" in source
-    assert "if folded in PLATFORM_LABELS:" in source
-    assert "for slug, label in PLATFORM_LABELS.items():" in source
-    assert "if label.casefold() == folded:" in source
+    source = LIBRARY_PATH.read_text(encoding="utf-8")
+    assert "return normalize_platform_slug(game.source_platform)" in source
 
 
 def test_local_scan_recognizes_dedicated_and_retroarch_formats(tmp_path: Path):
@@ -47,11 +50,25 @@ def test_local_scan_recognizes_dedicated_and_retroarch_formats(tmp_path: Path):
     assert found == set(expected.items())
 
 
-def test_main_3ds_library_reuses_verified_transfer_worker():
+def test_main_3ds_library_delegates_transport_after_target_selection():
     source = LIBRARY_PATH.read_text(encoding="utf-8")
 
-    assert "ThreeDSTransferWorker" in source
+    assert "from .three_ds_filesystem_deploy import ThreeDSFilesystemDeployDialog" in source
+    assert "ThreeDSFilesystemDeployDialog(self.config, game, target_key, self).exec()" in source
+    assert "self.open_manager_callback(game, target_key)" in source
+    assert "ThreeDSTransferWorker" not in source
+
+
+def test_filesystem_dialog_uses_single_mounted_and_ftp_workers_for_local_or_romm_games():
+    source = DEPLOY_PATH.read_text(encoding="utf-8")
+
+    assert "from .models import Game" in source
+    assert "from .three_ds_manager import ThreeDSTransferWorker" in source
+    assert "from .three_ds_storage_worker import ThreeDSMountedTransferWorker" in source
+    assert "class ThreeDSMountedTransferWorker" not in source
+    assert "if isinstance(self.game, RomMRemoteGame):" in source
+    assert "return self.game.path, None, \"\", \"\"" in source
+    assert "worker: QThread = ThreeDSMountedTransferWorker(" in source
     assert "worker = ThreeDSTransferWorker(" in source
-    assert "worker.cancel()" in source
-    assert "overwrite=overwrite" in source
-    assert "Open Device → Connection setup" in source
+    assert "self._closing_requested = True" in source
+    assert "QTimer.singleShot(0, self.close)" in source
