@@ -60,6 +60,17 @@ def test_local_library_filters_without_rescanning_each_keystroke() -> None:
     assert 'self.destination_label.setToolTip(str(path))' in source
 
 
+def test_local_library_platform_filter_uses_friendly_labels_and_exact_keys() -> None:
+    source = _source("romm_vita_manager/local_library.py")
+
+    assert 'current = self.platforms.currentData() if self.platforms.count() else None' in source
+    assert 'self.platforms.addItem("All platforms", None)' in source
+    assert 'self.platforms.addItem(platform_label(key), key)' in source
+    assert 'index = self.platforms.findData(current) if current is not None else 0' in source
+    assert 'platform = self.platforms.currentData()' in source
+    assert 'if platform is not None and game.source_platform != platform:' in source
+
+
 def test_local_library_status_checks_are_cached_and_contextual() -> None:
     source = _source("romm_vita_manager/local_library.py")
 
