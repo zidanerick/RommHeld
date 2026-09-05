@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 import romm_vita_manager.classic_vc_assets as assets
+from romm_vita_manager.vc_runtime_profiles import build_classic_runtime_profile
 
 
 def _cache_config(tmp_path: Path, family: str, version: int, *, ncch_logo: bool = False) -> dict:
@@ -65,3 +66,24 @@ def test_v5_nes_cache_requires_real_sized_dedicated_logo_region(
     assert paths is not None
     assert paths.ncch_logo is not None
     assert paths.ncch_logo.stat().st_size == 0x2000
+
+
+def test_profiled_classic_cache_is_rejected_after_runtime_file_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(assets, "validate_retail_romfs", lambda data: None)
+    config = _cache_config(tmp_path, "gbc", 5)
+    entry = config["classic_vc"]["gbc"]
+    entry["runtime_profile"] = build_classic_runtime_profile(
+        "gbc",
+        {"title_id": "0004000001234500"},
+        code=b"C",
+        exheader=b"E",
+        romfs_template=b"R",
+        rom_path=entry["rom_path"],
+    )
+    assert assets.configured_classic_runtime(config, "gbc") is not None
+
+    Path(entry["code_path"]).write_bytes(b"tampered")
+    assert assets.configured_classic_runtime(config, "gbc") is None
