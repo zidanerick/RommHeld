@@ -22,7 +22,7 @@ launcher.py
         -> ManagementShell
             -> Library
                 -> LocalLibraryWidget for Vita / DS local-library presentation
-                -> ThreeDSLibraryWidget for RomM-backed 3DS browsing
+                -> ThreeDSLibraryWidget for RomM or local 3DS-compatible browsing
             -> Device
                 -> contextual Vita / 3DS setup and advanced device actions
             -> Settings
@@ -108,7 +108,7 @@ Status: functional simplification complete; presentation polish remains desktop-
 
 - search over the in-memory library scan
 - platform filtering with friendly display labels while preserving exact source keys internally
-- Vita install-state filtering when requested
+- Vita install-state filtering when mounted VitaShell USB storage is available
 - cached mounted-Vita status checks for the current view
 - a single list presentation rather than a nonfunctional artwork-free tile mode
 - selection summary
@@ -120,26 +120,35 @@ Status: functional simplification complete; presentation polish remains desktop-
 
 The default `All games` browse path does not probe every mounted Vita destination merely to render rows. Exact install state is evaluated when the user selects a status filter or when selected games are evaluated for copying. The status cache is invalidated when device, configuration, transport or transfer state changes.
 
-DS and VitaShell FTP rows avoid claiming Vita-style pre-scanned destination state. DS destination choice remains in Device, while VitaShell FTP checks remote destinations when transfer work begins because that transport does not expose an efficient bulk-status query.
+Install-state filters are disabled when VitaShell USB storage is not mounted and any stale status selection is reset to `All games`. This prevents a disconnected Vita from making the local library appear empty. FTP mode also keeps bulk status filtering disabled because VitaShell FTP does not expose an efficient bulk-status query.
+
+DS and VitaShell FTP rows avoid claiming Vita-style pre-scanned destination state. DS destination choice remains in Device, while VitaShell FTP checks remote destinations when transfer work begins.
 
 Vita destination/status/copy helpers remain isolated in `vita_library_support.py` rather than living in an application window.
 
 Further local-library polish should be based on real desktop rendering with long names/paths and realistic library sizes. The 3DS master/detail library is the stronger visual reference pattern, but target-specific behavior should not be forced into a generic abstraction merely for consistency.
 
-### Nintendo 3DS / RomM library
+### Nintendo 3DS library
 
-Status: complete for the structural refactor.
+Status: complete for the structural refactor; deployment expansion remains hardware-driven.
 
-Implemented:
+`ThreeDSLibraryWidget` now presents compatible 3DS targets from either configured library source:
 
-- progressive RomM-backed compatible library loading
-- artwork inspector with selection-race protection
+- progressive, paginated RomM-backed compatible library loading
+- direct local-library scanning with compatible-target filtering
+- shared friendly platform labels and search/platform filtering
+- artwork inspector for RomM records with selection-race protection
+- local-file inspector state without pretending remote artwork exists
+- saved runtime preference applied through the shared normalized platform slug
 - target selection
-- GBA/native and VC handoff to deployment workflows
+- GBA/native and VC handoff to package-generation workflows
+- direct filesystem target handoff/deployment behavior where supported
 - Nintendo-red deployment accents
 - bounded worker shutdown
 
-Further 3DS deployment changes should be coordinated with hardware/runtime work. The remaining UX concern is avoiding unnecessary second-stage manager indirection when the game and deployment route are already known.
+Local 3DS browsing deliberately filters out package-generation targets that require RomM metadata/package preparation where the direct local route does not support them safely. A local `.cia` can expose the native CIA route; arbitrary local 3DS files are not relabelled as installable CIA content.
+
+Further 3DS deployment changes should be coordinated with hardware/runtime work. Avoid reintroducing a second generic library UI merely because the source can now be local: the 3DS master/detail surface remains target-specific and owns its compatibility/runtime choices.
 
 ## Phase 4: device readiness and contextual setup
 
@@ -162,7 +171,7 @@ Each Device page should answer:
 
 The sidebar shows compact state for the active handheld only rather than unrelated disconnected devices.
 
-Existing Device actions now use state-aware primary emphasis rather than permanently highlighting the same control. A missing Vita/3DS route emphasizes connection/configuration first; once a route exists, the useful manager/setup action becomes primary. DS emphasizes storage selection before validation, then validation after a root is selected. This changes presentation only, not the underlying handlers or validation semantics.
+Existing Device actions now use state-aware primary emphasis rather than permanently highlighting the same control. A missing Vita route emphasizes connection/configuration first. A 3DS route is considered ready when either ftpd is configured or a validated mounted SD root is available. Once a usable route exists, the manager becomes the emphasized action. DS emphasizes storage selection before validation, then validation after a root is selected. This changes presentation only, not the underlying handlers or validation semantics.
 
 ### Vita
 
@@ -175,9 +184,10 @@ Existing Device actions now use state-aware primary emphasis rather than permane
 
 ### Nintendo 3DS
 
-- FTP configuration state and endpoint
+- mounted SD state plus FTP configuration state and endpoint
+- mounted SD file workflow available contextually from Device
 - 3DS Setup launched contextually from Device
-- Runtime / FTP readiness available contextually from Device
+- Runtime readiness available contextually from Device
 - 3DS Manager remains available for direct filesystem/deployment management
 - FTP connectivity kept separate from FBI Remote Install readiness
 - FBI Remote Install retained through package deployment flows
@@ -288,8 +298,10 @@ Current regression areas include:
 - contextual page subtitles
 - Vita copy action remaining in Library
 - local-library in-memory filtering, friendly platform labels and removal of the false tile mode
-- lazy/cached mounted-Vita status inspection and contextual DS/FTP metadata
-- Device primary-action emphasis following readiness state
+- mounted-Vita status-filter availability plus lazy/cached status inspection and contextual DS/FTP metadata
+- staged VPK planning not requeueing already complete USB destinations
+- local and RomM-backed 3DS library source handling
+- Device primary-action emphasis following usable route state
 - RomM connection verification and test/save emphasis in Settings
 - direct configured startup bypassing onboarding
 - shared keyboard-focus styling
@@ -312,18 +324,20 @@ CI is headless and does not provide the full desktop graphics environment, so th
 - verify friendly platform labels and the reduced library filter row at realistic widths
 - verify semantic status tones and keyboard focus remain readable in the target desktop theme
 - verify Device and Settings primary-action emphasis changes are visually obvious but not excessive
+- verify 3DS local and RomM library sources render consistently without hiding valid target differences
 
 ### PlayStation Vita hardware
 
 - mount detection through VitaShell USB mode
 - local-library copy and cancellation from the in-library action
-- same-size skip behavior
+- same-size/staged skip behavior
 - storage-space failure path
 - redesigned Send File transfer and overwrite path
 - Vita Setup package download/stage flow
 
 ### Nintendo 3DS hardware
 
+- mounted SD detection/validation and direct-file route
 - FTP connect/disconnect/error state
 - remote browsing and destination selection
 - local file upload
