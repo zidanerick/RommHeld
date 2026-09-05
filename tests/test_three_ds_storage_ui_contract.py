@@ -18,7 +18,7 @@ def test_3ds_filesystem_dialog_exposes_mounted_sd_and_ftpd_routes():
     assert "Mounted SD card · Direct / offline" in source
     assert "ftpd · Wireless / live console" in source
     assert "configured_3ds_storage_root" in source
-    assert "ThreeDSMountedTransferWorker" in source
+    assert "ThreeDSFilesystemTransferWorker" in source
     assert 'transport not in {"sd", "ftp"}' in source
 
 
