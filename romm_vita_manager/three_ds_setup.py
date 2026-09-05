@@ -14,12 +14,15 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
+    QWidget,
 )
 
 from .config import save_config
@@ -323,15 +326,27 @@ class ThreeDSSetupDialog(QDialog):
         close.clicked.connect(self.accept)
         close_row.addWidget(close)
 
+        scroll_body = QWidget()
+        scroll_body_layout = QVBoxLayout(scroll_body)
+        scroll_body_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_body_layout.setSpacing(12)
+        scroll_body_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        scroll_body_layout.addWidget(storage_card)
+        scroll_body_layout.addWidget(ftp_card)
+        scroll_body_layout.addWidget(fbi_card)
+        scroll_body_layout.addWidget(runtime_card)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(scroll_body)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(12)
         layout.addWidget(header)
         layout.addLayout(status_row)
-        layout.addWidget(storage_card)
-        layout.addWidget(ftp_card)
-        layout.addWidget(fbi_card)
-        layout.addWidget(runtime_card, 1)
+        layout.addWidget(scroll, 1)
         layout.addLayout(close_row)
 
         self.refresh_candidates()
