@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import PurePosixPath
+
 
 # TNES uses its own compact mapper numbering. Mapping is the inverse of the
 # long-public TNES->iNES conversion table and covers the mapper families used by
-# Nintendo's 3DS NES VC emulator.
+# Nintendo's 3DS NES VC emulator. AxROM is TNES mapper 9; value 8 is not a
+# documented retail TNES mapper.
 _TNES_MAPPER_BY_INES = {
     0: 0,   # NROM
     1: 1,   # SxROM / MMC1
@@ -13,7 +16,7 @@ _TNES_MAPPER_BY_INES = {
     5: 5,   # ExROM / MMC5
     2: 6,   # UxROM
     3: 7,   # CNROM
-    7: 8,   # AxROM
+    7: 9,   # AxROM
 }
 
 
@@ -137,6 +140,28 @@ def ines_to_tnes(rom: bytes) -> bytes:
     return result
 
 
+def ensure_nes_patch_placeholder(files: dict[str, bytes], rom_path: str) -> dict[str, bytes]:
+    """Keep the NES emulator's per-ROM patch lookup structurally satisfied.
+
+    Retail NES VC titles carry ``/<rom basename>.patch`` next to the `/rom/`
+    payload. The donor patch itself is game-specific and must never be applied
+    to another ROM, but removing the path entirely introduces a family-specific
+    difference that the retail NES runtime needlessly has to handle. Generated
+    titles therefore retain the lookup path as an empty INI file. GB/GBC keep
+    their already hardware-validated behavior.
+    """
+    result = dict(files)
+    basename = PurePosixPath(rom_path).name
+    if not basename:
+        raise ValueError("NES VC runtime has no ROM basename for its patch placeholder.")
+    expected = f"/{basename}.patch"
+    for path in list(result):
+        if path.count("/") == 1 and path.casefold().endswith(".patch") and path != expected:
+            result.pop(path, None)
+    result[expected] = b""
+    return result
+
+
 _INSTALLED = False
 
 
@@ -153,6 +178,7 @@ def install() -> None:
 
     original_prepare = classic_vc.prepare_classic_rom
     original_product_code = classic_vc._product_code
+    original_runtime_files = getattr(classic_vc, "prepare_runtime_files", None)
 
     def prepare_classic_rom(data: bytes, family: str) -> bytes:
         key = family.lower()
@@ -167,6 +193,17 @@ def install() -> None:
         suffix = hashlib.sha256(f"nes:{romm_id}".encode("ascii")).hexdigest()[:3].upper()
         return f"CTR-N-RN{suffix}"
 
+    def prepare_runtime_files(files: dict[str, bytes], family: str, rom_path: str) -> dict[str, bytes]:
+        result = (
+            original_runtime_files(dict(files), family, rom_path)
+            if callable(original_runtime_files)
+            else dict(files)
+        )
+        if family.lower() == "nes":
+            return ensure_nes_patch_placeholder(result, rom_path)
+        return result
+
     classic_vc.prepare_classic_rom = prepare_classic_rom
     classic_vc._product_code = product_code
+    classic_vc.prepare_runtime_files = prepare_runtime_files
     _INSTALLED = True
