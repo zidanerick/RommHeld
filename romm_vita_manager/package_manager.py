@@ -112,8 +112,11 @@ def package_path(package: PackageSpec) -> Path:
     return CACHE_DIR / package.stage_name
 
 
-def download_package(package: PackageSpec, progress=None) -> Path:
+def download_package(package: PackageSpec, progress=None, cancel_event=None) -> Path:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError(f"Downloading {package.name} was cancelled.")
+
     url, digest = resolve_package(package)
     destination = package_path(package)
     temporary = destination.with_suffix(destination.suffix + ".part")
@@ -127,6 +130,8 @@ def download_package(package: PackageSpec, progress=None) -> Path:
             completed = 0
             hasher = hashlib.sha256()
             while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise InterruptedError(f"Downloading {package.name} was cancelled.")
                 chunk = response.read(1024 * 1024)
                 if not chunk:
                     break
@@ -135,6 +140,9 @@ def download_package(package: PackageSpec, progress=None) -> Path:
                 completed += len(chunk)
                 if progress is not None:
                     progress(completed, total)
+
+        if cancel_event is not None and cancel_event.is_set():
+            raise InterruptedError(f"Downloading {package.name} was cancelled.")
 
         actual = hasher.hexdigest()
         if digest and actual.lower() != digest.lower():
@@ -157,7 +165,7 @@ def inspect_package(package: PackageSpec) -> list[ArchiveEntry]:
     return list_archive(source)
 
 
-def stage_package(package: PackageSpec, vita: Path) -> Path:
+def stage_package(package: PackageSpec, vita: Path, cancel_event=None) -> Path:
     """Safely stage a normal file/VPK. Archive packages must be inspected first."""
     source = package_path(package)
     if not source.is_file():
@@ -181,8 +189,9 @@ def stage_package(package: PackageSpec, vita: Path) -> Path:
             f"{required} bytes required, {available} bytes available."
         )
 
-    if not copy_file_chunked(source, target, threading.Event()):
-        raise RuntimeError(f"Staging {package.name} was cancelled.")
+    event = cancel_event if cancel_event is not None else threading.Event()
+    if event.is_set() or not copy_file_chunked(source, target, event):
+        raise InterruptedError(f"Staging {package.name} was cancelled.")
     final_size = target.stat().st_size
     if final_size != required:
         raise IOError(
