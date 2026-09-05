@@ -21,6 +21,17 @@ def test_app_detection_is_case_insensitive(tmp_path: Path):
     assert "SD evidence" in status.detection_note
 
 
+def test_open_agb_database_without_firm_payload_is_not_called_ready(tmp_path: Path):
+    resource = tmp_path / "3ds" / "open_agb_firm"
+    resource.mkdir(parents=True)
+    (resource / "gba_db.bin").write_bytes(b"database")
+
+    status = detect_three_ds_app(tmp_path, APP_BY_KEY["open-agb-firm"])
+
+    assert not status.detected
+    assert status.marker is None
+
+
 def test_missing_cia_capable_app_preserves_unknown_installed_title_state(tmp_path: Path):
     status = detect_three_ds_app(tmp_path, APP_BY_KEY["fbi"])
 
