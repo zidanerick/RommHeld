@@ -10,7 +10,7 @@ def _importance(requirements):
     return {item.app_key: item.importance for item in requirements}
 
 
-def test_ftp_readiness_requires_luma_homebrew_and_ftpd_but_only_recommends_updater():
+def test_ftp_readiness_requires_luma_and_ftpd_but_only_recommends_homebrew_launcher():
     requirements = build_readiness_requirements(
         needs_ftp=True,
         needs_cia_install=False,
@@ -19,7 +19,7 @@ def test_ftp_readiness_requires_luma_homebrew_and_ftpd_but_only_recommends_updat
     importance = _importance(requirements)
 
     assert importance["luma"] == "required"
-    assert importance["homebrew-launcher"] == "required"
+    assert importance["homebrew-launcher"] == "recommended"
     assert importance["ftpd"] == "required"
     assert importance["universal-updater"] == "recommended"
     assert "fbi" not in importance
