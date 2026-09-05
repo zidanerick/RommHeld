@@ -21,10 +21,9 @@ ManagementShell
     |
     +--> Library
     +--> Device
-    +--> Setup
-    +--> Queue
-    +--> Tools
     +--> Settings
+            |
+            +--> contextual setup / advanced device dialogs
 ```
 
 `run.sh` executes `launcher.py`. The root `romm_vita_manager.py` script is only a compatibility entry point and forwards to the same launcher.
@@ -52,6 +51,7 @@ For library presentation:
 - selection summary
 - Vita destination summary
 - Vita copy/cancel workflow
+- the normal Vita copy action beside the current library selection
 
 DS can reuse the same presentation without claiming Vita-style install-state knowledge.
 
@@ -187,13 +187,13 @@ Large content surfaces remain neutral.
 
 - persistent sidebar
 - active-console branding
-- section navigation
-- device summary labels
+- core section navigation
+- compact active-device summary
 - content stack
 
 It does not own transport, storage or package logic.
 
-`workspace_dashboard.py` is the composition root for the active desktop window. It constructs target pages and delegates library behavior to standalone widgets rather than inheriting a console-specific application window.
+`workspace_dashboard.py` is the composition root for the active desktop window. It exposes only Library, Device and Settings as permanent destinations. Console-specific setup and advanced device tools are launched contextually from those pages. Library behavior remains delegated to standalone widgets rather than inheriting a console-specific application window.
 
 The obsolete `platform_selector.py` compatibility shim has been removed. All current callers use `console_selector.py` directly.
 
@@ -230,10 +230,12 @@ A clean shutdown is preferred over arbitrary short waits that can leave live Qt 
 The structural refactor is complete enough that further broad restructuring should stop before merge:
 
 - the unified workspace is a direct `QMainWindow`;
-- Vita/local library behavior is standalone;
+- Vita/local library behavior is standalone and exposes its primary copy action in-context;
 - the useful Vita copy/status helpers are in a focused module;
+- the permanent shell is reduced to Library, Device and Settings;
+- setup and advanced tools are contextual rather than placeholder navigation destinations;
 - legacy `ui.py`, `app.py` and `platform_selector.py` surfaces are removed;
 - Send File, removable-storage, Vita Setup, 3DS Setup and 3DS Manager use the shared design language;
-- AST regression tests prevent the removed legacy module dependencies from returning.
+- AST/source regression tests prevent removed legacy dependencies and placeholder navigation from returning.
 
 The remaining pre-merge work is primarily runtime regression testing on real Vita and Nintendo 3DS hardware, plus fixes for defects found by those tests. New architecture work should require a concrete functional reason rather than continuing the refactor for its own sake.
