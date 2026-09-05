@@ -52,17 +52,34 @@ def test_classic_runtime_profile_is_deterministic_and_sensitive_to_runtime_code(
     assert first["classification"] == "hardware-retest-required"
 
 
-def test_gba_runtime_profile_records_retail_donor_identity_and_asset_hashes():
+def test_gba_runtime_profile_records_retail_donor_identity_and_runtime_structure():
+    code_hash = hashlib.sha256(b"retail-gba-code").hexdigest()
     profile = build_gba_runtime_profile(
         {"title_id": "0004000000075400"},
         boot_logo=b"logo",
         donor_banner=b"banner",
         donor_icon=b"icon",
+        donor_code_sha256=code_hash,
+        donor_rom_size=0x200000,
     )
     assert profile["family"] == "gba"
     assert profile["classification"] == "recommended"
     assert profile["donor_title_id"] == "0004000000075400"
+    assert profile["donor_code_sha256"] == code_hash
+    assert profile["donor_rom_size"] == 0x200000
     assert profile["boot_logo_sha256"] == hashlib.sha256(b"logo").hexdigest()
+
+
+def test_gba_runtime_profile_rejects_invalid_structural_fingerprint():
+    with pytest.raises(ValueError, match="SHA-256"):
+        build_gba_runtime_profile(
+            {"title_id": "0004000000075400"},
+            boot_logo=b"logo",
+            donor_banner=b"banner",
+            donor_icon=b"icon",
+            donor_code_sha256="not-a-hash",
+            donor_rom_size=0x200000,
+        )
 
 
 def test_configured_runtime_profile_reads_gba_and_classic_locations():
