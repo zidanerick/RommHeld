@@ -59,6 +59,7 @@ class WorkspaceDashboardWindow(QMainWindow):
         self.three_ds_library: ThreeDSLibraryWidget | None = None
         self._settings_romm_thread: QThread | None = None
         self._settings_romm_worker: RomMConnectionWorker | None = None
+        self._settings_romm_verified = False
         self.local_library = LocalLibraryWidget(
             self.config,
             self.workspace_key if self.workspace_key != "3ds" else "vita",
@@ -273,6 +274,7 @@ class WorkspaceDashboardWindow(QMainWindow):
         layout.setSpacing(12)
 
         source = get_library_source(self.config)
+        self._settings_romm_verified = False
         source_card = SurfaceCard()
         source_card.content.addWidget(self._card_title("Library source"))
         source_card.content.addWidget(
@@ -319,11 +321,10 @@ class WorkspaceDashboardWindow(QMainWindow):
         self.settings_source_status.setWordWrap(True)
         source_card.content.addWidget(self.settings_source_status)
 
-        self.settings_test_button = QPushButton("Test connection")
+        accent = WORKSPACE_PROFILES[self.workspace_key].accent
+        self.settings_test_button = AccentButton("Test connection", accent)
         self.settings_test_button.clicked.connect(self._test_settings_romm)
-        self.settings_save_button = AccentButton(
-            "Save library settings", WORKSPACE_PROFILES[self.workspace_key].accent
-        )
+        self.settings_save_button = AccentButton("Save library settings", accent)
         self.settings_save_button.clicked.connect(self._save_settings_source)
         save_row = QHBoxLayout()
         save_row.addWidget(self.settings_test_button)
@@ -360,13 +361,24 @@ class WorkspaceDashboardWindow(QMainWindow):
 
     def _settings_source_changed(self) -> None:
         if self.settings_romm_radio.isChecked() and not self._settings_test_running():
+            self._settings_romm_verified = False
             self._set_settings_source_state(
                 "neutral",
                 "Test the RomM connection before saving if these credentials changed.",
             )
+            self._update_settings_action_emphasis()
 
     def _settings_test_running(self) -> bool:
         return bool(self._settings_romm_thread and self._settings_romm_thread.isRunning())
+
+    def _update_settings_action_emphasis(self) -> None:
+        local = self.settings_local_radio.isChecked()
+        if local:
+            self.settings_test_button.set_emphasized(False)
+            self.settings_save_button.set_emphasized(True)
+            return
+        self.settings_test_button.set_emphasized(not self._settings_romm_verified)
+        self.settings_save_button.set_emphasized(self._settings_romm_verified)
 
     def _settings_source_visibility(self) -> None:
         local = self.settings_local_radio.isChecked()
@@ -377,6 +389,7 @@ class WorkspaceDashboardWindow(QMainWindow):
         self.settings_test_button.setVisible(not local)
         self.settings_test_button.setEnabled(not local and not testing)
         self.settings_save_button.setEnabled(not testing)
+        self._update_settings_action_emphasis()
         if testing:
             self.settings_test_button.setText("Testing…")
             self._set_settings_source_state("busy", "Testing RomM connection…")
@@ -400,15 +413,19 @@ class WorkspaceDashboardWindow(QMainWindow):
         url = self.settings_url_edit.text().strip()
         token = self.settings_token_edit.text().strip()
         if not url or not token:
+            self._settings_romm_verified = False
             self._set_settings_source_state(
                 "error",
                 "Enter the RomM server URL and Client API Token first.",
             )
+            self._update_settings_action_emphasis()
             return
         try:
             normalized = normalize_romm_url(url)
         except ValueError as exc:
+            self._settings_romm_verified = False
             self._set_settings_source_state("error", str(exc))
+            self._update_settings_action_emphasis()
             return
         self.settings_url_edit.setText(normalized)
 
@@ -428,10 +445,14 @@ class WorkspaceDashboardWindow(QMainWindow):
         thread.start()
 
     def _settings_romm_test_succeeded(self, message: str) -> None:
+        self._settings_romm_verified = True
         self._set_settings_source_state("success", message)
+        self._update_settings_action_emphasis()
 
     def _settings_romm_test_failed(self, message: str) -> None:
+        self._settings_romm_verified = False
         self._set_settings_source_state("error", f"RomM unavailable • {message}")
+        self._update_settings_action_emphasis()
 
     def _settings_romm_thread_finished(self) -> None:
         self._settings_romm_worker = None
