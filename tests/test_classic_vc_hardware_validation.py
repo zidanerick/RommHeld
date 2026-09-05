@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +12,9 @@ from romm_vita_manager.classic_vc_hardware_fix import (
     validate_retail_romfs,
 )
 from romm_vita_manager.classic_vc_title_fix import hardware_safe_classic_title_id
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _align(value: int, boundary: int) -> int:
@@ -33,6 +38,20 @@ def test_package_init_exposes_hardware_safe_classic_title_ids() -> None:
         variation = actual[7]
         assert 0x0E0000 <= unique_id <= 0x0EFFFF
         assert variation == 0
+
+
+def test_active_classic_builder_accepts_deployment_title_id_override() -> None:
+    signature = inspect.signature(classic_vc.build_classic_vc_cia)
+    override = signature.parameters.get("title_id_override")
+
+    assert override is not None
+    assert override.default is None
+
+    deploy_source = (ROOT / "romm_vita_manager" / "classic_vc_deploy.py").read_text(
+        encoding="utf-8"
+    )
+    assert "self.config, title_id = persist_registered_title_id(self.family, self.game.rom_id)" in deploy_source
+    assert "title_id_override=title_id" in deploy_source
 
 
 def test_retail_romfs_layout_is_independently_verifiable() -> None:
