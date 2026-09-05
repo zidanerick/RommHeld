@@ -112,6 +112,24 @@ def test_stale_classic_cache_is_not_reported_ready(monkeypatch: pytest.MonkeyPat
     assert "Configure a Game Boy Color Virtual Console donor CIA" in message
 
 
+def test_stale_gba_banner_cache_without_icon_is_not_reported_ready(tmp_path: Path):
+    logo = tmp_path / "logo.bin"
+    banner = tmp_path / "banner.bin"
+    logo.write_bytes(b"logo")
+    banner.write_bytes(b"banner")
+    ready, message = vc_donors.donor_readiness(
+        {
+            "gba_vc": {
+                "boot_logo_path": str(logo),
+                "donor_banner_path": str(banner),
+            }
+        },
+        "gba",
+    )
+    assert not ready
+    assert "Configure a Game Boy Advance Virtual Console donor CIA" in message
+
+
 def test_gba_readiness_requires_donor_and_boot9(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(vc_donors, "save_config", lambda config: None)
     _stub_boot9_validation(monkeypatch)
