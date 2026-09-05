@@ -25,7 +25,7 @@ def test_workspace_only_exposes_core_destinations() -> None:
     assert 'self.shell.add_section("Setup"' not in source
     assert 'self.shell.add_section("Queue"' not in source
     assert 'self.shell.add_section("Tools"' not in source
-    assert 'setup = AccentButton("Vita setup", accent)' in source
+    assert 'self.workspace_vita_setup_action = AccentButton("Vita setup", accent)' in source
 
 
 def test_page_subtitles_are_contextual() -> None:
@@ -87,6 +87,21 @@ def test_vita_ftp_guidance_uses_current_device_navigation() -> None:
 
     assert "Device → Send file" in source
     assert "Tools → Send file" not in source
+
+
+def test_device_primary_actions_follow_readiness() -> None:
+    source = _source("romm_vita_manager/workspace_dashboard.py")
+    components = _source("romm_vita_manager/ui_components.py")
+
+    assert 'def set_emphasized(self, emphasized: bool) -> None:' in components
+    assert 'self.workspace_vita_send_action.set_emphasized(not route_ready)' in source
+    assert 'self.workspace_vita_setup_action.set_emphasized(route_ready)' in source
+    assert 'self.workspace_3ds_setup_action.set_emphasized(not bool(host))' in source
+    assert 'self.workspace_3ds_manage_action.set_emphasized(bool(host))' in source
+    assert 'self.ds_browse_action.set_emphasized(not bool(root))' in source
+    assert 'self.ds_validate_action.set_emphasized(bool(root))' in source
+    assert 'self.ds_browse_action.set_emphasized(False)' in source
+    assert 'self.ds_validate_action.set_emphasized(True)' in source
 
 
 def test_romm_connection_can_be_tested_from_settings() -> None:
