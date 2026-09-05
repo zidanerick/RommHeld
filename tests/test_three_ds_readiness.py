@@ -138,5 +138,51 @@ def test_target_runtime_preflight_distinguishes_detected_missing_and_console_con
     assert "confirm it on the console" in confirm.note
 
 
+def test_retroarch_preflight_requires_a_matching_platform_core(tmp_path: Path):
+    cores = tmp_path / "RetroArch" / "Cores"
+    cores.mkdir(parents=True)
+
+    folder_only = evaluate_target_runtime(tmp_path, "retroarch", "gba")
+    assert folder_only is not None
+    assert folder_only.state == "confirm_on_console"
+    assert "No matching core package is visible" in folder_only.note
+
+    (cores / "mgba_libretro.3dsx").write_bytes(b"core")
+    launchable = evaluate_target_runtime(tmp_path, "retroarch", "gba")
+    assert launchable is not None
+    assert launchable.state == "detected"
+    assert "matching 3DSX core executable" in launchable.note
+
+
+def test_retroarch_preflight_treats_cia_core_as_console_confirmation(tmp_path: Path):
+    cores = tmp_path / "RetroArch" / "Cores"
+    cores.mkdir(parents=True)
+    (cores / "gambatte_libretro.cia").write_bytes(b"installer")
+
+    result = evaluate_target_runtime(tmp_path, "retroarch", "gbc")
+
+    assert result is not None
+    assert result.state == "confirm_on_console"
+    assert "Confirm on the console" in result.note
+
+
+def test_retroarch_preflight_surfaces_missing_required_firmware(tmp_path: Path):
+    retroarch = tmp_path / "RetroArch"
+    cores = retroarch / "Cores"
+    cores.mkdir(parents=True)
+    (cores / "fceumm_libretro.3dsx").write_bytes(b"core")
+    (retroarch / "system").mkdir()
+    (retroarch / "retroarch.cfg").write_text(
+        'system_directory = "sdmc:/RetroArch/system"\n',
+        encoding="utf-8",
+    )
+
+    result = evaluate_target_runtime(tmp_path, "retroarch", "fds")
+
+    assert result is not None
+    assert result.state == "missing"
+    assert "required firmware is missing" in result.note
+
+
 def test_target_runtime_preflight_is_not_invented_for_existing_cia_copy(tmp_path: Path):
     assert evaluate_target_runtime(tmp_path, "native_3ds_cia") is None
