@@ -68,12 +68,32 @@ def destination_for_game(
             "unknown",
         )
 
-    if key == "vita":
+    if key in {"nds", "ds", "nintendo-ds"}:
+        if suffix == ".nds":
+            return (
+                "Nintendo DS / DSVita",
+                vita / "data" / "dsvita",
+                "file",
+            )
         return (
-            "PS Vita VPK staging",
-            vita / "data" / "RetroFlow" / "ROMS",
-            "staging",
+            "DSVita requires an .nds ROM",
+            vita / "data" / "dsvita",
+            "unknown",
         )
+
+    if key == "vita":
+        if suffix == ".vpk":
+            return (
+                "PS Vita VPK staging",
+                vita,
+                "staging",
+            )
+        return (
+            "PS Vita deployment requires a VPK",
+            vita,
+            "unknown",
+        )
+
     folder = mappings.get(key)
     if folder:
         return (
@@ -117,6 +137,8 @@ def game_status(
         if not target.exists():
             return "NEW", f"→ {label}"
         if target.is_file() and target.stat().st_size == game.size:
+            if mode == "staging":
+                return "STAGED", "VPK staged; install it with VitaShell"
             return "INSTALLED", "Same-size file already present"
         return "DIFFERENT", "Destination exists with different size"
     except OSError as exc:
@@ -162,8 +184,9 @@ class CopyWorker(QThread):
                 ):
                     skipped += 1
                     completed += game.size
+                    detail = "Already staged" if mode == "staging" else "Already present"
                     self.progress.emit(
-                        int(completed * 100 / total), game.name, "Already present"
+                        int(completed * 100 / total), game.name, detail
                     )
                     continue
 
