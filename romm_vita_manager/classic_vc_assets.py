@@ -15,10 +15,12 @@ from .vc_donors import configure_boot9, configure_donor
 
 _SUPPORTED = {"gb", "gbc", "nes", "gamegear", "snes"}
 # Version 5 adds the donor's optional NCCH plain and dedicated launch-logo
-# regions. Version 4 caches are deliberately invalidated so a one-time donor
-# re-prepare captures the retail regions rather than silently continuing with a
-# structurally-minimal NCCH.
+# regions. NES and SNES retail donors use the dedicated logo region, so their
+# older caches must be refreshed. GB/GBC/Game Gear had no dedicated NCCH logo
+# in the supplied retail donors and may keep a validated v4 cache; they will be
+# upgraded naturally the next time their donor is prepared.
 _CACHE_VERSION = 5
+_LOGO_REGION_FAMILIES = {"nes", "snes"}
 
 
 @dataclass(frozen=True)
@@ -84,7 +86,11 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
     entry = root.get(family, {}) if isinstance(root, dict) else {}
     if not isinstance(entry, dict):
         return None
-    if entry.get("cache_version") != _CACHE_VERSION:
+    cache_version = entry.get("cache_version")
+    if family in _LOGO_REGION_FAMILIES:
+        if cache_version != _CACHE_VERSION:
+            return None
+    elif cache_version not in (4, _CACHE_VERSION):
         return None
     exheader = Path(str(entry.get("exheader_path", ""))).expanduser()
     code = Path(str(entry.get("code_path", ""))).expanduser()
@@ -113,6 +119,11 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
     if ncch_logo is not None and not ncch_logo.is_file():
         return None
     if ncch_logo is not None and ncch_logo.stat().st_size != 0x2000:
+        return None
+    # A v5 NES/SNES cache must actually contain the dedicated retail launch
+    # logo captured from its donor. Otherwise accepting the cache would defeat
+    # the purpose of the format bump and recreate the minimal NCCH layout.
+    if family in _LOGO_REGION_FAMILIES and ncch_logo is None:
         return None
     try:
         validate_retail_romfs(romfs.read_bytes())
@@ -177,6 +188,10 @@ def extract_and_cache_classic_runtime(
         raise RuntimeError("Virtual Console donor did not provide an animated HOME Menu banner.")
     if not getattr(runtime, "donor_icon", b""):
         raise RuntimeError("Virtual Console donor did not provide a HOME Menu SMDH icon.")
+    if family in _LOGO_REGION_FAMILIES and not auxiliary.logo:
+        raise RuntimeError(
+            f"{family.upper()} Virtual Console donor is missing its dedicated retail NCCH launch logo."
+        )
     validate_retail_romfs(runtime.romfs_template)
 
     cache = runtime_cache_dir(family)
