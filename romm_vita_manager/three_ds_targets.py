@@ -67,7 +67,9 @@ RETROARCH = DeploymentTarget(
     "retroarch",
 )
 
-RETROARCH_PLATFORM_SLUGS = frozenset(
+# Platforms for which RommHeld intentionally exposes a RetroArch deployment
+# choice. Dedicated runtimes are tracked separately below.
+RETROARCH_TARGET_PLATFORM_SLUGS = frozenset(
     {
         "3ds",
         "gba",
@@ -105,7 +107,14 @@ RETROARCH_PLATFORM_SLUGS = frozenset(
 )
 
 DIRECT_RUNTIME_PLATFORM_SLUGS = frozenset({"gba", "nds", "virtualboy", "n64"})
-THREE_DS_PLATFORM_SLUGS = RETROARCH_PLATFORM_SLUGS | DIRECT_RUNTIME_PLATFORM_SLUGS
+THREE_DS_PLATFORM_SLUGS = RETROARCH_TARGET_PLATFORM_SLUGS | DIRECT_RUNTIME_PLATFORM_SLUGS
+
+# Compatibility alias. Existing RomM library code historically used this name
+# as the general set of platforms visible in the 3DS workspace, even though the
+# name implied RetroArch. Keep that code working while target selection itself
+# uses RETROARCH_TARGET_PLATFORM_SLUGS and therefore does not invent a
+# RetroArch route for dedicated-only platforms such as NDS and Virtual Boy.
+RETROARCH_PLATFORM_SLUGS = THREE_DS_PLATFORM_SLUGS
 
 # Every slug listed here has a concrete family-specific package builder and
 # PC-side structural validation. Hardware validation status is tracked
@@ -135,7 +144,7 @@ def available_targets(slug: str) -> tuple[DeploymentTarget, ...]:
 
     if key == "3ds":
         targets.append(NATIVE_3DS_CIA)
-    elif key in RETROARCH_PLATFORM_SLUGS:
+    elif key in RETROARCH_TARGET_PLATFORM_SLUGS:
         targets.append(RETROARCH)
 
     if key in VC_IMPLEMENTED_PLATFORM_SLUGS:
