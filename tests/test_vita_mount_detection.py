@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from romm_vita_manager.vita import find_vita_mounts, is_vita_mount
+from romm_vita_manager.vita import find_vita_mounts, is_vita_mount, unique_vita_mount
 
 
 def _mkdirs(root: Path, *relative_paths: str) -> None:
@@ -37,3 +37,12 @@ def test_find_vita_mounts_filters_candidates(monkeypatch, tmp_path: Path):
     )
 
     assert find_vita_mounts() == [vita]
+
+
+def test_unique_vita_mount_requires_exactly_one_candidate(tmp_path: Path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+
+    assert unique_vita_mount([]) is None
+    assert unique_vita_mount([first]) == first
+    assert unique_vita_mount([first, second]) is None
