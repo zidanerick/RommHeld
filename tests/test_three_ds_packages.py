@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import threading
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ import pytest
 from romm_vita_manager.three_ds_packages import (
     BACKUP_SUFFIX,
     ResolvedThreeDSPackage,
+    download_package,
     get_package,
     package_for_app,
     resolve_package,
@@ -74,6 +76,31 @@ def test_resolve_package_rejects_unexpected_download_host(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Unexpected download host"):
         resolve_package(get_package("ftpd-3dsx"))
+
+
+def test_cancelled_download_stops_before_network_request(monkeypatch, tmp_path: Path):
+    spec = get_package("ftpd-3dsx")
+    resolved = ResolvedThreeDSPackage(
+        spec,
+        "v3.2.1",
+        "https://github.com/mtheall/ftpd/releases/download/v3.2.1/ftpd.3dsx",
+        100,
+        None,
+    )
+    cancel_event = threading.Event()
+    cancel_event.set()
+    monkeypatch.setattr(
+        "romm_vita_manager.three_ds_packages.package_cache_path",
+        lambda resolved: tmp_path / "ftpd.3dsx",
+    )
+    monkeypatch.setattr(
+        "romm_vita_manager.three_ds_packages.urllib.request.urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("network should not run")),
+    )
+
+    with pytest.raises(InterruptedError, match="cancelled"):
+        download_package(resolved, cancel_event=cancel_event)
+    assert not (tmp_path / "ftpd.3dsx.part").exists()
 
 
 def test_stage_package_requires_high_confidence_3ds_root(tmp_path: Path):
