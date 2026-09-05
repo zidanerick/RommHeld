@@ -42,3 +42,14 @@ def test_3ds_ui_describes_direct_card_access_without_claiming_console_usb_storag
     assert "card reader" in setup
     assert "card reader" in deploy
     assert "standard USB mass storage" in deploy
+
+
+def test_3ds_filesystem_dialog_preserves_transfer_result_after_worker_cleanup():
+    source = DEPLOY_PATH.read_text(encoding="utf-8")
+
+    assert "update_activity: bool = True" in source
+    assert "if update_activity:" in source
+    assert '"Transfer complete. The final destination was size verified."' in source
+    assert '"Transfer cancelled. The existing destination was preserved."' in source
+    assert "self.status.setText(prefix + message)" in source
+    assert "self._transport_changed(update_activity=False)" in source
