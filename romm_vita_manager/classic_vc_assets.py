@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .classic_vc import ClassicVcRuntime, extract_classic_vc_runtime, parse_romfs_files
+from .classic_vc_donor_validation import classic_donor_patch_names
 from .classic_vc_hardware_fix import validate_retail_romfs
 from .classic_vc_ncch_regions import (
     auxiliary_cache_paths,
@@ -247,6 +248,7 @@ def extract_and_cache_classic_runtime(
         )
     validate_retail_romfs(runtime.romfs_template)
     emulator_build, config_hash = _runtime_profile_metadata(runtime.romfs_template)
+    donor_patches = classic_donor_patch_names(donor_cia, boot9, family)
     runtime_profile = build_classic_runtime_profile(
         family,
         configured_donor_info(updated, family),
@@ -259,6 +261,7 @@ def extract_and_cache_classic_runtime(
         logo=runtime.logo if runtime.logo else None,
         emulator_build=emulator_build,
         config_ini_sha256=config_hash,
+        donor_patch_names=donor_patches,
     )
 
     cache = runtime_cache_dir(family)
