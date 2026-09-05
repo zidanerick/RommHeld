@@ -37,9 +37,9 @@ After successful preparation, RommHeld forgets the donor CIA and boot9 source pa
 
 A donor is not treated as interchangeable merely because it belongs to the correct console family. Nintendo shipped materially different emulator builds.
 
-RommHeld records a runtime fingerprint when preparing a donor. Classic profiles include hashes of the emulator code, exheader and sanitized RomFS template plus the donor identity and ROM path. GBA profiles include the validated donor `.code` fingerprint/ROM size and hashes of the reusable presentation assets.
+RommHeld records a runtime fingerprint when preparing a donor. Classic profiles include hashes of the emulator code, exheader and sanitized RomFS template plus the donor identity and ROM path. Newly prepared classic profiles also cover reusable donor banner/icon presentation and the optional ExeFS logo. Newly cached auxiliary NCCH plain/logo regions carry their own SHA-256 values. GBA profiles include the validated donor `.code` fingerprint/ROM size and hashes of the reusable boot-logo, banner and icon assets.
 
-For caches that contain a runtime profile, those fingerprints are enforced before the cache is reported ready. Classic code, exheader or RomFS changes invalidate the profiled cache. GBA boot-logo, banner or SMDH changes likewise invalidate a profiled GBA cache. The user must re-prepare the donor rather than silently building from modified cached assets. Older unprofiled caches remain governed by their existing cache-version and structural compatibility rules.
+For caches that contain these fingerprints, they are enforced before the cache is reported ready. Modified classic runtime, presentation or hashed auxiliary-region files invalidate readiness. Modified profiled GBA boot-logo, banner or SMDH files likewise invalidate readiness. The user must re-prepare the donor rather than silently building from modified cached assets. Older caches that predate a particular optional hash remain governed by their existing cache-version and structural compatibility rules.
 
 Current guidance is:
 
@@ -49,7 +49,7 @@ Current guidance is:
 - **Game Gear:** accept structurally valid `.GG.m` donors, but do not label a fingerprint recommended until it has passed real-device validation.
 - **SNES:** a valid New Nintendo 3DS SNES donor is required, but donor choice does not replace per-game preset handling. The current generic simple-ROM path remains experimental.
 
-The profile/fingerprint layer is intentionally separate from the UI so future hardware-tested fingerprints can be promoted to known-good profiles without changing packaging architecture.
+The guidance/profile policy remains separate from package-generation logic. The GBA and classic VC deployment cards surface that policy contextually, including the cached profile classification and profile ID when present, so users can see whether a runtime is recommended, unverified, awaiting hardware retest or experimental without opening a separate advanced settings surface.
 
 ## Family-specific behavior
 
@@ -102,6 +102,8 @@ Title ID preview is side-effect free. Opening a deployment dialog does not alloc
 The allocation API can avoid explicitly supplied reserved target IDs when making a new assignment. Existing valid assignments remain stable even if that value later appears in a reserved set, because silently changing the ID of an already-deployed title would break upgrade and save continuity.
 
 This prevents collisions between RommHeld-managed generated titles. Current deployment does not claim to inventory every official, manually created or third-party CIA already installed on an arbitrary console, so it is not a guarantee of console-wide Title ID uniqueness.
+
+The active classic VC builder accepts the deployment-time allocated ID as an explicit override and propagates it through the exheader, NCCH, ticket and TMD. A regression test guards this active patched-builder contract because classic VC behavior is still layered through the current ordered family-correction installers.
 
 ## Package validation
 
