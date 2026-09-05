@@ -12,7 +12,7 @@ from .classic_vc_ncch_regions import (
 from .config import package_cache_dir, save_config
 from .gba_vc import _primary_ncch_from_cia
 from .vc_donors import configure_boot9, configure_donor, configured_donor_info
-from .vc_runtime_profiles import build_classic_runtime_profile
+from .vc_runtime_profiles import build_classic_runtime_profile, classic_runtime_profile_matches
 
 _SUPPORTED = {"gb", "gbc", "nes", "gamegear", "snes"}
 # Version 5 adds the donor's optional NCCH plain and dedicated launch-logo
@@ -127,7 +127,18 @@ def configured_classic_runtime(config: dict, family: str) -> ClassicVcRuntimePat
     if family in _LOGO_REGION_FAMILIES and ncch_logo is None:
         return None
     try:
-        validate_retail_romfs(romfs.read_bytes())
+        romfs_bytes = romfs.read_bytes()
+        validate_retail_romfs(romfs_bytes)
+        profile = entry.get("runtime_profile")
+        if isinstance(profile, dict) and not classic_runtime_profile_matches(
+            profile,
+            family,
+            code=code.read_bytes(),
+            exheader=exheader.read_bytes(),
+            romfs_template=romfs_bytes,
+            rom_path=rom_path,
+        ):
+            return None
     except (OSError, ValueError):
         return None
     return ClassicVcRuntimePaths(
