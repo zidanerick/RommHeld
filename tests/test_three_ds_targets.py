@@ -3,6 +3,7 @@ from romm_vita_manager.three_ds_targets import (
     available_targets,
     compatible_platform,
     default_destination,
+    preferred_target_key,
 )
 
 
@@ -36,8 +37,30 @@ def test_3ds_exposes_existing_cia_target():
     assert [target.key for target in available_targets("3ds")] == ["native_3ds_cia"]
 
 
+def test_runtime_preference_chooses_dedicated_routes_by_default():
+    assert preferred_target_key("gba") == "open_agb_firm"
+    assert preferred_target_key("nds") == "twilight"
+    assert preferred_target_key("virtualboy") == "red_viper"
+    assert preferred_target_key("n64") == "daedalusx64"
+    assert preferred_target_key("3ds") == "native_3ds_cia"
+
+
+def test_retroachievements_preference_uses_retroarch_only_when_exposed():
+    assert preferred_target_key("gba", "retroachievements") == "retroarch"
+    assert preferred_target_key("n64", "retroachievements") == "retroarch"
+    assert preferred_target_key("nds", "retroachievements") == "twilight"
+    assert preferred_target_key("virtualboy", "retroachievements") == "red_viper"
+
+
+def test_native_preference_prefers_official_vc_when_no_dedicated_native_route_exists():
+    assert preferred_target_key("gbc", "native") == "vc_cia"
+    assert preferred_target_key("nes", "native") == "vc_cia"
+    assert preferred_target_key("famicom", "native") == "retroarch"
+
+
 def test_non_supported_platform_is_not_claimed_compatible():
     assert not compatible_platform("ps2")
+    assert preferred_target_key("ps2") is None
 
 
 def test_default_destinations_are_stable_and_explicit():
