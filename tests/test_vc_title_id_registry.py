@@ -61,6 +61,19 @@ def test_allocation_skips_explicit_reserved_target_title_id():
     assert updated["three_ds_vc"]["title_id_allocations"]["gba:default:2"] == _gba(0x223).hex()
 
 
+def test_existing_assignment_stays_stable_if_later_listed_as_reserved():
+    config, first = registry.allocate_registered_title_id({}, "gba", 2, _gba(0x222))
+    same_config, repeated = registry.allocate_registered_title_id(
+        config,
+        "gba",
+        2,
+        _gba(0x222),
+        reserved_title_ids=(first,),
+    )
+    assert repeated == first
+    assert same_config == config
+
+
 def test_classic_families_share_one_collision_pool():
     config, gb = registry.allocate_registered_title_id({}, "gb", 11, _classic(0x3456))
     config, nes = registry.allocate_registered_title_id(config, "nes", 12, _classic(0x3456))
