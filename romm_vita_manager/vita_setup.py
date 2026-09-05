@@ -23,7 +23,7 @@ from .design_tokens import DARK, brand_for_platform
 from .emulators import EMULATORS, detect_emulators
 from .package_manager import PACKAGES, download_package, inspect_package, package_path, stage_package
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
-from .vita import free_space, total_space
+from .vita import free_space, is_vita_mount, total_space
 from .vita_ftp import VitaFtpSettings
 from .vita_package_transport import stage_package_via_ftp
 
@@ -107,8 +107,10 @@ class PackageWorker(QThread):
                     raise InterruptedError(f"Staging {package.name} was cancelled.")
                 self.finished_ok.emit("stage", target)
                 return
-            if self.vita is None:
-                raise RuntimeError("No Vita USB filesystem is mounted.")
+            if self.vita is None or not is_vita_mount(self.vita):
+                raise RuntimeError(
+                    "The VitaShell USB mount is no longer available. Reconnect the Vita or choose VitaShell FTP."
+                )
             target = stage_package(
                 package,
                 self.vita,
@@ -126,7 +128,8 @@ class VitaSetupDialog(QDialog):
 
     def __init__(self, vita: Path | None, parent=None):
         super().__init__(parent)
-        self.vita = vita
+        self.vita = vita if vita is not None and is_vita_mount(vita) else None
+        vita = self.vita
         self.worker: PackageWorker | None = None
         self.action_buttons: list[QPushButton] = []
         self._pending_stage_key: str | None = None
@@ -344,7 +347,7 @@ class VitaSetupDialog(QDialog):
     def _can_stage(self) -> bool:
         if self._selected_transport() == "ftp":
             return self._ftp_settings() is not None
-        return self.vita is not None
+        return self.vita is not None and is_vita_mount(self.vita)
 
     def _transport_changed(self, _index: int | None = None) -> None:
         if self._selected_transport() == "ftp":
@@ -361,8 +364,11 @@ class VitaSetupDialog(QDialog):
                     "Configure VitaShell FTP from Device → Send file / configure FTP before staging."
                 )
         else:
-            self.device_status.set_value("USB mounted" if self.vita is not None else "Not mounted")
-            if self.vita is None:
+            usb_available = self.vita is not None and is_vita_mount(self.vita)
+            if not usb_available:
+                self.vita = None
+            self.device_status.set_value("USB mounted" if usb_available else "Not mounted")
+            if not usb_available:
                 self.storage_status.set_value("Unavailable")
                 self.activity.setText("USB selected. Mount ux0 through VitaShell before staging.")
             else:
