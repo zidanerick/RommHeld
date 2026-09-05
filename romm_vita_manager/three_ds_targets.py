@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 
 
 @dataclass(frozen=True)
@@ -185,6 +186,22 @@ def available_targets(slug: str) -> tuple[DeploymentTarget, ...]:
     return tuple(targets)
 
 
+def _payload_suffix(filename: str) -> str:
+    normalized = str(filename or "").replace("\\", "/")
+    return PurePosixPath(normalized).suffix.casefold()
+
+
+def available_targets_for_file(
+    slug: str,
+    filename: str,
+) -> tuple[DeploymentTarget, ...]:
+    """Return only targets that can consume the existing payload as supplied."""
+    targets = available_targets(slug)
+    if slug.lower() == "3ds" and _payload_suffix(filename) != ".cia":
+        return tuple(target for target in targets if target.key != "native_3ds_cia")
+    return targets
+
+
 def preferred_target_key(slug: str, preference: str = "compatibility") -> str | None:
     """Return a preferred target without inventing unsupported runtime routes."""
     key = slug.lower()
@@ -233,6 +250,13 @@ def default_destination(target_key: str, platform_slug: str, filename: str) -> s
         return f"/3ds/DaedalusX64/Roms/{safe_name}"
     if target_key == "retroarch":
         return f"/roms/{slug}/{safe_name}"
-    if target_key in {"native_gba", "native_3ds_cia", "vc_cia"}:
+    if target_key == "native_3ds_cia":
+        if _payload_suffix(safe_name) != ".cia":
+            raise ValueError(
+                "The existing Nintendo 3DS package route requires a .cia source file; "
+                f"refusing to rename {safe_name!r} into an installable CIA destination."
+            )
+        return f"/cias/{safe_name}"
+    if target_key in {"native_gba", "vc_cia"}:
         return f"/cias/{safe_name.rsplit('.', 1)[0]}.cia"
     return safe_name
