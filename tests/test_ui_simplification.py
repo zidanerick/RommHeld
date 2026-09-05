@@ -60,6 +60,13 @@ def test_local_library_filters_without_rescanning_each_keystroke() -> None:
     assert 'self.destination_label.setToolTip(str(path))' in source
 
 
+def test_vita_ftp_guidance_uses_current_device_navigation() -> None:
+    source = _source("romm_vita_manager/local_library.py")
+
+    assert "Device → Send file" in source
+    assert "Tools → Send file" not in source
+
+
 def test_romm_connection_can_be_tested_from_settings() -> None:
     source = _source("romm_vita_manager/workspace_dashboard.py")
 
