@@ -14,14 +14,16 @@ def copy_file_chunked(
 ) -> bool:
     """Copy a file in cancellable chunks without exposing a partial destination.
 
-    Data is written to a temporary sibling and moved into place only after the
-    copy completes. Cancellation or an exception removes only the temporary file,
+    Data is written to a temporary sibling, size-verified against the source
+    snapshot, and moved into place only after the copy completes. Cancellation,
+    verification failure, or another exception removes only the temporary file,
     preserving any existing destination.
     """
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(
         f".{destination.name}.rommheld-{uuid4().hex}.part"
     )
+    expected_size = source.stat().st_size
     copied = 0
     try:
         if cancel_event.is_set():
@@ -41,6 +43,10 @@ def copy_file_chunked(
 
         if cancel_event.is_set():
             return False
+        if copied != expected_size:
+            raise IOError(
+                f"Source changed while copying: expected {expected_size} bytes, copied {copied} bytes."
+            )
 
         temporary.replace(destination)
         return True
