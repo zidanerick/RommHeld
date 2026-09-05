@@ -29,13 +29,18 @@ RommHeld also has a conservative open_agb_firm configuration adapter for the cur
 
 ### Virtual Boy
 
-- Preferred dedicated 3DS route: Red Viper.
+- Preferred compatibility/native-style 3DS route: Red Viper.
 - Red Viper is a dedicated 3DS Virtual Boy emulator and supports the console's stereoscopic 3D display path.
-- RommHeld exposes the target key `red_viper` and currently uses `/roms/virtualboy/<filename>` as a conventional content destination.
-- That ROM directory is a RommHeld convention, not Red Viper installation evidence. Red Viper can browse ROMs from other SD locations.
+- RommHeld exposes `red_viper` and RetroArch as separate Virtual Boy targets while keeping `red_viper` as the normal compatibility and native preference.
+- The current official 3DS RetroArch recipe builds `mednafen_vb`, the Beetle VB core. RommHeld therefore exposes RetroArch as a real alternate route rather than treating Virtual Boy as dedicated-only.
+- RetroAchievements currently supports Beetle VB, so the 3DS `retroachievements` preference selects the RetroArch route for Virtual Boy.
+- Both routes use `/roms/virtualboy/<filename>` as RommHeld's conventional content destination; changing runtime must not change transport semantics.
+- That ROM directory is content evidence only. It must not prove that Red Viper, RetroArch, or the Beetle VB core is installed.
 - Red Viper's single-file 3DSX release is eligible for controlled mounted-SD staging. A CIA-installed copy can exist without a detectable SD-side application marker, so absence is reported as needing on-console confirmation rather than definite absence.
-- DSP firmware remains a recommended troubleshooting prerequisite for this route and must be generated from the user's own console.
+- RetroArch readiness checks specifically for `mednafen_vb_libretro.3dsx` or CIA package evidence instead of accepting a generic RetroArch directory as proof that the Virtual Boy route is usable.
+- DSP firmware remains a recommended troubleshooting prerequisite for the Red Viper route and must be generated from the user's own console.
 - Red Viper configuration remains owned by the emulator itself for now.
+- Beetle VB performance, input behavior, audio, save behavior, and RetroAchievements operation on real 3DS hardware remain unvalidated. Exposing the route is not a hardware-performance claim.
 
 ### N64
 
@@ -51,8 +56,9 @@ RommHeld also has a conservative open_agb_firm configuration adapter for the cur
 ### SNES
 
 - RommHeld exposes both Nintendo VC packaging and RetroArch as ordinary runtime choices where appropriate.
-- The current official 3DS RetroArch build publishes `snes9x2002`, `snes9x2005`, `snes9x2005_plus`, and `snes9x2010` cores, but not current mainline Snes9x.
-- RetroAchievements currently lists those older Snes9x variants as unsupported/problematic for achievements. Therefore `retroachievements` preference does **not** recommend RetroArch for SNES on 3DS today.
+- The current official 3DS RetroArch recipe builds `snes9x2002`, `snes9x2005`, `snes9x2005_plus`, `snes9x2010`, and `chimerasnes`, but not current mainline Snes9x.
+- RetroAchievements currently lists the older Snes9x 2002/2005/2005+/2010 variants as unsupported/problematic for achievements. Therefore `retroachievements` preference does **not** recommend RetroArch for SNES on 3DS today.
+- ChimeraSNES is retained as current core evidence, but RommHeld does not promote it to an achievement-capable recommendation without independent RetroAchievements support evidence.
 - When the Nintendo VC route is available, SNES `retroachievements` preference currently falls back to `vc_cia` rather than claiming achievements will work through an unsuitable RetroArch core.
 - This is intentionally capability-driven and should be revisited if the official 3DS core bundle changes.
 
@@ -71,15 +77,18 @@ RommHeld also has a conservative open_agb_firm configuration adapter for the cur
 
 ### Sega 8/16-bit and Sega CD
 
-- Current 3DS RetroArch builds contain audited candidates including Genesis Plus GX, PicoDrive, Gearsystem, SMS Plus GX, and ClownMDEmu depending on platform.
+- Current official 3DS RetroArch recipe candidates include Genesis Plus GX, PicoDrive, SMS Plus GX, and ClownMDEmu depending on platform.
 - Game Gear, Master System, Genesis/Mega Drive, 32X, and Sega/Mega CD can therefore use platform-specific RetroArch routes where the matching current 3DS core is available.
+- Historical/generic core metadata is not enough to expose a route. For example, Gearsystem is not treated as current 3DS core evidence when it is absent from the current official 3DS recipe.
 - Sega/Mega CD requires a user-provided BIOS matching the game's region. For Genesis Plus GX the documented names include `bios_CD_U.bin`, `bios_CD_E.bin`, and `bios_CD_J.bin`.
 - As with FDS, RommHeld checks required BIOS only when the configured RetroArch System/BIOS directory is explicit. It never downloads BIOS files.
 
 ### Other RetroArch systems
 
 - A platform being supported by RetroArch in general is not enough to make it a RommHeld 3DS recommendation.
-- RommHeld may expose a general RetroArch route only where a current 3DS core exists; RetroAchievements preference is narrower again and requires an audited achievement-capable core.
+- RommHeld may expose a general RetroArch route only where a current official 3DS core recipe entry exists; RetroAchievements preference is narrower again and requires an audited achievement-capable core.
+- The runtime profile set is regression-tested against the exposed RetroArch platform set so a new target cannot silently appear without an evidence profile.
+- Amiga and the ScummVM libretro core are not exposed as 3DS RetroArch routes because they are absent from the current official 3DS core recipe. A separate standalone 3DS application route, if added later, must use its own runtime and deployment model rather than masquerading as RetroArch.
 - Arcade remains core-specific because compatibility and achievement support vary materially by core.
 
 ## Runtime preference policy
@@ -100,9 +109,9 @@ Current compatibility defaults are:
 | N64 | `daedalusx64` |
 | Nintendo 3DS | `native_3ds_cia` |
 
-Current conservative RetroAchievements-to-RetroArch recommendations include GBA, GB/GBC, NES/Famicom/FDS, Game Gear, Master System, Genesis/Mega Drive, 32X, and Sega/Mega CD. SNES and N64 are deliberately excluded for the current 3DS core bundle.
+Current conservative RetroAchievements-to-RetroArch recommendations include GBA, GB/GBC, NES/Famicom/FDS, Game Gear, Master System, Genesis/Mega Drive, 32X, Sega/Mega CD, and Virtual Boy through Beetle VB. SNES and N64 are deliberately excluded for the current 3DS core bundle.
 
-Per-title target selection remains available where multiple routes are exposed.
+Per-title target selection remains available where multiple routes are exposed. For Virtual Boy, selecting `retroachievements` chooses RetroArch while compatibility/native preferences continue to choose Red Viper.
 
 ## 3DS RetroAchievements policy
 
@@ -113,7 +122,7 @@ For each target RommHeld should be able to represent:
 - `ra_support`: none / experimental / softcore / hardcore / unverified
 - `runtime_type`: native / emulator / hybrid
 - `frontend`: e.g. RetroArch or TWiLight Menu++
-- `core_or_loader`: e.g. mGBA, FCEUmm, Genesis Plus GX, or nds-bootstrap
+- `core_or_loader`: e.g. mGBA, FCEUmm, Beetle VB, Genesis Plus GX, or nds-bootstrap
 - `storage_profile`
 - `recommended_route`
 
@@ -135,6 +144,8 @@ For RetroArch it distinguishes:
 - required firmware unverified when RetroArch's System/BIOS directory cannot be resolved safely.
 
 Core scanning respects an explicit `libretro_directory` in `retroarch.cfg`; otherwise it uses the documented 3DS bundle location `/RetroArch/Cores`. The optional `Cores-Notused` convention is treated as inactive rather than ready.
+
+The audited profile inventory covers every RetroArch platform RommHeld currently exposes on 3DS, including the dedicated-plus-RetroArch Virtual Boy case. Core existence in the official 3DS recipe establishes route availability, while RetroAchievements recommendation remains a separately audited property.
 
 For TWiLight the detail scanner separately records TWiLight assets, nds-bootstrap, and `BOOT.NDS`, while readiness requires the first two together.
 
@@ -272,6 +283,8 @@ Unit-tested/backend implemented:
 - dedicated 3DS target exposure and destination mapping;
 - persisted runtime preference policy;
 - conservative RetroAchievements route gating;
+- current official 3DS RetroArch recipe gating and one-to-one exposed-target/core-profile coverage;
+- dual Virtual Boy routing with Red Viper as compatibility/native default and Beetle VB/RetroArch for the audited RetroAchievements preference;
 - RomM inclusion of dedicated-runtime platforms such as NDS and N64 without inventing unavailable RetroArch targets;
 - conservative runtime/homebrew marker detection;
 - coherent TWiLight/nds-bootstrap detection;
@@ -286,13 +299,14 @@ Desktop GUI validation still required:
 - `OpenAgbSettingsDialog` rendering and save flow;
 - 3DS Device/Setup readiness presentation with the tightened evidence rules;
 - Settings persistence and the 3DS RetroAchievements preference control;
-- 3DS Manager default target selection after preference changes.
+- 3DS Manager default target selection after preference changes, including Red Viper versus RetroArch on Virtual Boy.
 
 Real-device validation still required:
 
 - direct open_agb_firm ROM transfer, launch, save and relaunch;
 - TWiLight NDS transfer, launch, save and relaunch;
 - Red Viper staging/launch/3D/save behavior;
+- Virtual Boy RetroArch/Beetle VB launch, performance, input, audio, save behavior and RetroAchievements operation on real 3DS hardware;
 - DaedalusX64 destination and selected-title launch behavior, including DSP-firmware troubleshooting path;
 - RetroArch content path/core behavior and RetroAchievements preference behavior on audited current cores;
 - FDS and Sega CD required-BIOS handling with user-owned BIOS files;
