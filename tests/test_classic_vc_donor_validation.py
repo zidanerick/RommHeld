@@ -34,6 +34,21 @@ def _payload(monkeypatch: pytest.MonkeyPatch, data: bytes, path: str = "/rom/TES
     )
 
 
+def test_donor_patch_names_only_capture_root_level_game_patch_files() -> None:
+    files = {
+        "/rom/TEST.rom": b"rom",
+        "/TEST.rom.patch": b"game patch",
+        "/OTHER.PATCH": b"second patch",
+        "/rom/not-runtime.patch": b"nested",
+        "/notes.txt": b"notes",
+    }
+
+    assert donor_validation.donor_patch_names_from_files(files) == (
+        "OTHER.PATCH",
+        "TEST.rom.patch",
+    )
+
+
 def test_nes_donor_requires_tnes_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     _payload(monkeypatch, _gb_rom(cgb_flag=0))
     with pytest.raises(ValueError, match="TNES runtime"):
