@@ -67,6 +67,15 @@ def test_manager_disables_deployment_without_a_safe_target():
     assert "This file format does not have a supported Nintendo 3DS deployment route" in source
 
 
+def test_manager_ftp_save_preserves_independently_owned_3ds_fields_in_memory():
+    source = MANAGER_PATH.read_text(encoding="utf-8")
+
+    assert 'device = dict(devices.get("3ds", {}))' in source
+    assert 'device.update(' in source
+    assert 'devices["3ds"] = device' in source
+    assert 'devices["3ds"] = {' not in source
+
+
 def test_manager_routes_all_implemented_romm_vc_families_to_package_dialogs():
     source = MANAGER_PATH.read_text(encoding="utf-8")
 
