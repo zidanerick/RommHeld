@@ -63,7 +63,7 @@ DAEDALUSX64 = DeploymentTarget(
 RETROARCH = DeploymentTarget(
     "retroarch",
     "RetroArch ROM",
-    "Copy the original ROM into the configured 3DS RetroArch ROM tree.",
+    "Copy the original ROM into the shared 3DS ROM tree for use with the selected RetroArch core. RetroArch content does not need to live inside /RetroArch.",
     "retroarch",
 )
 
@@ -202,7 +202,7 @@ def default_destination(target_key: str, platform_slug: str, filename: str) -> s
     if target_key == "daedalusx64":
         return f"/3ds/DaedalusX64/Roms/{safe_name}"
     if target_key == "retroarch":
-        return f"/RetroArch/roms/{slug}/{safe_name}"
+        return f"/roms/{slug}/{safe_name}"
     if target_key in {"native_gba", "native_3ds_cia", "vc_cia"}:
         return f"/cias/{safe_name.rsplit('.', 1)[0]}.cia"
     return safe_name
