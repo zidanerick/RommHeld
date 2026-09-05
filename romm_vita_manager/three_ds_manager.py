@@ -93,6 +93,7 @@ class ThreeDSTransferWorker(QThread):
         remote_game=None,
         romm_url="",
         romm_token="",
+        overwrite: bool = False,
     ):
         super().__init__()
         self.settings = settings
@@ -101,6 +102,7 @@ class ThreeDSTransferWorker(QThread):
         self.remote_game = remote_game
         self.romm_url = romm_url
         self.romm_token = romm_token
+        self.overwrite = overwrite
         self.cancel_event = threading.Event()
         self.backend: ThreeDSFtpBackend | None = None
         self._temporary_path: Path | None = None
@@ -132,14 +134,47 @@ class ThreeDSTransferWorker(QThread):
 
     def run(self) -> None:
         try:
-            source = self._resolve_source()
-            name = self.remote_game.name if self.remote_game else source.name
-            self.status_changed.emit(f"Uploading {name} to the Nintendo 3DS…")
+            if self.cancel_event.is_set():
+                self.completed.emit("cancelled")
+                return
+
+            source = None
+            if self.remote_game is not None:
+                expected_size = int(self.remote_game.size)
+                name = self.remote_game.name
+            else:
+                source = self._resolve_source()
+                expected_size = source.stat().st_size
+                name = source.name
+
+            self.status_changed.emit(f"Checking {name} on the Nintendo 3DS…")
             self.backend = ThreeDSFtpBackend(self.settings)
             self.backend.connect()
+            remote_size = self.backend.remote_size(self.destination)
+            if remote_size == expected_size:
+                self.completed.emit("skipped")
+                return
+            if remote_size is not None and not self.overwrite:
+                self.completed.emit("different")
+                return
+            if self.cancel_event.is_set():
+                self.completed.emit("cancelled")
+                return
+
+            if source is None:
+                source = self._resolve_source()
+                if source.stat().st_size != expected_size:
+                    raise IOError(
+                        f"RomM download size mismatch for {name}: expected {expected_size} bytes, got {source.stat().st_size}."
+                    )
+
+            self.status_changed.emit(
+                f"Uploading {name} to a verified staging file on the Nintendo 3DS…"
+            )
             result, _ = self.backend.upload(
                 source,
                 self.destination,
+                overwrite=self.overwrite,
                 cancel_event=self.cancel_event,
                 progress=self.progress.emit,
             )
@@ -171,6 +206,7 @@ class ThreeDSManagerDialog(QDialog):
         self._connected = False
         self._games: list[object] = []
         self._closing_requested = False
+        self._last_transfer_result: str | None = None
 
         self.setWindowTitle("Nintendo 3DS Manager")
         self.resize(1180, 780)
@@ -661,6 +697,7 @@ class ThreeDSManagerDialog(QDialog):
         self.cancel_button.setEnabled(bool(self.worker and self.worker.isRunning()))
         self.cancel_button.setVisible(bool(self.worker and self.worker.isRunning()))
         self.progress.setVisible(bool(self.worker and self.worker.isRunning()))
+        self.game_list.setEnabled(not ftp_busy and not library_busy)
         for widget in (
             self.host_edit,
             self.port_edit,
@@ -673,7 +710,7 @@ class ThreeDSManagerDialog(QDialog):
         self.destination_edit.setEnabled(not ftp_busy and not library_busy)
         self.target_combo.setEnabled(selected and not ftp_busy and not library_busy)
 
-    def send_selected(self) -> None:
+    def send_selected(self, _checked: bool = False, *, overwrite: bool = False) -> None:
         selected = self._selected_game()
         if selected is None:
             return
@@ -721,8 +758,13 @@ class ThreeDSManagerDialog(QDialog):
             QMessageBox.warning(self, "Invalid FTP settings", str(exc))
             return
 
+        self._last_transfer_result = None
         self.progress.setValue(0)
-        self.status.setText(f"Preparing {selected.name}…")
+        self.status.setText(
+            f"Preparing verified replacement for {selected.name}…"
+            if overwrite
+            else f"Checking destination for {selected.name}…"
+        )
         self.worker = ThreeDSTransferWorker(
             settings,
             source,
@@ -730,6 +772,7 @@ class ThreeDSManagerDialog(QDialog):
             remote_game=remote_game,
             romm_url=self.library_source.romm_url,
             romm_token=self.library_source.api_token,
+            overwrite=overwrite,
         )
         self.worker.status_changed.connect(self.status.setText)
         self.worker.progress.connect(self.worker_progress)
@@ -753,24 +796,45 @@ class ThreeDSManagerDialog(QDialog):
         self.progress.setValue(int(done * 100 / total) if total else 100)
 
     def worker_completed(self, result: str) -> None:
+        self._last_transfer_result = result
         self.status.setText(
             {
-                "copied": "Upload complete and size verified.",
-                "resumed": "Partial upload resumed and size verified.",
-                "skipped": "The 3DS already has the same-size file; nothing was overwritten.",
-                "different": "A different-size file already exists on the 3DS. Nothing was overwritten.",
-                "cancelled": "Transfer cancelled.",
+                "copied": "Upload complete. The staged file and final destination were size verified.",
+                "resumed": "Matching partial RommHeld stage resumed, verified, and moved into place.",
+                "skipped": "The 3DS already has the same-size file; no download or overwrite was needed.",
+                "different": "A different-size file already exists on the 3DS. Nothing was changed.",
+                "cancelled": "Transfer cancelled. The destination was preserved; a matching partial stage may be reused on retry.",
             }.get(result, result)
         )
-        if result == "different":
-            QMessageBox.warning(self, "3DS file already exists", self.status.text())
 
     def worker_failed(self, message: str) -> None:
-        self.status.setText(f"Transfer failed: {message}")
+        self._last_transfer_result = None
+        self.status.setText(
+            "Transfer failed. The existing destination was preserved where replacement had begun. "
+            f"{message}"
+        )
 
     def _worker_finished(self) -> None:
+        result = self._last_transfer_result
         self.worker = None
         self.progress.setVisible(False)
+        if self._closing_requested:
+            self._update_controls()
+            self._maybe_finish_close()
+            return
+
+        if result == "different":
+            answer = QMessageBox.question(
+                self,
+                "Replace existing 3DS file?",
+                "The destination contains a different-size file. Replace it? RommHeld will upload into a separate staging file, verify that upload, and keep the existing destination until the replacement is ready to be swapped into place.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                self.send_selected(overwrite=True)
+                return
+
         self._update_controls()
         self._maybe_finish_close()
 
