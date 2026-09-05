@@ -86,23 +86,63 @@ class TargetRuntimePreflight:
     note: str
 
 
+def _retroarch_target_preflight(
+    root: Path,
+    platform_slug: str,
+) -> TargetRuntimePreflight:
+    from .three_ds_runtime_details import scan_retroarch_route
+
+    definition = APP_BY_KEY["retroarch"]
+    route = scan_retroarch_route(root, platform_slug)
+    if route.state == "launchable_sd_core_detected":
+        return TargetRuntimePreflight(
+            "retroarch",
+            "retroarch",
+            definition.name,
+            "detected",
+            route.note,
+        )
+    if route.state == "missing_firmware":
+        return TargetRuntimePreflight(
+            "retroarch",
+            "retroarch",
+            definition.name,
+            "missing",
+            route.note,
+        )
+    return TargetRuntimePreflight(
+        "retroarch",
+        "retroarch",
+        definition.name,
+        "confirm_on_console",
+        route.note,
+    )
+
+
 def evaluate_target_runtime(
     root: Path,
     target_key: str,
+    platform_slug: str | None = None,
 ) -> TargetRuntimePreflight | None:
     """Summarize SD-visible readiness for the runtime required by a target.
 
     This is deliberately non-blocking. Some runtimes can be installed as CIA
     titles without leaving a reliable SD marker, so absence can mean either a
-    definite missing runtime or a console-confirmation state.
+    definite missing runtime or a console-confirmation state. RetroArch is
+    platform-aware when the caller supplies a slug so a stale frontend folder
+    is not mistaken for a usable core route.
     """
     normalized_target = str(target_key).strip()
     app_key = TARGET_RUNTIME_APPS.get(normalized_target)
     if app_key is None:
         return None
 
+    root = root.expanduser()
+    if normalized_target == "retroarch" and platform_slug:
+        return _retroarch_target_preflight(root, str(platform_slug).casefold())
+
     definition = APP_BY_KEY[app_key]
-    status = detect_three_ds_app(root.expanduser(), definition)
+    status = detect_three_ds_app(root, definition)
     if status.detected:
         return TargetRuntimePreflight(
             normalized_target,
