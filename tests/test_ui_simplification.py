@@ -46,6 +46,20 @@ def test_vita_copy_primary_action_lives_with_library_selection() -> None:
     assert 'self.transfer_status.setText(f"Transfer complete' in source
 
 
+def test_local_library_filters_without_rescanning_each_keystroke() -> None:
+    source = _source("romm_vita_manager/local_library.py")
+
+    assert 'self.search.textChanged.connect(self._apply_filters)' in source
+    assert 'self.platforms.currentIndexChanged.connect(self._apply_filters)' in source
+    assert 'self.status_filter.currentIndexChanged.connect(self._apply_filters)' in source
+    assert 'self.refresh_button.clicked.connect(self.refresh_library)' in source
+    assert 'def _apply_filters(self) -> None:' in source
+    assert 'self.games = list(scan_games(root))' in source
+    assert 'STATUS_LABELS = {' in source
+    assert 'self.source_label.setToolTip(str(self._library_root))' in source
+    assert 'self.destination_label.setToolTip(str(path))' in source
+
+
 def test_romm_connection_can_be_tested_from_settings() -> None:
     source = _source("romm_vita_manager/workspace_dashboard.py")
 
