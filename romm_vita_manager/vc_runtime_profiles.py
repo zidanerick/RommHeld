@@ -118,6 +118,19 @@ def _profile_id(family: str, parts: tuple[str, ...]) -> str:
     return digest.hexdigest()[:16]
 
 
+def _clean_build_label(value: str) -> str:
+    return " ".join(str(value).replace("\x00", " ").split())[:80]
+
+
+def _validated_optional_sha256(value: str, label: str) -> str:
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return ""
+    if len(normalized) != 64 or any(ch not in "0123456789abcdef" for ch in normalized):
+        raise ValueError(f"{label} SHA-256 must contain exactly 64 hexadecimal digits.")
+    return normalized
+
+
 def build_classic_runtime_profile(
     family: str,
     donor_info: dict,
@@ -129,12 +142,16 @@ def build_classic_runtime_profile(
     donor_banner: bytes | None = None,
     donor_icon: bytes | None = None,
     logo: bytes | None = None,
+    emulator_build: str = "",
+    config_ini_sha256: str = "",
 ) -> dict:
     guidance = guidance_for_family(family)
     code_hash = _sha256(code)
     exheader_hash = _sha256(exheader)
     romfs_hash = _sha256(romfs_template)
     donor_title_id = str(donor_info.get("title_id", "")).strip().lower()
+    build_label = _clean_build_label(emulator_build)
+    config_hash = _validated_optional_sha256(config_ini_sha256, "Classic VC config.ini")
     profile_id = _profile_id(
         guidance.family,
         (code_hash, exheader_hash, rom_path, romfs_hash),
@@ -160,6 +177,10 @@ def build_classic_runtime_profile(
         profile["donor_icon_sha256"] = _sha256(donor_icon)
     if logo is not None:
         profile["logo_sha256"] = _sha256(logo)
+    if build_label:
+        profile["emulator_build"] = build_label
+    if config_hash:
+        profile["config_ini_sha256"] = config_hash
     return profile
 
 
@@ -283,7 +304,36 @@ def runtime_guidance_summary(config: dict, family: str) -> str:
     ).strip().lower() or guidance.classification
     status = classification.replace("-", " ")
     profile_id = str(profile.get("profile_id", "")).strip()
-    prefix = f"Cached profile: {status}"
+    build_label = _clean_build_label(str(profile.get("emulator_build", "")))
+    identifiers: list[str] = []
+    if build_label:
+        identifiers.append(f"build {build_label}")
     if profile_id:
-        prefix += f" • {profile_id}"
+        identifiers.append(profile_id)
+    prefix = f"Cached profile: {status}"
+    if identifiers:
+        prefix += " • " + " • ".join(identifiers)
     return f"{prefix}. {guidance.recommendation}"
+
+
+def runtime_guidance_details(config: dict, family: str) -> tuple[str, ...]:
+    """Return donor-policy details plus safe cached profile identifiers."""
+    guidance = guidance_for_family(family)
+    details = list(guidance.details)
+    profile = configured_runtime_profile(config, family)
+    if profile is None:
+        return tuple(details)
+
+    profile_id = str(profile.get("profile_id", "")).strip()
+    donor_title_id = str(profile.get("donor_title_id", "")).strip().upper()
+    build_label = _clean_build_label(str(profile.get("emulator_build", "")))
+    config_hash = str(profile.get("config_ini_sha256", "")).strip().lower()
+    if profile_id:
+        details.append(f"Runtime profile ID: {profile_id}")
+    if donor_title_id:
+        details.append(f"Donor Title ID: {donor_title_id}")
+    if build_label:
+        details.append(f"Emulator build: {build_label}")
+    if config_hash:
+        details.append(f"config.ini SHA-256: {config_hash}")
+    return tuple(details)
