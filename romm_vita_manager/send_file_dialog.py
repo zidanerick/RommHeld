@@ -127,7 +127,7 @@ class SendFileDialog(QDialog):
         self.status = QLabel(
             "Choose a file and an explicit Vita destination."
             if vita is not None
-            else "Connect the Vita in VitaShell USB mode before starting a transfer."
+            else "Open VitaShell, press START, set SELECT button to USB, close Settings, press SELECT, then connect the Vita with a USB data cable."
         )
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
