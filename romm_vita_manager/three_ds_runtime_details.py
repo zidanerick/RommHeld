@@ -42,15 +42,17 @@ class RetroArchRouteStatus:
             return "frontend_not_detected"
         if self.profile is None:
             return "profile_unverified"
+        if not self.active_core_files:
+            if self.inactive_core_files:
+                return "core_staged_inactive"
+            return "confirm_core_on_console"
+        if self.profile.firmware and self.system_directory is None:
+            return "firmware_unverified"
         if self.missing_firmware:
             return "missing_firmware"
         if any(path.suffix.casefold() == ".3dsx" for path in self.active_core_files):
             return "launchable_sd_core_detected"
-        if self.active_core_files:
-            return "core_installer_evidence"
-        if self.inactive_core_files:
-            return "core_staged_inactive"
-        return "confirm_core_on_console"
+        return "core_installer_evidence"
 
     @property
     def note(self) -> str:
@@ -58,16 +60,19 @@ class RetroArchRouteStatus:
             return "RetroArch SD-side frontend evidence was not found."
         if self.state == "profile_unverified":
             return "RetroArch is present, but RommHeld has no audited 3DS core profile for this platform."
+        if self.state == "core_staged_inactive":
+            return "A matching core package exists only in the inactive core directory."
+        if self.state == "confirm_core_on_console":
+            return "No matching core package is visible on SD. A CIA-installed core may still be present, so confirm on the console."
+        if self.state == "firmware_unverified":
+            names = ", ".join(req.description for req in self.profile.firmware) if self.profile else "required firmware"
+            return f"A matching core is present, but RetroArch's System/BIOS directory is not explicit, so RommHeld cannot verify {names}."
         if self.state == "missing_firmware":
             names = ", ".join(req.description for req in self.missing_firmware)
             return f"A matching core is present, but required firmware is missing: {names}."
         if self.state == "launchable_sd_core_detected":
             return "A matching 3DSX core executable is present in the active RetroArch core directory."
-        if self.state == "core_installer_evidence":
-            return "A matching CIA core package is present. Confirm on the console that the core title is installed."
-        if self.state == "core_staged_inactive":
-            return "A matching core package exists only in the inactive core directory."
-        return "No matching core package is visible on SD. A CIA-installed core may still be present, so confirm on the console."
+        return "A matching CIA core package is present. Confirm on the console that the core title is installed."
 
 
 @dataclass(frozen=True)
@@ -223,11 +228,9 @@ def _firmware_status(
     root: Path,
     requirements: tuple[FirmwareRequirement, ...],
 ) -> tuple[Path | None, tuple[str, ...], tuple[FirmwareRequirement, ...]]:
-    if not requirements:
-        return _resolve_config_path(root, _config_value(root, "system_directory")), (), ()
     system_directory = _resolve_config_path(root, _config_value(root, "system_directory"))
-    if system_directory is None:
-        return None, (), ()
+    if not requirements or system_directory is None:
+        return system_directory, (), ()
 
     found: list[str] = []
     missing: list[FirmwareRequirement] = []
