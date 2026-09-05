@@ -21,6 +21,7 @@ from .design_tokens import DARK, brand_for_platform
 from .file_transfer import transfer_file
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 from .vita import free_space
+from .vita_paths import vita_target
 
 
 PLAYSTATION_BLUE = brand_for_platform("vita").accent
@@ -33,23 +34,6 @@ def human_size(value: int) -> str:
             return f"{n:.1f} {unit}"
         n /= 1024
     return f"{value} B"
-
-
-def vita_target(vita: Path, remote_path: str) -> Path:
-    raw = remote_path.strip().replace("\\", "/")
-    if raw.startswith("ux0:/"):
-        raw = raw.removeprefix("ux0:/")
-    elif raw == "ux0":
-        raw = ""
-    elif raw.startswith("ux0/"):
-        raw = raw.removeprefix("ux0/")
-    base = (vita / "ux0").resolve()
-    target = (base / Path(raw)).resolve()
-    try:
-        target.relative_to(base)
-    except ValueError as exc:
-        raise ValueError("Destination must remain inside the Vita ux0 filesystem.") from exc
-    return target
 
 
 class SendFileWorker(QThread):
