@@ -83,7 +83,10 @@ class StatusPill(QFrame):
 
 class AccentButton(QPushButton):
     def __init__(self, text: str, accent: str, parent: QWidget | None = None):
-        super().__init__(text, parent)
+        # Qt treats a single ampersand in button text as a mnemonic marker.
+        # RommHeld uses explicit keyboard focus rather than Alt-key mnemonics,
+        # so display product copy literally (for example, "Readiness & Runtimes").
+        super().__init__(text.replace("&", "&&"), parent)
         self._accent = accent
         self._emphasized = True
         self.setCursor(Qt.CursorShape.PointingHandCursor)
