@@ -339,7 +339,7 @@ Expected:
 - there is no `QThread: Destroyed while thread is still running` warning or abort
 - closing is blocked while the current package worker is active
 
-The package backend supports cancellation events for downloads and USB staging, and FTP staging already uses the same cancellation event. A user-facing Vita Setup cancellation control is still required before Setup cancellation can be marked desktop/device validated.
+Vita Setup exposes a user-facing cancellation control for downloads and USB/FTP staging. While a package worker is active, Done/accept, Escape/reject and the window close action must all keep the dialog alive until the current worker has finished cancelling or completed normally.
 
 ## 5. Worker and application lifecycle
 
@@ -348,7 +348,9 @@ Run these after transfers work normally:
 - cancel an active USB transfer
 - cancel an active FTP transfer
 - attempt to close Send File while a transfer is active
+- press Escape in Send File while a transfer is active
 - attempt to close Vita Setup during package download/staging
+- press Escape in Vita Setup during package download/staging
 - stage a package immediately after download using both transports
 - switch away from and back to the Vita workspace repeatedly
 - disconnect USB while the app is open, then reconnect and refresh
@@ -381,6 +383,7 @@ Record physical-device results here when executed. Do not mark a route validated
 | Vita Setup package USB staging | covered | pending | pending | Install/launch requires device |
 | Vita Setup package FTP staging | covered | pending | pending | PSTV-capable path |
 | RetroArch VPK/data readiness | covered | pending | pending | 1.22.2; archive remains review-only |
-| Package cancellation backend | covered | pending | pending | Setup user-facing cancel control still pending |
+| Package cancellation UI/backend | covered | pending | pending | Download and USB/FTP staging cancellation exposed |
 | Download-to-stage worker handoff | covered | pending | pending | Must fully finish old QThread first |
+| Dialog dismissal during worker | covered | pending | pending | Done, Escape and window close must preserve live worker ownership |
 | Lifecycle/shutdown | partial | pending | pending | Exercise worker close/reconnect cases |
