@@ -52,14 +52,14 @@ COMPONENTS = (
         "fbi",
         "FBI",
         "3DS title manager and installer. SD evidence can show a homebrew 3DSX or theme directory; an installed CIA title cannot be reliably inferred from SD files alone.",
-        ("fbi/theme", "3ds/FBI/FBI.3dsx", "3ds/fbi/fbi.3dsx", "FBI.3dsx", "FBI.cia"),
+        ("fbi/theme", "3ds/FBI/FBI.3dsx", "3ds/fbi/fbi.3dsx", "FBI.3dsx"),
         "https://github.com/Steveice10/FBI/releases",
     ),
     SetupComponent(
         "universal-updater",
         "Universal-Updater",
         "3DS homebrew updater and software catalogue.",
-        ("3ds/Universal-Updater.3dsx", "3ds/Universal-Updater/Universal-Updater.3dsx", "Universal-Updater.cia"),
+        ("3ds/Universal-Updater.3dsx", "3ds/Universal-Updater/Universal-Updater.3dsx"),
         "https://github.com/Universal-Team/Universal-Updater/releases",
     ),
     SetupComponent(
