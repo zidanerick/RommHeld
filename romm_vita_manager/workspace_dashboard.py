@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QThread, Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFileDialog,
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 from .send_file_dialog import SendFileDialog
 from .classic_vc_deploy import ClassicVcDeployDialog
 from .config import load_config, save_config
-from .console_selector import PlatformSelectorDialog
+from .console_selector import PlatformSelectorDialog, RomMConnectionWorker
 from .design_tokens import DARK
 from .gba_vc_deploy import GbaVcDeployDialog
 from .library_sources import LibrarySource, get_library_source, save_library_source
@@ -56,6 +56,8 @@ class WorkspaceDashboardWindow(QMainWindow):
 
         self.vita: Path | None = None
         self.three_ds_library: ThreeDSLibraryWidget | None = None
+        self._settings_romm_thread: QThread | None = None
+        self._settings_romm_worker: RomMConnectionWorker | None = None
         self.local_library = LocalLibraryWidget(
             self.config,
             self.workspace_key if self.workspace_key != "3ds" else "vita",
@@ -294,33 +296,128 @@ class WorkspaceDashboardWindow(QMainWindow):
         form.addRow("Client API Token", self.settings_token_edit)
         source_card.content.addLayout(form)
 
-        save = AccentButton(
+        self.settings_source_status = QLabel()
+        self.settings_source_status.setWordWrap(True)
+        source_card.content.addWidget(self.settings_source_status)
+
+        self.settings_test_button = QPushButton("Test connection")
+        self.settings_test_button.clicked.connect(self._test_settings_romm)
+        self.settings_save_button = AccentButton(
             "Save library settings", WORKSPACE_PROFILES[self.workspace_key].accent
         )
-        save.clicked.connect(self._save_settings_source)
+        self.settings_save_button.clicked.connect(self._save_settings_source)
         save_row = QHBoxLayout()
+        save_row.addWidget(self.settings_test_button)
         save_row.addStretch()
-        save_row.addWidget(save)
+        save_row.addWidget(self.settings_save_button)
         source_card.content.addLayout(save_row)
 
         layout.addWidget(source_card)
         layout.addWidget(self._runtime_preference_box())
         layout.addWidget(
             self._secondary(
-                "RomM connection testing is available from the handheld selector. Credentials are currently stored in local application configuration until secure credential-store migration is implemented."
+                "Credentials are currently stored in local application configuration until secure credential-store migration is implemented."
             )
         )
         layout.addStretch(1)
 
-        self._settings_source_visibility()
         self.settings_local_radio.toggled.connect(self._settings_source_visibility)
+        self.settings_url_edit.textChanged.connect(self._settings_source_changed)
+        self.settings_token_edit.textChanged.connect(self._settings_source_changed)
+        self._settings_source_visibility()
         return page
+
+    def _set_settings_source_state(self, state: str, text: str) -> None:
+        colors = {
+            "success": DARK.success,
+            "error": DARK.error,
+            "busy": DARK.warning,
+            "neutral": DARK.text_secondary,
+        }
+        self.settings_source_status.setText(text)
+        self.settings_source_status.setStyleSheet(
+            f"color:{colors.get(state, DARK.text_secondary)};font-size:10px;"
+        )
+
+    def _settings_source_changed(self) -> None:
+        if self.settings_romm_radio.isChecked() and not self._settings_test_running():
+            self._set_settings_source_state(
+                "neutral",
+                "Test the RomM connection before saving if these credentials changed.",
+            )
+
+    def _settings_test_running(self) -> bool:
+        return bool(self._settings_romm_thread and self._settings_romm_thread.isRunning())
 
     def _settings_source_visibility(self) -> None:
         local = self.settings_local_radio.isChecked()
-        self.settings_local_edit.setEnabled(local)
-        self.settings_url_edit.setEnabled(not local)
-        self.settings_token_edit.setEnabled(not local)
+        testing = self._settings_test_running()
+        self.settings_local_edit.setEnabled(local and not testing)
+        self.settings_url_edit.setEnabled(not local and not testing)
+        self.settings_token_edit.setEnabled(not local and not testing)
+        self.settings_test_button.setVisible(not local)
+        self.settings_test_button.setEnabled(not local and not testing)
+        self.settings_save_button.setEnabled(not testing)
+        if testing:
+            self.settings_test_button.setText("Testing…")
+            self._set_settings_source_state("busy", "Testing RomM connection…")
+        else:
+            self.settings_test_button.setText("Test connection")
+            if local:
+                root = Path(self.settings_local_edit.text()).expanduser()
+                self._set_settings_source_state(
+                    "success" if root.is_dir() else "neutral",
+                    "Local library ready" if root.is_dir() else "Choose an existing ROM directory",
+                )
+            elif not self.settings_source_status.text():
+                self._set_settings_source_state(
+                    "neutral",
+                    "Test the RomM connection before saving if these credentials changed.",
+                )
+
+    def _test_settings_romm(self) -> None:
+        if self._settings_test_running():
+            return
+        url = self.settings_url_edit.text().strip()
+        token = self.settings_token_edit.text().strip()
+        if not url or not token:
+            self._set_settings_source_state(
+                "error",
+                "Enter the RomM server URL and Client API Token first.",
+            )
+            return
+        try:
+            normalized = normalize_romm_url(url)
+        except ValueError as exc:
+            self._set_settings_source_state("error", str(exc))
+            return
+        self.settings_url_edit.setText(normalized)
+
+        thread = QThread(self)
+        worker = RomMConnectionWorker(normalized, token)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.succeeded.connect(self._settings_romm_test_succeeded)
+        worker.failed.connect(self._settings_romm_test_failed)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._settings_romm_thread_finished)
+        thread.finished.connect(thread.deleteLater)
+        self._settings_romm_thread = thread
+        self._settings_romm_worker = worker
+        self._settings_source_visibility()
+        thread.start()
+
+    def _settings_romm_test_succeeded(self, message: str) -> None:
+        self._set_settings_source_state("success", message)
+
+    def _settings_romm_test_failed(self, message: str) -> None:
+        self._set_settings_source_state("error", f"RomM unavailable • {message}")
+
+    def _settings_romm_thread_finished(self) -> None:
+        self._settings_romm_worker = None
+        self._settings_romm_thread = None
+        self._settings_source_visibility()
 
     def _browse_settings_local(self) -> None:
         path = QFileDialog.getExistingDirectory(
@@ -328,17 +425,29 @@ class WorkspaceDashboardWindow(QMainWindow):
         )
         if path:
             self.settings_local_edit.setText(path)
+            self._settings_source_visibility()
 
     def _save_settings_source(self) -> None:
+        if self._settings_test_running():
+            return
         mode = "local" if self.settings_local_radio.isChecked() else "romm_api"
         local_root = self.settings_local_edit.text().strip()
         romm_url = self.settings_url_edit.text().strip()
         token = self.settings_token_edit.text().strip()
-        if mode == "romm_api":
+        if mode == "local":
+            root = Path(local_root).expanduser()
+            if not root.is_dir():
+                self._set_settings_source_state("error", "Choose an existing local ROM directory.")
+                return
+            local_root = str(root)
+        else:
             try:
                 romm_url = normalize_romm_url(romm_url)
             except ValueError as exc:
-                self.statusBar().showMessage(str(exc), 5000)
+                self._set_settings_source_state("error", str(exc))
+                return
+            if not token:
+                self._set_settings_source_state("error", "Enter the RomM Client API Token.")
                 return
         source = LibrarySource(mode=mode, local_root=local_root, romm_url=romm_url, api_token=token)
         save_library_source(self.config, source)
@@ -433,6 +542,11 @@ class WorkspaceDashboardWindow(QMainWindow):
             return []
 
     def change_workspace(self) -> None:
+        if self._settings_test_running():
+            self.statusBar().showMessage(
+                "Finish the RomM connection test before switching handhelds.", 4000
+            )
+            return
         dialog = PlatformSelectorDialog(self._reload_config(), self)
         if dialog.exec() != dialog.DialogCode.Accepted:
             return
@@ -528,6 +642,10 @@ class WorkspaceDashboardWindow(QMainWindow):
         return load_config()
 
     def closeEvent(self, event) -> None:
+        thread = self._settings_romm_thread
+        if thread is not None and thread.isRunning():
+            thread.quit()
+            thread.wait()
         if self.three_ds_library is not None:
             self.three_ds_library.close()
         super().closeEvent(event)
