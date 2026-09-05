@@ -88,6 +88,18 @@ def test_local_library_status_checks_are_cached_and_contextual() -> None:
     assert '"Checked during FTP transfer"' not in source
 
 
+def test_vita_status_filter_requires_mounted_usb_storage() -> None:
+    source = _source("romm_vita_manager/local_library.py")
+
+    assert 'def _status_filter_available(self) -> bool:' in source
+    assert 'return self.target_key == "vita" and not self._using_ftp() and self.vita is not None' in source
+    assert 'if not available and self.status_filter.currentIndex() != 0:' in source
+    assert 'self.status_filter.setCurrentIndex(0)' in source
+    assert 'self.status_filter.setEnabled(available and not worker_running)' in source
+    assert 'Connect the Vita through VitaShell USB to filter by installed state.' in source
+    assert 'self.status_filter.setEnabled(not running and self._status_filter_available())' in source
+
+
 def test_local_library_only_exposes_real_view_controls() -> None:
     source = _source("romm_vita_manager/local_library.py")
 
