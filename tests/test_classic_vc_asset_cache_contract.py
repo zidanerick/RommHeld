@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -87,3 +88,19 @@ def test_profiled_classic_cache_is_rejected_after_runtime_file_changes(
 
     Path(entry["code_path"]).write_bytes(b"tampered")
     assert assets.configured_classic_runtime(config, "gbc") is None
+
+
+def test_hashed_nes_auxiliary_logo_is_rejected_after_cache_tampering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(assets, "validate_retail_romfs", lambda data: None)
+    config = _cache_config(tmp_path, "nes", 5, ncch_logo=True)
+    entry = config["classic_vc"]["nes"]
+    logo_path = Path(entry["ncch_logo_path"])
+    entry["ncch_logo_sha256"] = hashlib.sha256(logo_path.read_bytes()).hexdigest()
+
+    assert assets.configured_classic_runtime(config, "nes") is not None
+
+    logo_path.write_bytes(b"X" * 0x2000)
+    assert assets.configured_classic_runtime(config, "nes") is None
