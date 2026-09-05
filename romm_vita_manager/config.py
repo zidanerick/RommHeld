@@ -13,6 +13,11 @@ CONFIG_PATH = config_path()
 APP_DIR = CONFIG_PATH.parent
 DEFAULT_ROMM_ROOT = Path.home() / "RomM" / "roms" / "roms"
 
+# Preserve deployment identity/cache metadata across a first-run setup reset.
+# In particular, Virtual Console title-ID allocations must remain stable so a
+# settings reset cannot silently break upgrade/save continuity.
+_RESET_PRESERVED_KEYS = ("three_ds_vc", "gba_vc")
+
 
 def _load_path(path: Path) -> dict:
     try:
@@ -72,6 +77,23 @@ def save_config(config: dict) -> None:
     temporary = CONFIG_PATH.with_suffix(".tmp")
     temporary.write_text(json.dumps(config, indent=2), encoding="utf-8")
     temporary.replace(CONFIG_PATH)
+
+
+def reset_config() -> dict:
+    """Reset first-run/application settings while preserving deployment identity.
+
+    The persisted ``setup_complete=False`` marker deliberately prevents an old
+    Linux legacy config from being migrated back in on the next load. ROMs,
+    device files and package-cache contents are not touched by this operation.
+    """
+    existing = _load_path(CONFIG_PATH)
+    reset: dict = {"setup_complete": False}
+    for key in _RESET_PRESERVED_KEYS:
+        value = existing.get(key)
+        if isinstance(value, dict) and value:
+            reset[key] = dict(value)
+    save_config(reset)
+    return reset
 
 
 def package_cache_dir() -> Path:
