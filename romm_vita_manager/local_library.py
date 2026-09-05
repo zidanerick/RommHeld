@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -73,8 +73,6 @@ class LocalLibraryWidget(QWidget):
                 "Destination unavailable",
             ]
         )
-        self.view_mode = QComboBox()
-        self.view_mode.addItems(["List", "Tiles"])
         self.vita_transport = QComboBox()
         self.vita_transport.addItem("VitaShell USB", "usb")
         self.vita_transport.addItem("VitaShell FTP", "ftp")
@@ -93,7 +91,6 @@ class LocalLibraryWidget(QWidget):
         filters.setSpacing(8)
         filters.addWidget(self.platforms)
         filters.addWidget(self.status_filter)
-        filters.addWidget(self.view_mode)
         filters.addWidget(self.vita_transport)
         filters.addStretch(1)
 
@@ -152,7 +149,6 @@ class LocalLibraryWidget(QWidget):
         self.search.textChanged.connect(self._apply_filters)
         self.platforms.currentIndexChanged.connect(self._apply_filters)
         self.status_filter.currentIndexChanged.connect(self._apply_filters)
-        self.view_mode.currentIndexChanged.connect(self.apply_view_mode)
         self.vita_transport.currentIndexChanged.connect(self._transport_changed)
         self.game_list.itemSelectionChanged.connect(self.update_summary)
         self.copy_button.clicked.connect(self.copy_selected)
@@ -326,8 +322,6 @@ class LocalLibraryWidget(QWidget):
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.game_list.addItem(item)
 
-        self.apply_view_mode()
-
     def _empty_message(self) -> str:
         if not self.games:
             if self._library_root is None:
@@ -368,18 +362,6 @@ class LocalLibraryWidget(QWidget):
             result = ("UNKNOWN", "Unable to inspect the current Vita destination")
         self._status_cache[game.path] = result
         return result
-
-    def apply_view_mode(self) -> None:
-        if self.view_mode.currentText() == "Tiles":
-            self.game_list.setViewMode(QListWidget.ViewMode.IconMode)
-            self.game_list.setResizeMode(QListWidget.ResizeMode.Adjust)
-            self.game_list.setMovement(QListWidget.Movement.Static)
-            self.game_list.setGridSize(QSize(250, 82))
-            self.game_list.setIconSize(QSize(32, 32))
-        else:
-            self.game_list.setViewMode(QListWidget.ViewMode.ListMode)
-            self.game_list.setResizeMode(QListWidget.ResizeMode.Fixed)
-            self.game_list.setMovement(QListWidget.Movement.Static)
 
     def selected_games(self) -> list[Game]:
         result: list[Game] = []
@@ -617,7 +599,6 @@ class LocalLibraryWidget(QWidget):
         self.status_filter.setEnabled(
             not running and self.target_key == "vita" and not self._using_ftp()
         )
-        self.view_mode.setEnabled(not running)
         self.vita_transport.setEnabled(not running)
         self.game_list.setEnabled(not running)
         self.progress.setVisible(running)
