@@ -118,7 +118,7 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         "open_agb_firm",
         "runtime",
         "Direct GBA runtime using the 3DS GBA hardware path.",
-        ("luma/payloads/open_agb_firm.firm", "3ds/open_agb_firm/gba_db.bin"),
+        ("luma/payloads/open_agb_firm.firm",),
         "https://github.com/profi200/open_agb_firm/releases",
         "universal_updater_or_manual",
         ("gba",),
