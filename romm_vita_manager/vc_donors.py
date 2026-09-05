@@ -129,29 +129,6 @@ def inspect_cia_container(path: str | Path) -> tuple[str, int]:
     return title_id, content_count
 
 
-def _validate_family_container_identity(family: VcDonorFamily, title_id: str) -> None:
-    """Reject donor containers whose title-ID class proves they are the wrong family.
-
-    Most classic families require decrypted runtime inspection before their
-    emulator family can be identified safely. GBA is different: native GBA VC
-    applications occupy the AGB_FIRM-compatible ``0004000000F???00`` range.
-    Checking that range here prevents an arbitrary retail CIA from being cached
-    merely because it also contains a logo/banner/icon.
-    """
-    if family.key != "gba":
-        return
-    normalized = title_id.strip().lower()
-    if not (
-        len(normalized) == 16
-        and normalized.startswith("0004000000f")
-        and normalized.endswith("00")
-    ):
-        raise ValueError(
-            "Selected GBA donor is not in the native AGB_FIRM Virtual Console title-ID range "
-            "0004000000F???00. Choose a genuine GBA Virtual Console CIA."
-        )
-
-
 def configured_donor_path(config: dict, family_key: str) -> Path | None:
     family = donor_family(family_key)
     settings = config.get("three_ds_vc", {})
@@ -184,7 +161,6 @@ def configure_donor(config: dict, family_key: str, cia_path: str | Path) -> dict
     if path.suffix.lower() != ".cia":
         raise ValueError("Virtual Console donor must be a .cia file.")
     title_id, content_count = inspect_cia_container(path)
-    _validate_family_container_identity(family, title_id)
 
     updated = dict(config)
     vc = dict(updated.get("three_ds_vc", {})) if isinstance(updated.get("three_ds_vc", {}), dict) else {}
