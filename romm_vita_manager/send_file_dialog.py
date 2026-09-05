@@ -121,7 +121,7 @@ class SendFileDialog(QDialog):
         vita = self.vita
         self.worker: SendFileWorker | VitaFtpSendWorker | None = None
         self.overwrite = False
-        self._pending_overwrite_retry = False
+        self._pending_overwrite_review = False
         self._settled_status: tuple[str, str] | None = None
         self.config = load_config()
         saved_ftp = self.config.get("devices", {}).get("vita_ftp", {})
@@ -425,7 +425,7 @@ class SendFileDialog(QDialog):
         except Exception as exc:
             self.worker = None
             self.overwrite = False
-            self._pending_overwrite_retry = False
+            self._pending_overwrite_review = False
             self._set_transfer_inputs_enabled(True)
             self.done_button.setEnabled(True)
             self._selection_changed()
@@ -442,25 +442,9 @@ class SendFileDialog(QDialog):
         self.cancel_button.setEnabled(False)
         self.progress.setVisible(False)
         if result == "different":
+            self._pending_overwrite_review = True
             self.transfer_status.set_value("Overwrite needed")
-            answer = QMessageBox.question(
-                self,
-                "File already exists",
-                "The destination contains a different-size file. Overwrite it? The existing file is preserved until the replacement has uploaded and verified successfully.",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            if answer == QMessageBox.StandardButton.Yes:
-                self.overwrite = True
-                self._pending_overwrite_retry = True
-                self.status.setText("Preparing verified replacement…")
-            else:
-                self.overwrite = False
-                self._pending_overwrite_retry = False
-                self._settled_status = (
-                    "Ready",
-                    "Overwrite cancelled. The existing destination was preserved.",
-                )
+            self.status.setText("Waiting for the transfer worker to finish before overwrite review…")
             return
 
         message = {
@@ -473,7 +457,7 @@ class SendFileDialog(QDialog):
         self.transfer_status.set_value(status_value)
         self._settled_status = (status_value, message)
         self.overwrite = False
-        self._pending_overwrite_retry = False
+        self._pending_overwrite_review = False
         if result in {"copied", "skipped"}:
             QMessageBox.information(self, "Send File", message)
 
@@ -485,17 +469,32 @@ class SendFileDialog(QDialog):
         self.status.setText(failure_message)
         self._settled_status = ("Failed", failure_message)
         self.overwrite = False
-        self._pending_overwrite_retry = False
+        self._pending_overwrite_review = False
         QMessageBox.critical(self, "Transfer failed", message)
 
     def _worker_finished(self) -> None:
-        retry = self._pending_overwrite_retry
-        self._pending_overwrite_retry = False
+        review_overwrite = self._pending_overwrite_review
+        self._pending_overwrite_review = False
         self.worker = None
 
-        if retry:
-            self.start_transfer()
-            return
+        if review_overwrite:
+            answer = QMessageBox.question(
+                self,
+                "File already exists",
+                "The destination contains a different-size file. Overwrite it? The existing file is preserved until the replacement has uploaded and verified successfully.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                self.overwrite = True
+                self.status.setText("Preparing verified replacement…")
+                self.start_transfer()
+                return
+            self.overwrite = False
+            self._settled_status = (
+                "Ready",
+                "Overwrite cancelled. The existing destination was preserved.",
+            )
 
         self._set_transfer_inputs_enabled(True)
         self.done_button.setEnabled(True)
