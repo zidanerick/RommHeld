@@ -119,8 +119,24 @@ def configured_title_id(config: dict, family: str, romm_id: int) -> bytes | None
 
 
 def displayed_title_id(config: dict, family: str, romm_id: int) -> bytes:
-    """Return the current assignment or preferred candidate without persisting it."""
-    return configured_title_id(config, family, romm_id) or preferred_title_id(family, romm_id)
+    """Preview the deployment-time assignment without persisting it.
+
+    A valid existing assignment is returned unchanged. For a first deployment,
+    the preview uses the same registry collision probing and mounted-SD visible
+    Title ID inventory as the persistence boundary, but discards the updated
+    config returned by the allocator.
+    """
+    existing = configured_title_id(config, family, romm_id)
+    if existing is not None:
+        return existing
+    reserved = configured_mounted_sd_title_ids(config)
+    _, candidate = allocate_registered_title_id(
+        config,
+        family,
+        romm_id,
+        reserved_title_ids=reserved,
+    )
+    return candidate
 
 
 def allocate_registered_title_id(
