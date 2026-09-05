@@ -117,9 +117,11 @@ Allocation identity includes the configured RomM source as well as family and Ro
 
 Title ID preview is side-effect free. Opening a deployment dialog does not allocate or write an ID. The assignment is persisted when deployment packaging begins, while the low-level deterministic ID helpers remain independent of user configuration.
 
-The allocation API can avoid explicitly supplied reserved target IDs when making a new assignment. Existing valid assignments remain stable even if that value later appears in a reserved set, because silently changing the ID of an already-deployed title would break upgrade and save continuity.
+The allocation API can avoid explicitly supplied reserved target IDs when making a new assignment. In addition, when a validated mounted 3DS SD-card root is configured, the persistence boundary reads visible title-directory IDs from `Nintendo 3DS/<ID0>/<ID1>/title/<Title ID High>/<Title ID Low>` and automatically reserves those IDs before a first-time assignment. The scan is read-only and does not decrypt title contents or modify the console's title data.
 
-This prevents collisions between RommHeld-managed generated titles. Current deployment does not claim to inventory every official, manually created or third-party CIA already installed on an arbitrary console, so it is not a guarantee of console-wide Title ID uniqueness.
+Existing valid assignments remain stable even if that value later appears in the mounted-card or caller-supplied reserved set, because silently changing the ID of an already-deployed title would break upgrade and save continuity.
+
+This prevents collisions between RommHeld-managed generated titles and reduces collision risk with titles visible on the currently mounted SD card. It is still not a guarantee of console-wide Title ID uniqueness: NAND-only titles, titles on another unmounted card or console, and titles not represented in the visible SD title tree are outside this inventory.
 
 The active classic VC builder accepts the deployment-time allocated ID as an explicit override and propagates it through the exheader, NCCH, ticket and TMD. A regression test guards this active patched-builder contract because classic VC behavior is still layered through the current ordered family-correction installers.
 
@@ -137,6 +139,7 @@ Classic VC builds are checked before deployment at multiple layers:
 - family-specific target ROM/container rules, including GB/GBC cartridge headers and Game Gear Sega-family identification
 - profiled runtime-cache integrity where a fingerprint is available
 - donor runtime compatibility metadata such as emulator build/config fingerprints and original root-level patch names
+- first-time generated Title ID avoidance for RommHeld allocations, caller-supplied reserved IDs and IDs visible on a validated mounted 3DS SD card
 
 NES and SNES additionally preserve required donor NCCH auxiliary launch-logo regions rather than emitting a minimal NCCH layout that only passes local parser checks.
 
