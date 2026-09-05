@@ -29,13 +29,14 @@ from .gba_assets import (
     configured_donor_banner,
     extract_and_cache_gba_donor_assets,
 )
-from .gba_vc import build_native_gba_cia, native_title_id_for_romm_id
+from .gba_vc import build_native_gba_cia
 from .hshop_catalog import HShopVcRelease, find_official_vc_release
 from .romm_remote import RomMRemoteGame, download_artwork, download_rom
 from .three_ds_ftp import ThreeDSFtpBackend, ThreeDSFtpSettings
 from .three_ds_targets import default_destination
 from .ui_components import AccentButton, SurfaceCard
 from .vc_donors import configured_boot9_path, configured_donor_path
+from .vc_title_id_registry import displayed_title_id, persist_registered_title_id
 
 
 class HShopLookupWorker(QThread):
@@ -136,13 +137,17 @@ class GbaCiaDeployWorker(QThread):
                 raise ValueError("No usable RomM artwork is available for this title.")
             self._check_cancelled()
 
+            self.status_changed.emit("Allocating a stable RommHeld Title ID…")
+            self.config, title_id = persist_registered_title_id("gba", self.game.rom_id)
+            self._check_cancelled()
+
             self.status_changed.emit("Packaging GBA CIA for AGB_FIRM…")
             cia = build_native_gba_cia(
                 self.temp_rom.read_bytes(),
                 artwork,
                 boot_logo=boot_logo_path.read_bytes(),
                 donor_banner=donor_banner_path.read_bytes() if donor_banner_path is not None else None,
-                title_id=native_title_id_for_romm_id(self.game.rom_id),
+                title_id=title_id,
                 title_name=self.display_title,
                 long_title=self.display_title,
                 publisher=self.publisher,
@@ -357,9 +362,11 @@ class GbaVcDeployDialog(QDialog):
         configuration_title.setStyleSheet("font-size:14px;font-weight:700;")
         configuration.content.addWidget(configuration_title)
 
-        self.title_id_edit = QLineEdit(native_title_id_for_romm_id(game.rom_id).hex())
+        self.title_id_edit = QLineEdit(displayed_title_id(config, "gba", game.rom_id).hex())
         self.title_id_edit.setReadOnly(True)
-        self.title_id_edit.setToolTip("Generated deterministically inside the GBA Virtual Console title-ID range.")
+        self.title_id_edit.setToolTip(
+            "Current RommHeld assignment, or the preferred GBA VC candidate if this title has not been deployed yet."
+        )
         self.destination_edit = QLineEdit(default_destination("vc_cia", "gba", game.filename))
         self.destination_edit.setReadOnly(True)
         self.display_title_edit = QLineEdit(game.name)
