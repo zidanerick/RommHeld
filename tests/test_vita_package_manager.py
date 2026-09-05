@@ -149,6 +149,50 @@ def test_cancelled_download_removes_partial_cache_file(monkeypatch, tmp_path: Pa
     assert not (cache / "test.vpk.part").exists()
 
 
+def test_truncated_download_does_not_replace_cached_package(monkeypatch, tmp_path: Path):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    monkeypatch.setattr(package_manager, "CACHE_DIR", cache)
+    package = PackageSpec(
+        key="download",
+        name="Download test",
+        description="test",
+        source="direct:https://example.invalid/test.vpk",
+        asset_name="test.vpk",
+        stage_name="test.vpk",
+        destination="root",
+    )
+    cached = cache / "test.vpk"
+    cached.write_bytes(b"known-good")
+
+    class FakeResponse:
+        headers = {"Content-Length": "12"}
+
+        def __init__(self):
+            self.chunks = [b"short", b""]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, _size):
+            return self.chunks.pop(0)
+
+    monkeypatch.setattr(
+        package_manager.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: FakeResponse(),
+    )
+
+    with pytest.raises(IOError, match="Download size verification failed"):
+        download_package(package)
+
+    assert cached.read_bytes() == b"known-good"
+    assert not (cache / "test.vpk.part").exists()
+
+
 def test_cancelled_usb_stage_preserves_existing_destination(monkeypatch, tmp_path: Path):
     cache = tmp_path / "cache"
     cache.mkdir()
