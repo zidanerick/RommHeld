@@ -11,11 +11,18 @@ class DeploymentTarget:
     destination_kind: str
 
 
+OPEN_AGB_FIRM = DeploymentTarget(
+    "open_agb_firm",
+    "open_agb_firm GBA ROM",
+    "Copy the original GBA ROM to the SD card for direct launch through open_agb_firm. This is separate from creating an installable HOME Menu CIA.",
+    "native_rom",
+)
+
 NATIVE_GBA = DeploymentTarget(
     "native_gba",
-    "Nintendo GBA (AGB_FIRM)",
-    "Native 3DS GBA runtime. Requires the user's extracted AGB_FIRM donor assets.",
-    "native",
+    "GBA HOME Menu CIA (AGB_FIRM)",
+    "Create an installable GBA CIA that runs through the 3DS native AGB_FIRM runtime using the user's prepared donor assets.",
+    "cia",
 )
 
 VC_CIA = DeploymentTarget(
@@ -30,6 +37,27 @@ NATIVE_3DS_CIA = DeploymentTarget(
     "Nintendo 3DS CIA",
     "Transfer an existing 3DS application CIA without repackaging it.",
     "cia",
+)
+
+TWILIGHT_NDS = DeploymentTarget(
+    "twilight",
+    "TWiLight Menu++ / nds-bootstrap",
+    "Copy the Nintendo DS ROM to the conventional 3DS SD ROM tree for launch through TWiLight Menu++ and nds-bootstrap.",
+    "native_rom",
+)
+
+RED_VIPER = DeploymentTarget(
+    "red_viper",
+    "Red Viper",
+    "Copy the Virtual Boy ROM to the 3DS SD card for use with the dedicated Red Viper emulator.",
+    "emulator",
+)
+
+DAEDALUSX64 = DeploymentTarget(
+    "daedalusx64",
+    "DaedalusX64",
+    "Copy the Nintendo 64 ROM to DaedalusX64's documented 3DS ROM directory.",
+    "emulator",
 )
 
 RETROARCH = DeploymentTarget(
@@ -72,8 +100,12 @@ RETROARCH_PLATFORM_SLUGS = frozenset(
         "neo-geo-pocket-color",
         "zxs",
         "turbografx-cd",
+        "n64",
     }
 )
+
+DIRECT_RUNTIME_PLATFORM_SLUGS = frozenset({"gba", "nds", "virtualboy", "n64"})
+THREE_DS_PLATFORM_SLUGS = RETROARCH_PLATFORM_SLUGS | DIRECT_RUNTIME_PLATFORM_SLUGS
 
 # Every slug listed here has a concrete family-specific package builder and
 # PC-side structural validation. Hardware validation status is tracked
@@ -85,18 +117,27 @@ NATIVE_PLATFORM_SLUGS = frozenset({"gba"})
 
 
 def compatible_platform(slug: str) -> bool:
-    return slug.lower() in RETROARCH_PLATFORM_SLUGS
+    return slug.lower() in THREE_DS_PLATFORM_SLUGS
 
 
 def available_targets(slug: str) -> tuple[DeploymentTarget, ...]:
     key = slug.lower()
     targets: list[DeploymentTarget] = []
-    if key in NATIVE_PLATFORM_SLUGS:
-        targets.append(NATIVE_GBA)
+
+    if key == "gba":
+        targets.extend((OPEN_AGB_FIRM, NATIVE_GBA))
+    elif key == "nds":
+        targets.append(TWILIGHT_NDS)
+    elif key == "virtualboy":
+        targets.append(RED_VIPER)
+    elif key == "n64":
+        targets.append(DAEDALUSX64)
+
     if key == "3ds":
         targets.append(NATIVE_3DS_CIA)
     elif key in RETROARCH_PLATFORM_SLUGS:
         targets.append(RETROARCH)
+
     if key in VC_IMPLEMENTED_PLATFORM_SLUGS:
         targets.append(VC_CIA)
     return tuple(targets)
@@ -105,6 +146,14 @@ def available_targets(slug: str) -> tuple[DeploymentTarget, ...]:
 def default_destination(target_key: str, platform_slug: str, filename: str) -> str:
     safe_name = filename.replace("\\", "/").rsplit("/", 1)[-1]
     slug = platform_slug.lower()
+    if target_key == "open_agb_firm":
+        return f"/roms/gba/{safe_name}"
+    if target_key == "twilight":
+        return f"/roms/nds/{safe_name}"
+    if target_key == "red_viper":
+        return f"/roms/virtualboy/{safe_name}"
+    if target_key == "daedalusx64":
+        return f"/3ds/DaedalusX64/Roms/{safe_name}"
     if target_key == "retroarch":
         return f"/RetroArch/roms/{slug}/{safe_name}"
     if target_key in {"native_gba", "native_3ds_cia", "vc_cia"}:
