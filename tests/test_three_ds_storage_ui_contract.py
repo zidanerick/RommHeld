@@ -46,6 +46,14 @@ def test_3ds_ui_describes_direct_card_access_without_claiming_console_usb_storag
     assert "standard USB mass storage" in deploy
 
 
+def test_3ds_setup_does_not_treat_loose_installer_cias_as_app_detection():
+    setup = SETUP_PATH.read_text(encoding="utf-8")
+
+    assert '"FBI.cia"' not in setup
+    assert '"Universal-Updater.cia"' not in setup
+    assert "installed CIA title cannot be reliably inferred from SD files alone" in setup
+
+
 def test_3ds_filesystem_dialog_preserves_transfer_result_after_worker_cleanup():
     source = DEPLOY_PATH.read_text(encoding="utf-8")
 
