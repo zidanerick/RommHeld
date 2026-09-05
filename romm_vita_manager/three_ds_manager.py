@@ -440,13 +440,17 @@ class ThreeDSManagerDialog(QDialog):
     def save_settings(self) -> None:
         cfg = dict(self.config)
         devices = dict(cfg.get("devices", {}))
-        devices["3ds"] = {
-            "host": self.host_edit.text().strip(),
-            "port": int(self.port_edit.text()),
-            "username": self.user_edit.text().strip() or "anonymous",
-            "password": self.password_edit.text(),
-            "remote_root": self.root_edit.text().strip() or "/",
-        }
+        device = dict(devices.get("3ds", {}))
+        device.update(
+            {
+                "host": self.host_edit.text().strip(),
+                "port": int(self.port_edit.text()),
+                "username": self.user_edit.text().strip() or "anonymous",
+                "password": self.password_edit.text(),
+                "remote_root": self.root_edit.text().strip() or "/",
+            }
+        )
+        devices["3ds"] = device
         cfg["devices"] = devices
         save_config(cfg)
         self.config = cfg
