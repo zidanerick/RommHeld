@@ -22,11 +22,11 @@ from .mappings import normalize_platform_slug, platform_label
 from .models import Game
 from .romm_remote import RomMRemoteGame
 from .three_ds_apps import APP_BY_KEY
+from .three_ds_filesystem_worker import ThreeDSFilesystemTransferWorker
 from .three_ds_ftp import ThreeDSFtpSettings
-from .three_ds_manager import ThreeDSTransferWorker
+from .three_ds_payload import planned_payload_filename, requires_payload_resolution
 from .three_ds_readiness import TARGET_RUNTIME_APPS, evaluate_target_runtime
 from .three_ds_storage import configured_3ds_storage_root
-from .three_ds_storage_worker import ThreeDSMountedTransferWorker
 from .three_ds_targets import default_destination
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 
@@ -74,10 +74,21 @@ class ThreeDSFilesystemDeployDialog(QDialog):
             self._ftp_port = 5000
 
         self.platform_slug = _platform_slug(game)
-        self.destination = default_destination(
+        self.original_filename = _filename(game)
+        planned_filename = planned_payload_filename(
             target_key,
             self.platform_slug,
-            _filename(game),
+            self.original_filename,
+        )
+        self.destination: str | None = (
+            default_destination(target_key, self.platform_slug, planned_filename)
+            if planned_filename
+            else None
+        )
+        self._archive_resolution_required = requires_payload_resolution(
+            target_key,
+            self.platform_slug,
+            self.original_filename,
         )
 
         self.setWindowTitle("Deploy to Nintendo 3DS")
@@ -86,16 +97,13 @@ class ThreeDSFilesystemDeployDialog(QDialog):
 
         header = SectionHeader(
             "Deploy to Nintendo 3DS",
-            "The game, runtime and destination are already selected. Choose how the file should reach the console storage.",
+            "The game and runtime are selected. RommHeld prepares the runtime payload, then you choose how it should reach console storage.",
         )
 
         summary = SurfaceCard()
         summary.content.addWidget(self._card_title(game.name))
-        summary.content.addWidget(
-            self._secondary(
-                f"{_platform_name(game)} · {game.size:,} bytes\nDestination: {self.destination}"
-            )
-        )
+        self.summary_detail = self._secondary(self._summary_text())
+        summary.content.addWidget(self.summary_detail)
         self.runtime_status = StatusPill("Runtime", "Not checked")
         self.runtime_detail = QLabel()
         self.runtime_detail.setWordWrap(True)
@@ -189,6 +197,27 @@ class ThreeDSFilesystemDeployDialog(QDialog):
             f"color:{DARK.text_secondary};background:transparent;"
         )
         return label
+
+    def _summary_text(self) -> str:
+        if self.destination:
+            destination = self.destination
+            if self._archive_resolution_required:
+                destination += " · final filename verified after extraction"
+        else:
+            destination = "Resolved after archive extraction"
+        lines = [
+            f"{_platform_name(self.game)} · {self.game.size:,} source bytes",
+            f"Destination: {destination}",
+        ]
+        if self._archive_resolution_required:
+            lines.append(
+                "Source archive will be unpacked first. RommHeld requires exactly one compatible ROM payload and will not copy the archive to this raw-ROM runtime."
+            )
+        return "\n".join(lines)
+
+    def _destination_resolved(self, destination: str) -> None:
+        self.destination = destination
+        self.summary_detail.setText(self._summary_text())
 
     def _refresh_runtime_preflight(self) -> None:
         app_key = TARGET_RUNTIME_APPS.get(self.target_key)
@@ -320,63 +349,58 @@ class ThreeDSFilesystemDeployDialog(QDialog):
         self.status.setText(
             f"Preparing verified replacement for {self.game.name}…"
             if overwrite
-            else f"Checking destination for {self.game.name}…"
+            else f"Preparing runtime payload for {self.game.name}…"
         )
 
+        storage_root: Path | None = None
+        settings: ThreeDSFtpSettings | None = None
         if transport == "sd":
-            root = configured_3ds_storage_root(self.config)
-            if root is None:
+            storage_root = configured_3ds_storage_root(self.config)
+            if storage_root is None:
                 self._reset_after_failure(
                     "The configured Nintendo 3DS SD card is no longer mounted or no longer validates as a 3DS root."
                 )
                 return
-            worker: QThread = ThreeDSMountedTransferWorker(
-                root,
-                source,
-                self.destination,
-                remote_game=remote_game,
-                romm_url=romm_url,
-                romm_token=romm_token,
-                overwrite=overwrite,
-            )
         else:
             try:
                 settings = self._ftp_settings()
             except ValueError as exc:
                 self._reset_after_failure(str(exc))
                 return
-            worker = ThreeDSTransferWorker(
-                settings,
-                source,
-                self.destination,
-                remote_game=remote_game,
-                romm_url=romm_url,
-                romm_token=romm_token,
-                overwrite=overwrite,
-            )
+
+        worker = ThreeDSFilesystemTransferWorker(
+            transport,
+            target_key=self.target_key,
+            platform_slug=self.platform_slug,
+            original_filename=self.original_filename,
+            source=source,
+            remote_game=remote_game,
+            romm_url=romm_url,
+            romm_token=romm_token,
+            storage_root=storage_root,
+            ftp_settings=settings,
+            overwrite=overwrite,
+        )
 
         self.worker = worker
         worker.status_changed.connect(self.status.setText)
+        worker.destination_resolved.connect(self._destination_resolved)
         worker.progress.connect(self._progress)
         worker.completed.connect(self._completed)
         worker.failed.connect(self._failed)
         worker.finished.connect(self._finished)
         worker.start()
 
-    def _progress(self, done: int) -> None:
-        total = int(self.game.size)
-        if total > 0:
-            self.progress.setRange(0, 100)
-            self.progress.setValue(min(100, int(done * 100 / total)))
-        else:
-            self.progress.setRange(0, 0)
+    def _progress(self, percent: int) -> None:
+        self.progress.setRange(0, 100)
+        self.progress.setValue(max(0, min(100, int(percent))))
 
     def _completed(self, result: str) -> None:
         self._last_result = result
         messages = {
             "copied": "Transfer complete. The final destination was size verified.",
             "resumed": "The matching RommHeld FTP stage resumed, verified, and moved into place.",
-            "skipped": "The destination already contains the same-size file. No download or replacement was needed.",
+            "skipped": "The destination already contains the same-size runtime payload. No download or replacement was needed.",
             "different": "A different-size file already exists. Nothing was changed.",
             "cancelled": "Transfer cancelled. The existing destination was preserved.",
         }
