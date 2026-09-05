@@ -45,3 +45,13 @@ def test_vita_setup_blocks_all_dismissal_paths_during_worker():
     assert "super().accept()" in source
     assert "super().reject()" in source
     assert "super().closeEvent(event)" in source
+
+
+def test_vita_setup_revalidates_usb_mount_before_staging():
+    source = source_text()
+
+    assert "from .vita import free_space, is_vita_mount, total_space" in source
+    assert "self.vita = vita if vita is not None and is_vita_mount(vita) else None" in source
+    assert "return self.vita is not None and is_vita_mount(self.vita)" in source
+    assert "if self.vita is None or not is_vita_mount(self.vita):" in source
+    assert "The VitaShell USB mount is no longer available." in source
