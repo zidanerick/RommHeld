@@ -54,6 +54,20 @@ def test_retroarch_data_directory_does_not_claim_app_is_installed(tmp_path: Path
     assert detected["retroarch"] is False
 
 
+def test_additional_vita_runtime_title_ids_are_detected(tmp_path: Path):
+    for title_id, key in (
+        ("FLYCASTDC", "flycast"),
+        ("VSCU00001", "scummvm"),
+        ("FAKE00008", "fake-08"),
+    ):
+        vita = tmp_path / key
+        (vita / "app" / title_id).mkdir(parents=True)
+
+        detected = detect_emulators(vita)
+
+        assert detected[key] is True
+
+
 def test_stage_package_replaces_existing_file_after_safe_copy(monkeypatch, tmp_path: Path):
     cache = tmp_path / "cache"
     cache.mkdir()
