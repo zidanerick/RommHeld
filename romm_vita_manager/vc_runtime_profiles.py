@@ -131,6 +131,16 @@ def _validated_optional_sha256(value: str, label: str) -> str:
     return normalized
 
 
+def _clean_patch_names(values) -> tuple[str, ...]:
+    cleaned: set[str] = set()
+    for value in values:
+        name = str(value).replace("\\", "/").rsplit("/", 1)[-1].strip()
+        if not name or not name.casefold().endswith(".patch"):
+            continue
+        cleaned.add(name[:120])
+    return tuple(sorted(cleaned, key=str.casefold))
+
+
 def build_classic_runtime_profile(
     family: str,
     donor_info: dict,
@@ -144,6 +154,7 @@ def build_classic_runtime_profile(
     logo: bytes | None = None,
     emulator_build: str = "",
     config_ini_sha256: str = "",
+    donor_patch_names=(),
 ) -> dict:
     guidance = guidance_for_family(family)
     code_hash = _sha256(code)
@@ -152,6 +163,7 @@ def build_classic_runtime_profile(
     donor_title_id = str(donor_info.get("title_id", "")).strip().lower()
     build_label = _clean_build_label(emulator_build)
     config_hash = _validated_optional_sha256(config_ini_sha256, "Classic VC config.ini")
+    patch_names = _clean_patch_names(donor_patch_names)
     profile_id = _profile_id(
         guidance.family,
         (code_hash, exheader_hash, rom_path, romfs_hash),
@@ -181,6 +193,8 @@ def build_classic_runtime_profile(
         profile["emulator_build"] = build_label
     if config_hash:
         profile["config_ini_sha256"] = config_hash
+    if patch_names:
+        profile["donor_patch_names"] = list(patch_names)
     return profile
 
 
@@ -292,6 +306,13 @@ def configured_runtime_profile(config: dict, family: str) -> dict | None:
     return dict(value) if isinstance(value, dict) else None
 
 
+def _profile_patch_names(profile: dict) -> tuple[str, ...]:
+    raw = profile.get("donor_patch_names", ())
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    return _clean_patch_names(raw)
+
+
 def runtime_guidance_summary(config: dict, family: str) -> str:
     """Return concise donor guidance for deployment UI without packaging logic."""
     guidance = guidance_for_family(family)
@@ -305,6 +326,7 @@ def runtime_guidance_summary(config: dict, family: str) -> str:
     status = classification.replace("-", " ")
     profile_id = str(profile.get("profile_id", "")).strip()
     build_label = _clean_build_label(str(profile.get("emulator_build", "")))
+    patch_names = _profile_patch_names(profile)
     identifiers: list[str] = []
     if build_label:
         identifiers.append(f"build {build_label}")
@@ -313,7 +335,12 @@ def runtime_guidance_summary(config: dict, family: str) -> str:
     prefix = f"Cached profile: {status}"
     if identifiers:
         prefix += " • " + " • ".join(identifiers)
-    return f"{prefix}. {guidance.recommendation}"
+    caution = (
+        " Donor-specific .patch data was detected and is stripped before reuse."
+        if patch_names
+        else ""
+    )
+    return f"{prefix}. {guidance.recommendation}{caution}"
 
 
 def runtime_guidance_details(config: dict, family: str) -> tuple[str, ...]:
@@ -328,6 +355,7 @@ def runtime_guidance_details(config: dict, family: str) -> tuple[str, ...]:
     donor_title_id = str(profile.get("donor_title_id", "")).strip().upper()
     build_label = _clean_build_label(str(profile.get("emulator_build", "")))
     config_hash = str(profile.get("config_ini_sha256", "")).strip().lower()
+    patch_names = _profile_patch_names(profile)
     if profile_id:
         details.append(f"Runtime profile ID: {profile_id}")
     if donor_title_id:
@@ -336,4 +364,6 @@ def runtime_guidance_details(config: dict, family: str) -> tuple[str, ...]:
         details.append(f"Emulator build: {build_label}")
     if config_hash:
         details.append(f"config.ini SHA-256: {config_hash}")
+    if patch_names:
+        details.append("Donor game-specific patch files: " + ", ".join(patch_names))
     return tuple(details)
