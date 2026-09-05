@@ -14,7 +14,6 @@ _CLASSIC_CAPACITY = 0x10000
 _CLASSIC_UID_BASE = 0x0E0000
 _ALLOCATION_VERSION = 1
 _LOCK = threading.RLock()
-_INSTALLED = False
 
 
 def _source_key(config: dict) -> str:
@@ -212,31 +211,3 @@ def persist_registered_title_id(
         if updated != config:
             save_config(updated)
         return updated, title_id
-
-
-def persistent_title_id(family: str, romm_id: int, preferred: bytes) -> bytes:
-    """Compatibility wrapper for the temporary automatic-allocation hook."""
-    _, title_id = persist_registered_title_id(family, romm_id, preferred)
-    return title_id
-
-
-def install() -> None:
-    """Temporary compatibility hook; deployment code should allocate explicitly."""
-    global _INSTALLED
-    if _INSTALLED:
-        return
-
-    from . import classic_vc, gba_vc
-
-    original_gba = gba_vc.native_title_id_for_romm_id
-    original_classic = classic_vc.classic_title_id_for_romm_id
-
-    def native_title_id_for_romm_id(romm_id: int) -> bytes:
-        return persistent_title_id("gba", romm_id, original_gba(romm_id))
-
-    def classic_title_id_for_romm_id(romm_id: int, family: str) -> bytes:
-        return persistent_title_id(family, romm_id, original_classic(romm_id, family))
-
-    gba_vc.native_title_id_for_romm_id = native_title_id_for_romm_id
-    classic_vc.classic_title_id_for_romm_id = classic_title_id_for_romm_id
-    _INSTALLED = True
