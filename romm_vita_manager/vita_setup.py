@@ -115,6 +115,7 @@ class VitaSetupDialog(QDialog):
         self.vita = vita
         self.worker: PackageWorker | None = None
         self.action_buttons: list[QPushButton] = []
+        self._pending_stage_key: str | None = None
         saved_ftp = load_config().get("devices", {}).get("vita_ftp", {})
         self._ftp_host = str(saved_ftp.get("host", "")).strip()
         try:
@@ -417,22 +418,32 @@ class VitaSetupDialog(QDialog):
                 button.setEnabled(enabled)
 
     def _worker_finished(self) -> None:
+        pending_stage = self._pending_stage_key
+        self._pending_stage_key = None
+        self.worker = None
         self.transport_combo.setEnabled(True)
+        self._set_actions_enabled(True)
+
+        if pending_stage is None or not self._can_stage():
+            return
+        package = PACKAGES[pending_stage]
+        transport_label = (
+            "VitaShell FTP" if self._selected_transport() == "ftp" else "VitaShell USB"
+        )
+        reply = QMessageBox.question(
+            self,
+            "Download complete",
+            f"{package.name} was downloaded successfully. Stage it using {transport_label} now?",
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._start_worker(package.key, "stage")
 
     def _package_finished(self, action: str, path: str) -> None:
-        self._set_actions_enabled(True)
         self._finish_activity()
         self.activity.setText(f"Ready: {path}")
         package = PACKAGES[self.worker.package_key] if self.worker else None
         if action == "download" and package is not None and self._can_stage():
-            transport_label = "VitaShell FTP" if self._selected_transport() == "ftp" else "VitaShell USB"
-            reply = QMessageBox.question(
-                self,
-                "Download complete",
-                f"{package.name} was downloaded successfully. Stage it using {transport_label} now?",
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self._start_worker(package.key, "stage")
+            self._pending_stage_key = package.key
         elif action == "stage":
             QMessageBox.information(
                 self,
@@ -441,7 +452,6 @@ class VitaSetupDialog(QDialog):
             )
 
     def _archive_ready(self, path: str, entries: object) -> None:
-        self._set_actions_enabled(True)
         self._finish_activity()
         package = PACKAGES[self.worker.package_key] if self.worker else None
         archive_entries = [item for item in entries if isinstance(item, ArchiveEntry)]
@@ -476,7 +486,6 @@ class VitaSetupDialog(QDialog):
         _ = reply
 
     def _package_failed(self, message: str) -> None:
-        self._set_actions_enabled(True)
         self._finish_activity()
         self.activity.setText("Setup action failed.")
         QMessageBox.critical(self, "Vita setup failed", message)
