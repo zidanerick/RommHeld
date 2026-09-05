@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from PIL import Image
 
 from romm_vita_manager.vc_banner_patch import (
+    _encode_l4_tiled,
     _encode_texture_mips,
     _rebuild_cbmd_preserving_slots,
 )
@@ -51,6 +52,34 @@ def test_gamegear_single_level_rgb565_shape() -> None:
     encoded = _encode_texture_mips(image, texture)
 
     assert len(encoded) == 128 * 128 * 2
+
+
+def test_nes_l4_title_plaque_matches_four_bit_buffer_shape() -> None:
+    image = Image.new("L", (256, 64), 220)
+    texture = SimpleNamespace(
+        name="COMMON2",
+        width=256,
+        height=64,
+        hw_format=10,
+        mipmap_count=1,
+    )
+    encoded = _encode_texture_mips(image, texture)
+
+    assert len(encoded) == 256 * 64 // 2
+    assert encoded != bytes(len(encoded))
+
+
+def test_l4_packs_first_swizzled_texel_low_then_second_high() -> None:
+    image = Image.new("L", (8, 8), 0)
+    image.putpixel((0, 0), 0x11)
+    image.putpixel((1, 0), 0xEE)
+
+    encoded = _encode_l4_tiled(image, 8, 8)
+
+    # tex3ds/PICA L4 stores the first texel in the low nibble and the second
+    # in the high nibble after 8x8 swizzling.
+    assert encoded[0] == 0xE1
+    assert len(encoded) == 32
 
 
 def test_cbmd_rebuild_preserves_common_localized_slots_and_cwav() -> None:
