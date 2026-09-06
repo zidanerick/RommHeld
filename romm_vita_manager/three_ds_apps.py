@@ -21,6 +21,7 @@ class ThreeDSAppDefinition:
     installed_title_may_exist_without_sd_marker: bool = False
     marker_policy: str = "any"
     installed_title_ids: tuple[str, ...] = ()
+    marker_confirms_launchable: bool = True
 
     def __post_init__(self) -> None:
         if self.marker_policy not in {"any", "all"}:
@@ -67,6 +68,16 @@ class ThreeDSAppStatus:
             if self.source == "ftp":
                 return f"Live FTP evidence found at {self.marker}."
             return f"SD evidence found at {self.marker}."
+        if self.marker and not self.definition.marker_confirms_launchable:
+            if self.source == "ftp":
+                return (
+                    f"Runtime files are visible over FTP at {self.marker}, but these files do not "
+                    "prove that a launchable frontend or HOME Menu title is installed."
+                )
+            return (
+                f"Runtime files are present at {self.marker}, but these files do not prove that "
+                "a launchable frontend or HOME Menu title is installed."
+            )
         if self.definition.installed_title_may_exist_without_sd_marker:
             if self.source == "ftp":
                 return (
@@ -166,23 +177,26 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         "twilight",
         "TWiLight Menu++",
         "runtime",
-        "Nintendo DS frontend used with nds-bootstrap on 3DS SD storage. Both the TWiLight assets and nds-bootstrap are required for the RommHeld NDS route.",
+        "Nintendo DS frontend used with nds-bootstrap on 3DS SD storage. Both the TWiLight assets and nds-bootstrap are required for the RommHeld NDS route, but those folders alone do not prove that the 3DS launcher title is installed.",
         ("_nds/TWiLightMenu", "_nds/nds-bootstrap"),
         "https://github.com/DS-Homebrew/TWiLightMenu/releases",
         "prefer_universal_updater",
         ("nds",),
+        installed_title_may_exist_without_sd_marker=True,
         marker_policy="all",
+        marker_confirms_launchable=False,
     ),
     ThreeDSAppDefinition(
         "retroarch",
         "RetroArch",
         "runtime",
-        "Libretro frontend/core environment used for compatible emulated systems and RetroAchievements-capable routes.",
+        "Libretro frontend/core environment used for compatible emulated systems and RetroAchievements-capable routes. Data/core folders alone do not prove that a launchable frontend is installed.",
         ("RetroArch", "RetroArch/Cores", "retroarch/retroarch.cfg"),
         "https://www.retroarch.com/?page=platforms",
         "manual_bundle_or_updater",
         tuple(sorted(RETROARCH_TARGET_PLATFORM_SLUGS)),
         installed_title_may_exist_without_sd_marker=True,
+        marker_confirms_launchable=False,
     ),
     ThreeDSAppDefinition(
         "red-viper",
@@ -271,13 +285,13 @@ def detect_three_ds_app(
     matched = tuple(
         marker for marker in definition.markers if _case_insensitive_exists(root, marker)
     )
-    detected = (
+    marker_match = (
         len(matched) == len(definition.markers)
         if definition.marker_policy == "all"
         else bool(matched)
     )
-    if detected:
-        marker = "; ".join(matched) if matched else None
+    marker = "; ".join(matched) if marker_match and matched else None
+    if marker_match and definition.marker_confirms_launchable:
         return ThreeDSAppStatus(definition, True, marker)
 
     if definition.installed_title_ids:
@@ -300,7 +314,7 @@ def detect_three_ds_app(
                     normalized,
                 )
 
-    return ThreeDSAppStatus(definition, False, None)
+    return ThreeDSAppStatus(definition, False, marker)
 
 
 def scan_three_ds_apps(root: Path) -> dict[str, ThreeDSAppStatus]:
