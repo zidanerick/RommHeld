@@ -59,7 +59,7 @@ class RetroArchRouteStatus:
         if self.state == "frontend_not_detected":
             return "RetroArch SD-side frontend evidence was not found."
         if self.state == "profile_unverified":
-            return "RetroArch is present, but RommHeld has no audited 3DS core profile for this platform."
+            return "RetroArch assets are present, but RommHeld has no audited 3DS core profile for this platform."
         if self.state == "core_staged_inactive":
             return "A matching core package exists only in the inactive core directory."
         if self.state == "confirm_core_on_console":
@@ -93,15 +93,18 @@ class TwilightRuntimeStatus:
     def note(self) -> str:
         if self.state == "ready":
             suffix = " BOOT.NDS is also present." if self.boot_nds else ""
-            return f"TWiLight Menu++ assets and nds-bootstrap are present.{suffix}"
+            return (
+                "TWiLight Menu++ assets and nds-bootstrap are present, but the 3DS HOME Menu "
+                f"launcher still requires separate on-console confirmation.{suffix}"
+            )
         if self.state == "incomplete":
             missing: list[str] = []
             if not self.twilight_assets:
                 missing.append("TWiLight Menu++ assets")
             if not self.nds_bootstrap:
                 missing.append("nds-bootstrap")
-            return "The NDS runtime is incomplete; missing " + " and ".join(missing) + "."
-        return "No coherent TWiLight Menu++ / nds-bootstrap runtime was found."
+            return "The NDS runtime assets are incomplete; missing " + " and ".join(missing) + "."
+        return "No coherent TWiLight Menu++ / nds-bootstrap runtime assets were found."
 
 
 # Core IDs are limited to routes present in libretro-super's current
@@ -340,7 +343,12 @@ def _firmware_status(
 def scan_retroarch_route(root: Path, platform_slug: str) -> RetroArchRouteStatus:
     root = root.expanduser()
     profile = RETROARCH_CORE_PROFILES.get(platform_slug.casefold())
-    frontend = detect_three_ds_app(root, APP_BY_KEY["retroarch"]).detected
+    generic_status = detect_three_ds_app(root, APP_BY_KEY["retroarch"])
+    # The generic readiness row deliberately refuses to call data/core folders a
+    # launchable RetroArch install. The route scanner is deeper: those same
+    # folders are enough to establish a RetroArch layout and then core-specific
+    # executable/CIA evidence determines whether the selected route is usable.
+    frontend = generic_status.detected or generic_status.marker is not None
     if profile is None:
         return RetroArchRouteStatus(profile, frontend, (), (), None, (), ())
 
