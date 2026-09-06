@@ -231,7 +231,8 @@ def write_open_agb_config(
         return path
 
     backup = path.with_name(path.name + BACKUP_SUFFIX)
-    backup.write_text(original, encoding="utf-8")
+    if not backup.exists():
+        backup.write_text(original, encoding="utf-8")
     temporary = path.with_name(path.name + ".rommheld.tmp")
     try:
         temporary.write_text(updated, encoding="utf-8")
