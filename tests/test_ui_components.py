@@ -50,5 +50,5 @@ def test_explicit_health_vocab_uses_stable_readable_labels() -> None:
     assert normalize_health_state("present-unverified") == "present_unverified"
     assert health_state_label("present_unverified") == "Present · Launch not verified"
     assert health_state_label("data-only") == "Data/assets only"
-    assert health_state_label("unknown") == "Not checked"
+    assert health_state_label("unknown") == "Unknown"
     assert health_state_label("not-applicable") == "Not applicable"
