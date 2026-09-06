@@ -26,7 +26,7 @@ from .romm_library_cache import load_cached_page, save_cached_page
 from .romm_remote import RomMRemoteGame
 from .romm_remote_worker import RomMLibraryWorker
 from .three_ds_filesystem_deploy import ThreeDSFilesystemDeployDialog
-from .three_ds_manager import RomMArtworkWorker
+from .three_ds_manager import RomMArtworkWorker, _keep_worker_alive
 from .three_ds_targets import (
     available_targets_for_file,
     default_destination,
@@ -702,5 +702,7 @@ class ThreeDSLibraryWidget(QWidget):
         for worker in (self.library_worker, self.artwork_worker):
             if worker is not None and worker.isRunning():
                 worker.requestInterruption()
-                worker.wait()
+                _keep_worker_alive(worker)
+        self.library_worker = None
+        self.artwork_worker = None
         super().closeEvent(event)
