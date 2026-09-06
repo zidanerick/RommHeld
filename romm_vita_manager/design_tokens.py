@@ -141,6 +141,66 @@ _STATUS_SUCCESS_TERMS = (
 )
 
 
+# Health services expose explicit state keys. Keep their presentation separate
+# from status_tone(), which exists for older free-form workflow strings. This
+# prevents the UI from inferring device/runtime health from wording such as a
+# path, marker, or troubleshooting sentence.
+_HEALTH_STATE_ALIASES = {
+    "assets-only": "assets_only",
+    "manual-only": "manual_only",
+    "system-sensitive": "system_sensitive",
+    "not-verified": "not_verified",
+    "needs-attention": "needs_attention",
+    "unknown/manual-only": "unknown_manual_only",
+}
+
+_HEALTH_STATE_TONES = {
+    "healthy": "success",
+    "ready": "success",
+    "verified": "success",
+    "present": "neutral",
+    "not_verified": "neutral",
+    "partial": "warning",
+    "assets_only": "warning",
+    "repairable": "warning",
+    "needs_attention": "warning",
+    "incomplete": "warning",
+    "manual_only": "warning",
+    "system_sensitive": "warning",
+    "unknown_manual_only": "warning",
+    "busy": "warning",
+    "checking": "warning",
+    "misconfigured": "error",
+    "failed": "error",
+    "error": "error",
+    "missing": "muted",
+    "unknown": "muted",
+}
+
+_HEALTH_STATE_LABELS = {
+    "healthy": "Healthy",
+    "ready": "Ready",
+    "verified": "Verified",
+    "present": "Present",
+    "not_verified": "Present · Not verified",
+    "partial": "Partial",
+    "assets_only": "Assets only",
+    "repairable": "Repairable",
+    "needs_attention": "Needs attention",
+    "incomplete": "Incomplete",
+    "manual_only": "Manual only",
+    "system_sensitive": "System-sensitive · Manual only",
+    "unknown_manual_only": "Unknown · Manual confirmation required",
+    "busy": "In progress",
+    "checking": "Checking",
+    "misconfigured": "Misconfigured",
+    "failed": "Failed",
+    "error": "Error",
+    "missing": "Missing",
+    "unknown": "Unknown",
+}
+
+
 def brand_for_platform(platform_key: str | None) -> PlatformBrand:
     key = (platform_key or "").strip().lower()
     family = PLATFORM_FAMILIES.get(key, "neutral")
@@ -169,6 +229,39 @@ def status_tone(value: str) -> str:
     return "neutral"
 
 
+def normalize_health_state(state: str | None) -> str:
+    """Normalize a service-supplied health state for presentation only.
+
+    Unknown future states are preserved rather than rejected so a newer device
+    service can still render safely before the UI gains a tailored label/tone.
+    """
+
+    raw = str(state or "").strip().casefold()
+    if not raw:
+        return "unknown"
+    if raw in _HEALTH_STATE_ALIASES:
+        return _HEALTH_STATE_ALIASES[raw]
+    return raw.replace("-", "_").replace(" ", "_").replace("/", "_")
+
+
+def health_state_tone(state: str | None) -> str:
+    """Return the semantic UI tone for an explicit service health state."""
+
+    return _HEALTH_STATE_TONES.get(normalize_health_state(state), "neutral")
+
+
+def health_state_label(state: str | None, fallback: str | None = None) -> str:
+    """Return a compact label without deriving or changing the health state."""
+
+    normalized = normalize_health_state(state)
+    if fallback:
+        return fallback
+    label = _HEALTH_STATE_LABELS.get(normalized)
+    if label:
+        return label
+    return normalized.replace("_", " ").strip().title() or "Unknown"
+
+
 __all__ = [
     "BRANDS",
     "CONTENT_MAX_WIDTH",
@@ -188,5 +281,8 @@ __all__ = [
     "SPACE_6",
     "SPACE_8",
     "brand_for_platform",
+    "health_state_label",
+    "health_state_tone",
+    "normalize_health_state",
     "status_tone",
 ]
