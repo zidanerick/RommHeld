@@ -25,7 +25,12 @@ from PySide6.QtWidgets import (
 from .config import load_config, save_config
 from .console_identity import ConsoleIdentity
 from .design_tokens import DARK, brand_for_platform
-from .library_sources import LibrarySource, get_library_source, save_library_source
+from .library_sources import (
+    LibrarySource,
+    get_library_source,
+    save_library_source,
+    workspace_supports_library_source,
+)
 from .romm_api import RomMApiError, normalize_romm_url, test_connection
 from .ui_components import AccentButton
 
@@ -443,6 +448,9 @@ class PlatformSelectorDialog(QDialog):
         self.source_status.style().polish(self.source_status)
         self.source_status.update()
 
+    def _romm_supported(self) -> bool:
+        return workspace_supports_library_source(self.selected_console, "romm_api")
+
     def select_console(self, key: str) -> None:
         profile = next((item for item in CONSOLES if item.key == key), None)
         if profile is None or profile.state not in {"supported", "research"}:
@@ -453,6 +461,7 @@ class PlatformSelectorDialog(QDialog):
             tile.set_selected(tile.profile.key == key)
         self.continue_button.set_accent(profile.accent)
         self.selection_context.setText(profile.name)
+        self.update_source_visibility()
 
     def choose_local_root(self) -> None:
         path = QFileDialog.getExistingDirectory(
@@ -466,21 +475,37 @@ class PlatformSelectorDialog(QDialog):
             self.refresh_source_status()
 
     def update_source_visibility(self) -> None:
+        romm_supported = self._romm_supported()
+        if not romm_supported and self.romm_radio.isChecked():
+            self.local_radio.setChecked(True)
+
         local = self.local_radio.isChecked()
         testing = bool(self._romm_thread and self._romm_thread.isRunning())
         self.local_edit.setEnabled(local and not testing)
         self.local_browse.setEnabled(local and not testing)
-        self.url_edit.setEnabled(not local and not testing)
-        self.token_edit.setEnabled(not local and not testing)
-        self.test_button.setEnabled(not local and not testing)
+        self.romm_radio.setEnabled(romm_supported and not testing)
+        self.romm_radio.setToolTip(
+            ""
+            if romm_supported
+            else "RomM library browsing is currently available in the Nintendo 3DS workspace."
+        )
+        self.url_edit.setEnabled(romm_supported and not local and not testing)
+        self.token_edit.setEnabled(romm_supported and not local and not testing)
+        self.test_button.setEnabled(romm_supported and not local and not testing)
         self.continue_button.setEnabled(not testing)
         self.refresh_source_status()
 
     def refresh_source_status(self) -> None:
         if self.local_radio.isChecked():
             root = Path(self.local_edit.text()).expanduser()
+            target = self.selected_profile.name if self.selected_profile is not None else "this handheld"
             if root.is_dir():
-                self._set_source_state("success", "Local library ready")
+                self._set_source_state("success", f"Local library ready for {target}")
+            elif not self._romm_supported():
+                self._set_source_state(
+                    "neutral",
+                    f"{target} currently uses a local library. Choose an existing ROM directory.",
+                )
             else:
                 self._set_source_state("neutral", "Choose an existing ROM directory")
         elif self._romm_thread and self._romm_thread.isRunning():
@@ -492,6 +517,9 @@ class PlatformSelectorDialog(QDialog):
             )
 
     def test_romm_server(self) -> None:
+        if not self._romm_supported():
+            self.refresh_source_status()
+            return
         if self._romm_thread and self._romm_thread.isRunning():
             return
         url = self.url_edit.text().strip()
@@ -523,6 +551,7 @@ class PlatformSelectorDialog(QDialog):
         worker.succeeded.connect(self._romm_test_succeeded)
         worker.failed.connect(self._romm_test_failed)
         worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
         thread.finished.connect(self._romm_thread_finished)
         thread.finished.connect(thread.deleteLater)
         self._romm_thread = thread
@@ -548,8 +577,20 @@ class PlatformSelectorDialog(QDialog):
     def continue_selected(self) -> None:
         if self.selected_profile is None:
             return
+        mode = "local" if self.local_radio.isChecked() else "romm_api"
+        if not workspace_supports_library_source(self.selected_console, mode):
+            QMessageBox.warning(
+                self,
+                "Library source unavailable",
+                f"{self.selected_profile.name} does not currently have a {('RomM' if mode == 'romm_api' else 'local')} library browser. Choose an available library source.",
+            )
+            return
+
+        saved_romm_url = self.url_edit.text().strip()
+        saved_token = self.token_edit.text().strip()
+        saved_local_root = self.local_edit.text().strip()
         if self.local_radio.isChecked():
-            root = Path(self.local_edit.text()).expanduser()
+            root = Path(saved_local_root).expanduser()
             if not root.is_dir():
                 QMessageBox.warning(
                     self,
@@ -557,15 +598,19 @@ class PlatformSelectorDialog(QDialog):
                     "Choose an existing local ROM directory.",
                 )
                 return
-            source = LibrarySource(mode="local", local_root=str(root))
+            source = LibrarySource(
+                mode="local",
+                local_root=str(root),
+                romm_url=saved_romm_url,
+                api_token=saved_token,
+            )
         else:
             try:
-                url = normalize_romm_url(self.url_edit.text())
+                url = normalize_romm_url(saved_romm_url)
             except ValueError as exc:
                 QMessageBox.warning(self, "RomM configuration", str(exc))
                 return
-            token = self.token_edit.text().strip()
-            if not token:
+            if not saved_token:
                 QMessageBox.warning(
                     self,
                     "RomM configuration",
@@ -574,8 +619,9 @@ class PlatformSelectorDialog(QDialog):
                 return
             source = LibrarySource(
                 mode="romm_api",
+                local_root=saved_local_root,
                 romm_url=url,
-                api_token=token,
+                api_token=saved_token,
             )
         updated = save_library_source(self.config, source)
         updated["active_console"] = self.selected_console
@@ -584,11 +630,25 @@ class PlatformSelectorDialog(QDialog):
         self.config = updated
         self.accept()
 
+    def reject(self) -> None:
+        thread = self._romm_thread
+        if thread is not None and thread.isRunning():
+            self._set_source_state(
+                "busy",
+                "Finish the RomM connection test before closing setup.",
+            )
+            return
+        super().reject()
+
     def closeEvent(self, event) -> None:
         thread = self._romm_thread
         if thread is not None and thread.isRunning():
-            thread.quit()
-            thread.wait()
+            self._set_source_state(
+                "busy",
+                "Finish the RomM connection test before closing setup.",
+            )
+            event.ignore()
+            return
         for tile in self.console_grid.tiles:
             identity = tile.findChild(ConsoleIdentity)
             if identity is not None:
