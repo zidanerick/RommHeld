@@ -169,6 +169,10 @@ The current direct-staging allowlist is:
 - ftpd 3DSX
 - Universal-Updater 3DSX
 - Red Viper 3DSX
+- FBI Homebrew Launcher 3DSX
+- Checkpoint Homebrew Launcher 3DSX
+
+The FBI and Checkpoint entries prepare their `.3dsx` Homebrew Launcher builds on the mounted SD card. This is not evidence that their CIA titles are installed on the console and is not presented as such in readiness state.
 
 The staging service:
 
@@ -181,7 +185,9 @@ The staging service:
 7. stages through a temporary file and atomically replaces the target;
 8. supports cancellation during download.
 
-Complex or system-sensitive packages such as Luma3DS, TWiLight Menu++, RetroArch, DaedalusX64, GodMode9, and CFW/bootstrap components stay delegated to Universal-Updater or maintained upstream procedures. Console-specific DSP firmware is never downloaded by RommHeld.
+`three_ds_readiness_ui.py` adds an assisted tier for applications whose installation policy delegates complex or multi-file work to Universal-Updater. If Universal-Updater is absent, RommHeld can prepare its verified 3DSX bootstrap using the same direct-staging service. If it is already detected, the primary action shows the exact on-console next step: launch Universal-Updater and search for the selected application. RommHeld does not duplicate Universal-Updater's maintained archive extraction, CIA installation, updater scripts or system-sensitive file handling.
+
+Complex packages such as TWiLight Menu++, RetroArch and DaedalusX64 remain updater-assisted rather than being partially installed from a convenient but incomplete standalone asset. `open_agb_firm` remains updater/manual because its bundle and configuration format require version-aware handling. GodMode9 remains updater/guide driven. Luma3DS, the Homebrew Launcher exploit/bootstrap foundation and other boot-chain components remain guide-only and are never automatically replaced by RommHeld. Console-specific DSP firmware is never downloaded and must be generated from the user's own console.
 
 ### FBI Remote Install
 
