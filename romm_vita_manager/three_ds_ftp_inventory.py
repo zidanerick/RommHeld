@@ -36,9 +36,10 @@ class _RemoteTree:
             self._cache[key] = tuple(rows)
         return self._cache[key]
 
-    def resolve(self, marker: str) -> str | None:
+    def resolve_entry(self, marker: str) -> tuple[str, dict[str, str | int]] | None:
         current = ""
         actual_parts: list[str] = []
+        final_entry: dict[str, str | int] | None = None
         for raw_part in marker.replace("\\", "/").split("/"):
             part = raw_part.strip()
             if not part or part == ".":
@@ -56,7 +57,26 @@ class _RemoteTree:
             actual = str(match.get("name", ""))
             actual_parts.append(actual)
             current = "/".join(actual_parts)
-        return current if actual_parts else ""
+            final_entry = match
+        if final_entry is None:
+            return None
+        return current, final_entry
+
+    def resolve(self, marker: str) -> str | None:
+        resolved = self.resolve_entry(marker)
+        return resolved[0] if resolved is not None else None
+
+    def marker_present(self, marker: str) -> bool:
+        resolved = self.resolve_entry(marker)
+        if resolved is None:
+            return False
+        _path, entry = resolved
+        if entry.get("type") != "file":
+            return True
+        try:
+            return int(entry.get("size", 0)) > 0
+        except (TypeError, ValueError):
+            return False
 
 
 def _remote_title_roots(tree: _RemoteTree) -> tuple[str, ...]:
@@ -120,24 +140,6 @@ def scan_three_ds_apps_ftp(
                 )
                 continue
 
-            matched = tuple(
-                marker for marker in definition.markers if tree.resolve(marker) is not None
-            )
-            marker_match = (
-                len(matched) == len(definition.markers)
-                if definition.marker_policy == "all"
-                else bool(matched)
-            )
-            marker = "; ".join(matched) if marker_match and matched else None
-            if marker_match and definition.marker_confirms_launchable:
-                statuses[definition.key] = ThreeDSAppStatus(
-                    definition,
-                    True,
-                    marker=marker,
-                    source="ftp",
-                )
-                continue
-
             found_title_id = None
             for raw_title_id in definition.installed_title_ids:
                 normalized = raw_title_id.strip().upper()
@@ -156,6 +158,24 @@ def scan_three_ds_apps_ftp(
                     title_id=found_title_id,
                     source="ftp",
                 )
+                continue
+
+            matched = tuple(
+                marker for marker in definition.markers if tree.marker_present(marker)
+            )
+            marker_match = (
+                len(matched) == len(definition.markers)
+                if definition.marker_policy == "all"
+                else bool(matched)
+            )
+            marker = "; ".join(matched) if marker_match and matched else None
+            if marker_match and definition.marker_confirms_launchable:
+                statuses[definition.key] = ThreeDSAppStatus(
+                    definition,
+                    True,
+                    marker=marker,
+                    source="ftp",
+                )
             else:
                 statuses[definition.key] = ThreeDSAppStatus(
                     definition,
@@ -171,12 +191,16 @@ def scan_three_ds_apps_ftp(
 def merge_three_ds_app_inventories(
     *inventories: dict[str, ThreeDSAppStatus],
 ) -> dict[str, ThreeDSAppStatus]:
-    """Prefer any positive evidence while preserving the strongest negative evidence."""
+    """Prefer the strongest positive evidence, then preserve useful file evidence."""
 
     result: dict[str, ThreeDSAppStatus] = {}
     for definition in THREE_DS_APPS:
         candidates = [inventory.get(definition.key) for inventory in inventories]
-        detected = next((status for status in candidates if status and status.detected), None)
+        detected_candidates = [status for status in candidates if status and status.detected]
+        detected = next(
+            (status for status in detected_candidates if status.title_id),
+            detected_candidates[0] if detected_candidates else None,
+        )
         if detected is not None:
             result[definition.key] = detected
             continue
