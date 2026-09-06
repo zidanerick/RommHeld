@@ -81,7 +81,7 @@ def test_ftp_inventory_detects_known_cia_title_tree():
     assert "live FTP SD title tree" in checkpoint.detection_note
 
 
-def test_twilight_still_requires_both_remote_markers():
+def test_twilight_remote_assets_require_launcher_confirmation():
     FakeInventoryBackend.tree = {
         "": [_dir("_nds")],
         "_nds": [_dir("TWiLightMenu")],
@@ -92,6 +92,7 @@ def test_twilight_still_requires_both_remote_markers():
         backend_factory=FakeInventoryBackend,
     )
     assert not partial["twilight"].detected
+    assert partial["twilight"].marker is None
 
     FakeInventoryBackend.tree["_nds"].append(_dir("nds-bootstrap"))
     FakeInventoryBackend.tree["_nds/nds-bootstrap"] = []
@@ -99,7 +100,9 @@ def test_twilight_still_requires_both_remote_markers():
         ThreeDSFtpSettings("192.0.2.3"),
         backend_factory=FakeInventoryBackend,
     )
-    assert complete["twilight"].detected
+    assert not complete["twilight"].detected
+    assert complete["twilight"].marker == "_nds/TWiLightMenu; _nds/nds-bootstrap"
+    assert "do not prove" in complete["twilight"].detection_note
 
 
 def test_merge_prefers_positive_ftp_evidence_over_negative_mounted_scan():
@@ -119,3 +122,23 @@ def test_merge_prefers_positive_ftp_evidence_over_negative_mounted_scan():
 
     assert merged["checkpoint"].detected
     assert merged["checkpoint"].source == "ftp"
+
+
+def test_merge_keeps_unconfirmed_remote_runtime_file_evidence():
+    local = {
+        "twilight": ThreeDSAppStatus(APP_BY_KEY["twilight"], False),
+    }
+    remote = {
+        "twilight": ThreeDSAppStatus(
+            APP_BY_KEY["twilight"],
+            False,
+            "_nds/TWiLightMenu; _nds/nds-bootstrap",
+            source="ftp",
+        ),
+    }
+
+    merged = merge_three_ds_app_inventories(local, remote)
+
+    assert not merged["twilight"].detected
+    assert merged["twilight"].source == "ftp"
+    assert merged["twilight"].marker is not None
