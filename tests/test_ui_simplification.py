@@ -136,9 +136,12 @@ def test_device_primary_actions_follow_readiness() -> None:
     assert 'self.workspace_3ds_setup_action.set_emphasized(not route_ready)' in source
     assert 'self.workspace_3ds_manage_action.set_emphasized(route_ready)' in source
     assert 'self.ds_browse_action.set_emphasized(not bool(root))' in source
-    assert 'self.ds_validate_action.set_emphasized(bool(root))' in source
+    assert 'self.ds_validate_action = QPushButton("Refresh readiness")' in source
+    assert 'self.ds_validate_action.setEnabled(bool(root))' in source
     assert 'self.ds_browse_action.set_emphasized(False)' in source
-    assert 'self.ds_validate_action.set_emphasized(True)' in source
+    assert 'self.ds_validate_action.setEnabled(True)' in source
+    assert 'self.ds_health_panel = DsRuntimeHealthPanel(accent)' in source
+    assert 'self._refresh_ds_health()' in source
 
 
 def test_romm_connection_can_be_tested_from_settings() -> None:
