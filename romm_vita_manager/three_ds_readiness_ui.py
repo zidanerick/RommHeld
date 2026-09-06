@@ -33,6 +33,14 @@ from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 
 
 NINTENDO_RED = brand_for_platform("3ds").accent
+UNIVERSAL_UPDATER_ASSIST_POLICIES = frozenset(
+    {
+        "prefer_universal_updater",
+        "manual_bundle_or_updater",
+        "guide_or_universal_updater",
+        "universal_updater_or_manual",
+    }
+)
 
 
 class ThreeDSPackageStageWorker(QThread):
@@ -105,6 +113,7 @@ class ThreeDSReadinessDialog(QDialog):
         self.needs_ftp = needs_ftp
         self.needs_cia_install = needs_cia_install
         self.worker: ThreeDSPackageStageWorker | None = None
+        self._assist_target_app_key: str | None = None
         self._closing_requested = False
         self._requirements: dict[str, ReadinessRequirement] = {}
         self._statuses: dict[str, ThreeDSAppStatus] = {}
@@ -115,7 +124,7 @@ class ThreeDSReadinessDialog(QDialog):
 
         header = SectionHeader(
             "Nintendo 3DS readiness",
-            "Check the mounted SD card, distinguish required components from optional runtimes, and stage only simple upstream homebrew packages that RommHeld can verify safely.",
+            "Check the mounted SD card, distinguish required components from optional runtimes, and prepare supported homebrew through verified direct staging or the maintained on-console updater path.",
         )
 
         self.readiness_status = StatusPill("Readiness", "Checking…")
@@ -160,7 +169,7 @@ class ThreeDSReadinessDialog(QDialog):
         self.configure_button = QPushButton("Configure")
         self.configure_button.setEnabled(False)
         self.configure_button.clicked.connect(self.configure_selected)
-        self.stage_button = AccentButton("Stage to SD", NINTENDO_RED)
+        self.stage_button = AccentButton("Prepare on SD", NINTENDO_RED)
         self.stage_button.setEnabled(False)
         self.stage_button.clicked.connect(self.stage_selected)
         detail_actions = QHBoxLayout()
@@ -240,6 +249,17 @@ class ThreeDSReadinessDialog(QDialog):
         if status.definition.installed_title_may_exist_without_sd_marker:
             return "Not detected on SD"
         return "Not detected"
+
+    def _uses_universal_updater_assist(self, app_key: str) -> bool:
+        app = APP_BY_KEY[app_key]
+        return (
+            package_for_app(app_key) is None
+            and app.install_policy in UNIVERSAL_UPDATER_ASSIST_POLICIES
+        )
+
+    def _universal_updater_detected(self) -> bool:
+        status = self._statuses.get("universal-updater")
+        return bool(status and status.detected)
 
     def _runtime_detail(self, app_key: str) -> str:
         if app_key == "twilight":
@@ -341,18 +361,37 @@ class ThreeDSReadinessDialog(QDialog):
         reason = requirement.reason if requirement is not None else app.description
         detection = status.detection_note if status is not None else "Not checked."
         package = package_for_app(app_key)
+        updater_assist = self._uses_universal_updater_assist(app_key)
 
         policy_notes = {
-            "guide_only": "RommHeld will not modify this system component. Follow the current upstream guide.",
-            "console_generated": "This data must be generated from the user's own console and is never downloaded by RommHeld.",
-            "prefer_universal_updater": "Use Universal-Updater or the upstream installation process for this multi-file package.",
-            "manual_bundle_or_updater": "This package has a multi-file/runtime layout and is not directly staged by RommHeld.",
-            "guide_or_universal_updater": "Use the upstream guide or Universal-Updater; RommHeld does not manage this system utility directly.",
-            "manual_or_existing": "Verify the installed title on the console or follow the upstream installation procedure.",
-            "universal_updater_or_manual": "Prefer Universal-Updater for normal installation. RommHeld can stage a simple verified 3DSX build when one is explicitly supported.",
-            "manual_bootstrap": "RommHeld can stage the upstream 3DSX bootstrap; use the application itself for broader homebrew management.",
+            "guide_only": "Use the maintained upstream guide. RommHeld will not automatically replace boot-chain or exploit-environment files.",
+            "console_generated": "Generate this from your own console. RommHeld will not download console-specific system data.",
+            "prefer_universal_updater": "Use Universal-Updater for the maintained on-console installation recipe.",
+            "manual_bundle_or_updater": "This runtime has a multi-file layout. Use Universal-Updater for the maintained on-console installation recipe.",
+            "guide_or_universal_updater": "Use Universal-Updater or the maintained upstream guide; RommHeld will not directly modify this system-sensitive package.",
+            "manual_or_existing": "Verify the installed title on the console or use the verified Homebrew Launcher build that RommHeld can prepare on this SD card.",
+            "universal_updater_or_manual": "Prefer Universal-Updater for normal installation; RommHeld can directly prepare an explicitly supported verified 3DSX build.",
+            "manual_bootstrap": "RommHeld can prepare the verified 3DSX bootstrap on this SD card; use the application itself for broader homebrew management.",
         }
-        policy = policy_notes.get(app.install_policy, app.install_policy)
+        if package is not None:
+            policy = (
+                f"RommHeld can safely prepare the exact upstream {package.asset_name} on this mounted SD card. "
+                "This prepares the Homebrew Launcher build and does not claim that a CIA title is installed."
+            )
+        elif updater_assist:
+            if self._universal_updater_detected():
+                policy = (
+                    f"Fastest supported path: launch Universal-Updater on the 3DS and search for {app.name}. "
+                    "The maintained on-console recipe owns the complex installation steps."
+                )
+            else:
+                policy = (
+                    f"Fastest supported path: RommHeld can prepare Universal-Updater on this SD card. "
+                    f"Then launch it on the 3DS and search for {app.name}."
+                )
+        else:
+            policy = policy_notes.get(app.install_policy, app.install_policy)
+
         runtime_detail = self._runtime_detail(app_key)
         detail = f"{reason}\n\n{detection}\n\n{policy}"
         if runtime_detail:
@@ -360,16 +399,31 @@ class ThreeDSReadinessDialog(QDialog):
         self.detail_title.setText(f"{app.name} · {importance} · {state}")
         self.detail_text.setText(detail)
         self.open_upstream_button.setEnabled(is_web_url(app.upstream_url))
+        self.open_upstream_button.setText(
+            "Open install guide"
+            if app.install_policy in {"guide_only", "console_generated"}
+            else "Open upstream"
+        )
         self.configure_button.setEnabled(
             app_key == "open-agb-firm" and self._open_agb_config_is_current()
         )
         self.configure_button.setText(
             "Configure open_agb_firm" if app_key == "open-agb-firm" else "Configure"
         )
-        self.stage_button.setEnabled(package is not None and self.worker is None)
-        self.stage_button.setText(
-            f"Stage {package.name} to SD" if package is not None else "Stage to SD"
+
+        self.stage_button.setEnabled(
+            self.worker is None and (package is not None or updater_assist)
         )
+        if package is not None:
+            self.stage_button.setText(f"Prepare {package.name}")
+        elif updater_assist and self._universal_updater_detected():
+            self.stage_button.setText("Show updater steps")
+        elif updater_assist:
+            self.stage_button.setText("Prepare Universal-Updater")
+        elif app.install_policy == "console_generated":
+            self.stage_button.setText("Generate on console")
+        else:
+            self.stage_button.setText("No automatic install")
 
     def _open_agb_config_is_current(self) -> bool:
         path = open_agb_config_path(self.sd_root)
@@ -410,21 +464,10 @@ class ThreeDSReadinessDialog(QDialog):
         dialog.exec()
         self.refresh()
 
-    def stage_selected(self) -> None:
-        if self.worker is not None:
+    def _start_stage_worker(self, app_key: str) -> None:
+        package = package_for_app(app_key)
+        if package is None:
             return
-        app_key = self._selected_app_key()
-        package = package_for_app(app_key or "")
-        if app_key is None or package is None:
-            return
-        answer = QMessageBox.question(
-            self,
-            f"Stage {package.name}",
-            f"RommHeld will download the exact {package.asset_name} asset from the latest stable {package.repository} GitHub release, verify the published size and SHA-256 when the release provides one, then stage it to /{package.destination}. Existing files are backed up before replacement. Continue?",
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-
         self.progress.setValue(0)
         self.progress.setVisible(True)
         self.cancel_button.setVisible(True)
@@ -439,6 +482,49 @@ class ThreeDSReadinessDialog(QDialog):
         self.stage_button.setEnabled(False)
         self.worker.start()
 
+    def stage_selected(self) -> None:
+        if self.worker is not None:
+            return
+        app_key = self._selected_app_key()
+        if app_key is None:
+            return
+        app = APP_BY_KEY[app_key]
+        package = package_for_app(app_key)
+
+        if package is not None:
+            answer = QMessageBox.question(
+                self,
+                f"Prepare {package.name}",
+                f"RommHeld will download the exact {package.asset_name} asset from the latest stable {package.repository} GitHub release, verify the published size and SHA-256 when the release provides one, then place it at /{package.destination}. Existing files are backed up before replacement. Continue?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            self._assist_target_app_key = None
+            self._start_stage_worker(app_key)
+            return
+
+        if not self._uses_universal_updater_assist(app_key):
+            return
+        if self._universal_updater_detected():
+            self.operation_status.setText(
+                f"On the 3DS, launch Universal-Updater and search for {app.name}. "
+                "Use its maintained install recipe, then return here and refresh checks."
+            )
+            return
+
+        updater = package_for_app("universal-updater")
+        if updater is None:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Prepare Universal-Updater",
+            f"{app.name} uses a complex or system-sensitive install layout. RommHeld will first prepare the verified Universal-Updater 3DSX at /{updater.destination}. Then launch Universal-Updater on the 3DS and search for {app.name}. Continue?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self._assist_target_app_key = app_key
+        self._start_stage_worker("universal-updater")
+
     def cancel_staging(self) -> None:
         if self.worker is not None and self.worker.isRunning():
             self.cancel_button.setEnabled(False)
@@ -447,10 +533,17 @@ class ThreeDSReadinessDialog(QDialog):
 
     def _stage_completed(self, name: str, target: str) -> None:
         self.progress.setValue(100)
-        self.operation_status.setText(f"{name} staged to {target}")
+        if self._assist_target_app_key:
+            app = APP_BY_KEY[self._assist_target_app_key]
+            self.operation_status.setText(
+                f"Universal-Updater prepared at {target}. On the 3DS, launch it and search for {app.name}."
+            )
+        else:
+            self.operation_status.setText(f"{name} prepared at {target}")
 
     def _stage_failed(self, message: str) -> None:
-        self.operation_status.setText(f"Package staging failed: {message}")
+        prefix = "Universal-Updater preparation failed" if self._assist_target_app_key else "Package staging failed"
+        self.operation_status.setText(f"{prefix}: {message}")
         QMessageBox.warning(self, "3DS package staging failed", message)
 
     def _stage_cancelled(self) -> None:
@@ -462,9 +555,11 @@ class ThreeDSReadinessDialog(QDialog):
         self.cancel_button.setVisible(False)
         self.progress.setVisible(False)
         if self._closing_requested:
+            self._assist_target_app_key = None
             QTimer.singleShot(0, self.close)
             return
         self.refresh()
+        self._assist_target_app_key = None
 
     def closeEvent(self, event) -> None:
         if self.worker is not None and self.worker.isRunning():
