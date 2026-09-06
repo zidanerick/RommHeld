@@ -43,6 +43,26 @@ def test_setup_fbi_quick_check_ignores_theme_only_leftovers(tmp_path: Path):
     assert "fbi/theme" not in matched
 
 
+def test_setup_fbi_quick_check_detects_sd_installed_cia_title(tmp_path: Path):
+    fbi = _component("fbi")
+    title_id = "000400000F800100"
+    title_path = (
+        tmp_path
+        / "Nintendo 3DS"
+        / ("1" * 32)
+        / ("2" * 32)
+        / "title"
+        / title_id[:8]
+        / title_id[8:]
+    )
+    title_path.mkdir(parents=True)
+
+    detected, marker = component_presence(tmp_path, fbi)
+
+    assert detected
+    assert marker == "Nintendo 3DS/<ID0>/<ID1>/title/00040000/0F800100"
+
+
 def test_setup_open_agb_firm_quick_check_requires_firm_payload(tmp_path: Path):
     open_agb = _component("open-agb-firm")
     (tmp_path / "3ds" / "open_agb_firm").mkdir(parents=True)
