@@ -1,7 +1,9 @@
 from pathlib import Path
 
+from romm_vita_manager.platform_services import is_web_url
 from romm_vita_manager.three_ds_apps import (
     APP_BY_KEY,
+    THREE_DS_APPS,
     detect_three_ds_app,
     readiness_component_keys,
     recommended_runtime_keys,
@@ -148,6 +150,11 @@ def test_retroarch_app_metadata_matches_audited_3ds_target_set():
     assert "n64" not in APP_BY_KEY["retroarch"].platform_slugs
     assert "amiga" not in APP_BY_KEY["retroarch"].platform_slugs
     assert "scummvm" not in APP_BY_KEY["retroarch"].platform_slugs
+
+
+def test_all_readiness_apps_have_valid_web_upstream_urls():
+    assert THREE_DS_APPS
+    assert all(is_web_url(app.upstream_url) for app in THREE_DS_APPS)
 
 
 def test_runtime_recommendations_are_platform_specific():
