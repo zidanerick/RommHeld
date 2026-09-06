@@ -131,13 +131,14 @@ PSP and PS1 retain their Adrenaline paths. Other supported systems can map to Re
 ### Nintendo 3DS
 
 - `three_ds_ftp.py`: FTP transport, remote-root enforcement, creation, skip/resume/cancellation and size verification
+- `three_ds_ftp_inventory.py`: read-only live-ftpd runtime/homebrew evidence collection using the shared app definitions
 - `three_ds_storage.py`: mounted 3DS SD-card root/configuration backend
 - `three_ds_manager.py`: direct 3DS transfer/management UI
 - `three_ds_setup.py`: guided storage/transport/FBI-readiness setup workflow
 - `three_ds_paths.py`: path helpers
 - `storage_validation.py`: mounted-storage validation
-- `three_ds_apps.py`: declarative 3DS runtime/homebrew inventory and conservative SD-marker detection
-- `three_ds_readiness.py`: required/recommended/optional workflow-readiness evaluation
+- `three_ds_apps.py`: declarative 3DS runtime/homebrew markers, known Title IDs and evidence semantics shared by mounted-SD and FTP inventory
+- `three_ds_readiness.py`: source-independent required/recommended/optional workflow-readiness evaluation
 - `three_ds_packages.py`: narrow, verified mounted-SD staging for explicitly supported simple 3DSX packages
 - `three_ds_readiness_ui.py`: focused readiness/runtime-management dialog built on the non-UI services above
 
@@ -145,11 +146,13 @@ The Device page treats a validated mounted SD/microSD card as a direct offline f
 
 The recommended live filesystem server is mtheall `ftpd`. RommHeld defaults to port `5000`, tells users to open `ftpd` and leave it running, and translates common timeout/refusal/authentication errors into console-side remediation. The 3DS backend can use `MLSD` with fallback listing, `REST` resume where supported, `ABOR` cancellation, `SIZE` verification and the configured remote-root boundary. Failed connection setup closes partially opened FTP sockets.
 
+Runtime readiness can inspect either a validated mounted SD card, a configured live ftpd endpoint, or both. `three_ds_ftp_inventory.py` traverses the configured remote root case-insensitively, applies the same marker and marker-policy definitions used by mounted-SD scanning, checks known CIA Title IDs in the FTP-visible `Nintendo 3DS/<ID0>/<ID1>/title/` tree, and treats a successful ftpd connection as direct evidence that ftpd itself is available. When both sources are present, positive evidence from either source is retained. The FTP inventory runs in a dedicated Qt worker so remote traversal does not block the UI thread.
+
+FTP-visible title-tree evidence is intentionally narrow. A known Title ID directory can support a positive installed-CIA result for explicitly modelled applications, but absence of a marker or known Title ID does not prove an application is absent from NAND or from an installation layout RommHeld has not modelled. Applications that can exist without reliable filesystem evidence remain a console-confirmation state where appropriate.
+
 FTP transport does not choose runtime or package format. Setup keeps FTP connectivity and FBI Remote Install readiness explicit rather than treating them as one state. For installable CIA packages, FBI Remote Install remains the direct installation route; FTP is the filesystem-copy route.
 
-3DS readiness also does not equate “not visible in the SD filesystem” with “not installed”. Applications that may exist only as installed CIA titles are reported as needing on-console confirmation when required.
-
-The active Device page exposes guided Connection setup, Mounted SD files, and contextual Runtime readiness. The readiness dialog remains a focused secondary surface rather than another permanent navigation destination.
+The active Device page exposes guided Connection setup, Mounted SD files, and contextual Runtime readiness. Runtime readiness can open in FTP-only mode without forcing the user to remove or mount the SD card. Direct verified package staging and device-side configuration editing remain mounted-SD-only because those operations require the stronger local storage validation and replacement guarantees.
 
 ### 3DS runtime configuration
 
@@ -185,7 +188,7 @@ The staging service:
 7. stages through a temporary file and atomically replaces the target;
 8. supports cancellation during download.
 
-`three_ds_readiness_ui.py` adds an assisted tier for applications whose installation policy delegates complex or multi-file work to Universal-Updater. If Universal-Updater is absent, RommHeld can prepare its verified 3DSX bootstrap using the same direct-staging service. If it is already detected, the primary action shows the exact on-console next step: launch Universal-Updater and search for the selected application. RommHeld does not duplicate Universal-Updater's maintained archive extraction, CIA installation, updater scripts or system-sensitive file handling.
+`three_ds_readiness_ui.py` adds an assisted tier for applications whose installation policy delegates complex or multi-file work to Universal-Updater. If Universal-Updater is absent, RommHeld can prepare its verified 3DSX bootstrap using the same direct-staging service. If it is already detected through either mounted-SD or FTP evidence, the primary action shows the exact on-console next step: launch Universal-Updater and search for the selected application. RommHeld does not duplicate Universal-Updater's maintained archive extraction, CIA installation, updater scripts or system-sensitive file handling.
 
 Complex packages such as TWiLight Menu++, RetroArch and DaedalusX64 remain updater-assisted rather than being partially installed from a convenient but incomplete standalone asset. `open_agb_firm` remains updater/manual because its bundle and configuration format require version-aware handling. GodMode9 remains updater/guide driven. Luma3DS, the Homebrew Launcher exploit/bootstrap foundation and other boot-chain components remain guide-only and are never automatically replaced by RommHeld. Console-specific DSP firmware is never downloaded and must be generated from the user's own console.
 
@@ -296,6 +299,8 @@ Every worker follows these rules:
 
 The 3DS package-staging worker follows the same lifecycle. Package resolution is a bounded network operation and package download is cancellation-aware. Closing the readiness dialog requests cancellation and keeps the dialog alive until its worker finishes.
 
+The 3DS FTP-readiness worker follows the same ownership rule. Closing the readiness dialog requests interruption and keeps the dialog alive until the bounded FTP scan has returned, preventing a live `QThread` from being destroyed while the network operation unwinds.
+
 VitaShell FTP workers use the same ownership rules. Since VitaShell does not support FTP `ABOR`, cancellation may require closing the current FTP control connection and using a short cleanup connection rather than waiting for a protocol-level abort response.
 
 A clean shutdown is preferred over arbitrary short waits that can leave live Qt threads behind.
@@ -314,7 +319,7 @@ A clean shutdown is preferred over arbitrary short waits that can leave live Qt 
 10. Transport code does not silently choose runtime/package format.
 11. Package preparation does not silently install proprietary executable content from untrusted mirrors.
 12. UI refactors preserve overwrite, verification, cancellation and credential semantics.
-13. Runtime/homebrew detection is evidence-based and does not claim installed-title certainty from missing SD markers.
+13. Runtime/homebrew detection is evidence-based and does not claim installed-title certainty from missing mounted-SD or FTP markers.
 14. Device-side configuration adapters must be narrow, version-aware, backed up before replacement, and preserve unrelated settings.
 15. Automatic homebrew staging must use an explicit allowlist and upstream release verification; it must not expand into CFW/bootstrap management.
 16. Device-specific FTP capabilities are not assumed to be interchangeable. Resume, listing, cancellation and reply handling follow the actual server used by that console.
@@ -334,7 +339,7 @@ The structural refactor is complete enough that further broad restructuring shou
 - legacy `ui.py`, `app.py` and `platform_selector.py` surfaces are removed;
 - Send File, removable-storage, Vita Setup, 3DS Setup and 3DS Manager use the shared design language;
 - 3DS runtime/readiness/configuration/package-staging responsibilities are isolated from transport and package-generation code;
-- 3DS readiness and mounted-storage management are reachable contextually from Device without becoming permanent pages;
+- 3DS readiness can merge mounted-SD and live-ftpd evidence and can run in FTP-only mode without becoming a permanent navigation destination;
 - AST/source regression tests prevent removed legacy dependencies and placeholder navigation from returning.
 
 The remaining pre-merge UI work is primarily desktop rendering/lifecycle validation and defect-driven polish, while device-dependent behavior still requires real Vita and Nintendo 3DS regression testing. VitaShell FTP and the newer 3DS runtime/deployment routes cannot be considered hardware-validated from CI alone. New architecture work should require a concrete functional reason rather than continuing the refactor for its own sake.
