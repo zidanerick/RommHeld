@@ -1,3 +1,6 @@
+from pathlib import Path
+
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from romm_vita_manager.three_ds_apps import APP_BY_KEY, ThreeDSAppStatus
@@ -13,21 +16,7 @@ def _dialog():
     return ThreeDSReadinessDialog(None, needs_ftp=False)
 
 
-def _select(dialog: ThreeDSReadinessDialog, app_key: str) -> None:
-    for row in range(dialog.component_list.count()):
-        item = dialog.component_list.item(row)
-        if item.data(item.data.__self__.UserRole) if False else False:
-            pass
-        if str(item.data(256) or "") == app_key:
-            dialog.component_list.setCurrentRow(row)
-            dialog._selection_changed(item, None)
-            return
-    raise AssertionError(f"App row not found: {app_key}")
-
-
 def _select_by_key(dialog: ThreeDSReadinessDialog, app_key: str) -> None:
-    from PySide6.QtCore import Qt
-
     for row in range(dialog.component_list.count()):
         item = dialog.component_list.item(row)
         if str(item.data(Qt.ItemDataRole.UserRole) or "") == app_key:
@@ -93,9 +82,7 @@ def test_ftpd_scan_failure_shows_repair_sequence_instead_of_only_detected_state(
 
 
 def test_inventory_copy_explicitly_separates_presence_from_health():
-    source = __import__(
-        "pathlib"
-    ).Path("romm_vita_manager/three_ds_readiness_ui.py").read_text(encoding="utf-8")
+    source = Path("romm_vita_manager/three_ds_readiness_ui.py").read_text(encoding="utf-8")
 
     assert "Presence does not prove an application launches correctly" in source
     assert "assess_three_ds_app_health" in source
