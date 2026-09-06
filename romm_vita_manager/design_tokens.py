@@ -147,10 +147,13 @@ _STATUS_SUCCESS_TERMS = (
 # path, marker, or troubleshooting sentence.
 _HEALTH_STATE_ALIASES = {
     "assets-only": "assets_only",
+    "data-only": "data_only",
     "manual-only": "manual_only",
     "system-sensitive": "system_sensitive",
     "not-verified": "not_verified",
+    "present-unverified": "present_unverified",
     "needs-attention": "needs_attention",
+    "not-applicable": "not_applicable",
     "unknown/manual-only": "unknown_manual_only",
 }
 
@@ -160,11 +163,14 @@ _HEALTH_STATE_TONES = {
     "verified": "success",
     "present": "neutral",
     "not_verified": "neutral",
+    "present_unverified": "neutral",
     "partial": "warning",
     "assets_only": "warning",
+    "data_only": "warning",
     "repairable": "warning",
     "needs_attention": "warning",
     "incomplete": "warning",
+    "outdated": "warning",
     "manual_only": "warning",
     "system_sensitive": "warning",
     "unknown_manual_only": "warning",
@@ -175,6 +181,7 @@ _HEALTH_STATE_TONES = {
     "error": "error",
     "missing": "muted",
     "unknown": "muted",
+    "not_applicable": "muted",
 }
 
 _HEALTH_STATE_LABELS = {
@@ -183,11 +190,14 @@ _HEALTH_STATE_LABELS = {
     "verified": "Verified",
     "present": "Present",
     "not_verified": "Present · Not verified",
+    "present_unverified": "Present · Launch not verified",
     "partial": "Partial",
     "assets_only": "Assets only",
+    "data_only": "Data/assets only",
     "repairable": "Repairable",
     "needs_attention": "Needs attention",
     "incomplete": "Incomplete",
+    "outdated": "Outdated",
     "manual_only": "Manual only",
     "system_sensitive": "System-sensitive · Manual only",
     "unknown_manual_only": "Unknown · Manual confirmation required",
@@ -197,7 +207,8 @@ _HEALTH_STATE_LABELS = {
     "failed": "Failed",
     "error": "Error",
     "missing": "Missing",
-    "unknown": "Unknown",
+    "unknown": "Not checked",
+    "not_applicable": "Not applicable",
 }
 
 
