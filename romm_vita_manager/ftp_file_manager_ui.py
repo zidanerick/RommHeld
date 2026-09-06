@@ -6,6 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QDialog,
     QFileDialog,
@@ -68,9 +69,7 @@ def _format_size(size: int) -> str:
     value = float(max(0, size))
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
         if value < 1024.0 or unit == "TiB":
-            if unit == "B":
-                return f"{int(value)} {unit}"
-            return f"{value:.1f} {unit}"
+            return f"{int(value)} B" if unit == "B" else f"{value:.1f} {unit}"
         value /= 1024.0
     return f"{int(size)} B"
 
@@ -124,12 +123,8 @@ class FtpFileOperationWorker(QThread):
                 entries = adapter.list_directory(self.remote_path)
                 free = adapter.available_space() if adapter.capabilities.free_space else None
                 self.completed.emit(
-                    self.operation,
-                    {
-                        "entries": entries,
-                        "cwd": cwd,
-                        "free_space": free,
-                    },
+                    "list",
+                    {"entries": entries, "cwd": cwd, "free_space": free},
                 )
                 return
 
@@ -146,11 +141,11 @@ class FtpFileOperationWorker(QThread):
                     progress=lambda done: self._progress(done, total),
                 )
                 if result == "different" and not self.overwrite:
-                    self.completed.emit(self.operation, {"result": "different", "size": 0})
+                    self.completed.emit("upload", {"result": "different", "size": 0})
                     return
                 if result == "cancelled":
                     raise InterruptedError("FTP upload cancelled.")
-                self.completed.emit(self.operation, {"result": result, "size": size})
+                self.completed.emit("upload", {"result": result, "size": size})
                 return
 
             if self.operation == "download":
@@ -165,29 +160,25 @@ class FtpFileOperationWorker(QThread):
                     cancel_event=self.cancel_event,
                     progress=lambda done: self._progress(done, expected),
                 )
-                self.completed.emit(self.operation, {"result": result, "size": size})
+                self.completed.emit("download", {"result": result, "size": size})
                 return
 
             if self.operation == "mkdir":
                 adapter.make_directory(self.remote_path)
-                self.completed.emit(self.operation, self.remote_path)
+                self.completed.emit("mkdir", self.remote_path)
                 return
-
             if self.operation == "rename":
                 adapter.rename(self.remote_path, self.destination_path)
-                self.completed.emit(self.operation, self.destination_path)
+                self.completed.emit("rename", self.destination_path)
                 return
-
             if self.operation == "delete_file":
                 adapter.delete_file(self.remote_path)
-                self.completed.emit(self.operation, self.remote_path)
+                self.completed.emit("delete_file", self.remote_path)
                 return
-
             if self.operation == "remove_directory":
                 adapter.remove_directory(self.remote_path)
-                self.completed.emit(self.operation, self.remote_path)
+                self.completed.emit("remove_directory", self.remote_path)
                 return
-
             raise ValueError(f"Unknown FTP file operation: {self.operation}")
         except InterruptedError:
             self.completed.emit(self.operation, {"result": "cancelled"})
@@ -198,7 +189,7 @@ class FtpFileOperationWorker(QThread):
 
 
 class FtpFileManagerDialog(QDialog):
-    """Contextual remote file browser shared by the supported console FTP transports."""
+    """Contextual remote file browser shared by supported console FTP transports."""
 
     def __init__(self, console: str, settings: Settings, parent=None):
         super().__init__(parent)
@@ -209,14 +200,14 @@ class FtpFileManagerDialog(QDialog):
         self.current_path = ""
         self.worker: FtpFileOperationWorker | None = None
         self._pending_upload: tuple[Path, str] | None = None
+        self._retry_upload_after_finish = False
+        self._last_operation_result: str | None = None
         self._closing_requested = False
 
         if not settings.host.strip():
             raise ValueError(f"{self.console_name} FTP host is required.")
 
         accent = brand_for_platform(self.console_family).accent
-        root_label = settings.remote_root
-
         self.setWindowTitle(f"{self.console_name} FTP Files")
         self.resize(940, 680)
         self.setMinimumSize(760, 560)
@@ -227,11 +218,15 @@ class FtpFileManagerDialog(QDialog):
         )
 
         self.connection_status = StatusPill("FTP", "Connecting…")
-        endpoint_label = QLabel(f"{_endpoint(settings)}  ·  Root: {root_label}")
+        endpoint_label = QLabel(
+            f"{_endpoint(settings)}  ·  Root: {settings.remote_root}"
+        )
         endpoint_label.setProperty("secondary", True)
         endpoint_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.space_label = QLabel(
-            "Free space: checking…" if self.console_family == "3ds" else "Free space: unavailable over VitaShell FTP"
+            "Free space: checking…"
+            if self.console_family == "3ds"
+            else "Free space: unavailable over VitaShell FTP"
         )
         self.space_label.setProperty("secondary", True)
         connection_row = QHBoxLayout()
@@ -239,7 +234,6 @@ class FtpFileManagerDialog(QDialog):
         connection_row.addWidget(self.connection_status)
         connection_row.addWidget(endpoint_label, 1)
         connection_row.addWidget(self.space_label)
-
         connection_card = SurfaceCard()
         connection_card.content.addLayout(connection_row)
 
@@ -251,7 +245,6 @@ class FtpFileManagerDialog(QDialog):
         self.copy_path_button.clicked.connect(self.copy_current_path)
         self.refresh_button = AccentButton("Refresh", accent)
         self.refresh_button.clicked.connect(self.refresh_directory)
-
         path_row = QHBoxLayout()
         path_row.setSpacing(8)
         path_row.addWidget(self.up_button)
@@ -261,16 +254,15 @@ class FtpFileManagerDialog(QDialog):
 
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Name", "Type", "Size"])
-        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
-        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.itemSelectionChanged.connect(self._selection_changed)
         self.table.cellDoubleClicked.connect(self._row_activated)
-
         browser_card = SurfaceCard()
         browser_card.content.addLayout(path_row)
         browser_card.content.addWidget(self.table, 1)
@@ -285,7 +277,6 @@ class FtpFileManagerDialog(QDialog):
         self.new_folder_button.clicked.connect(self.create_folder)
         self.rename_button.clicked.connect(self.rename_selected)
         self.delete_button.clicked.connect(self.delete_selected)
-
         action_row = QHBoxLayout()
         action_row.setSpacing(8)
         action_row.addWidget(self.upload_button)
@@ -325,16 +316,18 @@ class FtpFileManagerDialog(QDialog):
         layout.addLayout(operation_row)
         layout.addLayout(close_row)
 
-        self._update_actions()
+        self._set_busy(False)
         self.refresh_directory()
 
     def _remote_display_path(self) -> str:
+        return self._display_path_for_relative(self.current_path)
+
+    def _display_path_for_relative(self, path: str) -> str:
         root = self.settings.remote_root.rstrip("/") or "/"
-        if not self.current_path:
+        cleaned = path.strip("/")
+        if not cleaned:
             return root
-        if root == "/":
-            return "/" + self.current_path
-        return root + "/" + self.current_path
+        return "/" + cleaned if root == "/" else root + "/" + cleaned
 
     def _selected_entry(self) -> RemoteEntry | None:
         rows = self.table.selectionModel().selectedRows()
@@ -361,11 +354,8 @@ class FtpFileManagerDialog(QDialog):
         self.cancel_button.setVisible(busy and transfer)
         self.progress.setVisible(busy and transfer)
         if not busy:
+            self.progress.setRange(0, 100)
             self.progress.setValue(0)
-
-    def _update_actions(self) -> None:
-        busy = self.worker is not None and self.worker.isRunning()
-        self._set_busy(busy, transfer=False)
 
     def _selection_changed(self) -> None:
         if self.worker is not None and self.worker.isRunning():
@@ -380,7 +370,7 @@ class FtpFileManagerDialog(QDialog):
         del column
         item = self.table.item(row, 0)
         entry = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
-        if isinstance(entry, RemoteEntry) and entry.is_dir:
+        if isinstance(entry, RemoteEntry) and entry.is_dir and self.worker is None:
             self.current_path = entry.path
             self.refresh_directory()
 
@@ -396,7 +386,8 @@ class FtpFileManagerDialog(QDialog):
     ) -> None:
         if self.worker is not None:
             return
-        self.worker = FtpFileOperationWorker(
+        self._last_operation_result = None
+        worker = FtpFileOperationWorker(
             self.console,
             self.settings,
             operation,
@@ -405,13 +396,14 @@ class FtpFileManagerDialog(QDialog):
             local_path=local_path,
             overwrite=overwrite,
         )
-        self.worker.completed.connect(self._operation_completed)
-        self.worker.failed.connect(self._operation_failed)
-        self.worker.progress.connect(self._operation_progress)
-        self.worker.status_changed.connect(self.status_label.setText)
-        self.worker.finished.connect(self._worker_finished)
+        self.worker = worker
+        worker.completed.connect(self._operation_completed)
+        worker.failed.connect(self._operation_failed)
+        worker.progress.connect(self._operation_progress)
+        worker.status_changed.connect(self.status_label.setText)
+        worker.finished.connect(self._worker_finished)
         self._set_busy(True, transfer=transfer)
-        self.worker.start()
+        worker.start()
 
     def refresh_directory(self) -> None:
         if self.worker is not None:
@@ -421,10 +413,9 @@ class FtpFileManagerDialog(QDialog):
         self._start_worker("list", remote_path=self.current_path)
 
     def go_up(self) -> None:
-        if self.worker is not None:
-            return
-        self.current_path = _parent_relative(self.current_path)
-        self.refresh_directory()
+        if self.worker is None:
+            self.current_path = _parent_relative(self.current_path)
+            self.refresh_directory()
 
     def copy_current_path(self) -> None:
         QApplication.clipboard().setText(self._remote_display_path())
@@ -437,8 +428,13 @@ class FtpFileManagerDialog(QDialog):
         if not raw:
             return
         source = Path(raw).expanduser()
-        remote = _join_relative(self.current_path, source.name)
+        try:
+            remote = _join_relative(self.current_path, source.name)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Invalid remote name", str(exc))
+            return
         self._pending_upload = (source, remote)
+        self._retry_upload_after_finish = False
         self._start_worker("upload", remote_path=remote, local_path=source, transfer=True)
 
     def download_selected(self) -> None:
@@ -483,9 +479,15 @@ class FtpFileManagerDialog(QDialog):
 
     def _confirm_sensitive_change(self, path: str, verb: str) -> bool:
         risk = destructive_path_risk(self.console, path)
-        message = f"{risk.message}\n\nSelected path: {self._display_path_for_relative(path)}\n\n{verb} this item?"
+        message = (
+            f"{risk.message}\n\nSelected path: {self._display_path_for_relative(path)}"
+            f"\n\n{verb} this item?"
+        )
         if risk.level == "critical":
-            message += "\n\nThis is a console-sensitive location. RommHeld cannot automatically repair damage caused by an incorrect change."
+            message += (
+                "\n\nThis is a console-sensitive location. RommHeld cannot automatically "
+                "repair damage caused by an incorrect change."
+            )
         answer = QMessageBox.warning(
             self,
             risk.title if risk.level != "normal" else f"{verb} remote item",
@@ -495,22 +497,12 @@ class FtpFileManagerDialog(QDialog):
         )
         return answer == QMessageBox.StandardButton.Yes
 
-    def _display_path_for_relative(self, path: str) -> str:
-        root = self.settings.remote_root.rstrip("/") or "/"
-        cleaned = path.strip("/")
-        if not cleaned:
-            return root
-        return "/" + cleaned if root == "/" else root + "/" + cleaned
-
     def rename_selected(self) -> None:
         entry = self._selected_entry()
         if entry is None or self.worker is not None:
             return
         name, ok = QInputDialog.getText(
-            self,
-            "Rename remote item",
-            "New name",
-            text=entry.name,
+            self, "Rename remote item", "New name", text=entry.name
         )
         name = name.strip()
         if not ok or not name or name == entry.name:
@@ -520,13 +512,13 @@ class FtpFileManagerDialog(QDialog):
         except ValueError as exc:
             QMessageBox.warning(self, "Invalid remote name", str(exc))
             return
-        if destructive_path_risk(self.console, entry.path).level != "normal":
-            if not self._confirm_sensitive_change(entry.path, "Rename"):
-                return
+        if (
+            destructive_path_risk(self.console, entry.path).level != "normal"
+            and not self._confirm_sensitive_change(entry.path, "Rename")
+        ):
+            return
         self._start_worker(
-            "rename",
-            remote_path=entry.path,
-            destination_path=destination,
+            "rename", remote_path=entry.path, destination_path=destination
         )
 
     def delete_selected(self) -> None:
@@ -536,8 +528,10 @@ class FtpFileManagerDialog(QDialog):
         verb = "Remove empty folder" if entry.is_dir else "Delete"
         if not self._confirm_sensitive_change(entry.path, verb):
             return
-        operation = "remove_directory" if entry.is_dir else "delete_file"
-        self._start_worker(operation, remote_path=entry.path)
+        self._start_worker(
+            "remove_directory" if entry.is_dir else "delete_file",
+            remote_path=entry.path,
+        )
 
     def cancel_operation(self) -> None:
         if self.worker is None or not self.worker.isRunning():
@@ -558,16 +552,21 @@ class FtpFileManagerDialog(QDialog):
         for entry in entries:
             row = self.table.rowCount()
             self.table.insertRow(row)
-            name = QTableWidgetItem(entry.name)
-            name.setData(Qt.ItemDataRole.UserRole, entry)
-            kind = QTableWidgetItem("Folder" if entry.is_dir else "File")
-            size = QTableWidgetItem("—" if entry.is_dir else _format_size(entry.size))
-            size.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.table.setItem(row, 0, name)
-            self.table.setItem(row, 1, kind)
-            self.table.setItem(row, 2, size)
+            name_item = QTableWidgetItem(entry.name)
+            name_item.setData(Qt.ItemDataRole.UserRole, entry)
+            kind_item = QTableWidgetItem("Folder" if entry.is_dir else "File")
+            size_item = QTableWidgetItem("—" if entry.is_dir else _format_size(entry.size))
+            size_item.setTextAlignment(
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+            )
+            self.table.setItem(row, 0, name_item)
+            self.table.setItem(row, 1, kind_item)
+            self.table.setItem(row, 2, size_item)
 
     def _operation_completed(self, operation: str, payload: object) -> None:
+        result = payload.get("result") if isinstance(payload, dict) else None
+        self._last_operation_result = str(result) if result is not None else "completed"
+
         if operation == "list" and isinstance(payload, dict):
             entries = payload.get("entries", [])
             if isinstance(entries, list):
@@ -582,34 +581,34 @@ class FtpFileManagerDialog(QDialog):
             self.path_label.setText(self._remote_display_path())
             return
 
-        result = payload.get("result") if isinstance(payload, dict) else None
-        if result == "different" and operation == "upload" and self._pending_upload is not None:
+        if result == "different" and operation == "upload" and self._pending_upload:
             source, remote = self._pending_upload
             answer = QMessageBox.question(
                 self,
                 "Replace remote file?",
-                f"A different-size file already exists at {self._display_path_for_relative(remote)}. Upload to a verified staging file and replace the existing file only after verification?",
+                f"A different-size file already exists at {self._display_path_for_relative(remote)}. "
+                "Upload to a verified staging file and replace the existing file only after verification?",
             )
             if answer == QMessageBox.StandardButton.Yes:
+                self._retry_upload_after_finish = True
+                self.status_label.setText("Replacement approved. Waiting for the preflight worker to finish…")
+            else:
                 self._pending_upload = None
-                self.worker = None
-                self._start_worker(
-                    "upload",
-                    remote_path=remote,
-                    local_path=source,
-                    overwrite=True,
-                    transfer=True,
+                self.status_label.setText(
+                    "Remote replacement cancelled; existing file was preserved."
                 )
-                return
-            self._pending_upload = None
-            self.status_label.setText("Remote replacement cancelled; existing file was preserved.")
             return
 
         if result == "cancelled":
-            self.status_label.setText("FTP operation cancelled. Existing destination data was preserved where applicable.")
+            self._pending_upload = None
+            self._retry_upload_after_finish = False
+            self.status_label.setText(
+                "FTP operation cancelled. Existing destination data was preserved where applicable."
+            )
             return
 
-        self._pending_upload = None
+        if operation == "upload":
+            self._pending_upload = None
         labels = {
             "upload": "Upload completed.",
             "download": "Download completed and verified.",
@@ -622,32 +621,56 @@ class FtpFileManagerDialog(QDialog):
 
     def _operation_failed(self, operation: str, message: str) -> None:
         self._pending_upload = None
+        self._retry_upload_after_finish = False
+        self._last_operation_result = "failed"
         self.connection_status.set_value("Error")
-        self.status_label.setText(f"{operation.replace('_', ' ').capitalize()} failed: {message}")
+        self.status_label.setText(
+            f"{operation.replace('_', ' ').capitalize()} failed: {message}"
+        )
         QMessageBox.warning(self, "FTP file operation failed", message)
 
     def _worker_finished(self) -> None:
         worker = self.worker
+        if worker is None:
+            return
+        operation = worker.operation
+        worker.deleteLater()
         self.worker = None
-        if worker is not None:
-            worker.deleteLater()
         self.cancel_button.setEnabled(True)
-        self.progress.setRange(0, 100)
         self._set_busy(False)
 
         if self._closing_requested:
+            self._pending_upload = None
+            self._retry_upload_after_finish = False
             self.close()
             return
 
-        # Refresh after mutations/transfers, but not after a plain list or a cancelled operation.
-        if worker is not None and worker.operation not in {"list", "download"}:
+        if self._retry_upload_after_finish and self._pending_upload is not None:
+            source, remote = self._pending_upload
+            self._retry_upload_after_finish = False
+            self._start_worker(
+                "upload",
+                remote_path=remote,
+                local_path=source,
+                overwrite=True,
+                transfer=True,
+            )
+            return
+
+        should_refresh = (
+            operation in {"upload", "mkdir", "rename", "delete_file", "remove_directory"}
+            and self._last_operation_result not in {"cancelled", "different", "failed"}
+        )
+        if should_refresh:
             self.refresh_directory()
 
     def closeEvent(self, event) -> None:
         if self.worker is not None and self.worker.isRunning():
             self._closing_requested = True
             self.worker.cancel()
-            self.status_label.setText("Cancelling the active FTP operation before closing…")
+            self.status_label.setText(
+                "Cancelling the active FTP operation before closing…"
+            )
             event.ignore()
             return
         super().closeEvent(event)
