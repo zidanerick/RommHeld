@@ -53,6 +53,53 @@ def test_staged_installer_cias_do_not_satisfy_app_readiness(tmp_path: Path):
     assert "installed CIA title may still be present" in updater.detection_note
 
 
+def test_known_cia_titles_are_detected_from_mounted_sd_title_tree(tmp_path: Path):
+    known_titles = {
+        "fbi": "000400000F800100",
+        "ftpd": "000400000BEEF500",
+        "universal-updater": "0004000004391700",
+        "red-viper": "000400000FE7CB00",
+        "checkpoint": "000400000BCFFF00",
+    }
+    title_root = (
+        tmp_path
+        / "Nintendo 3DS"
+        / ("1" * 32)
+        / ("2" * 32)
+        / "title"
+    )
+    for title_id in known_titles.values():
+        (title_root / title_id[:8] / title_id[8:]).mkdir(parents=True, exist_ok=True)
+
+    statuses = scan_three_ds_apps(tmp_path)
+
+    for app_key, title_id in known_titles.items():
+        status = statuses[app_key]
+        assert status.detected
+        assert status.marker is None
+        assert status.title_id == title_id
+        assert title_id in status.detection_note
+        assert "Installed CIA title" in status.detection_note
+
+
+def test_unrelated_sd_title_does_not_false_positive_cia_capable_apps(tmp_path: Path):
+    title_root = (
+        tmp_path
+        / "Nintendo 3DS"
+        / ("A" * 32)
+        / ("B" * 32)
+        / "title"
+        / "00040000"
+        / "01234500"
+    )
+    title_root.mkdir(parents=True)
+
+    statuses = scan_three_ds_apps(tmp_path)
+
+    for app_key in ("fbi", "ftpd", "universal-updater", "red-viper", "checkpoint"):
+        assert not statuses[app_key].detected
+
+
 def test_scan_detects_foundation_transfer_and_coherent_twilight_runtime(tmp_path: Path):
     (tmp_path / "boot.firm").write_bytes(b"firm")
     (tmp_path / "boot.3dsx").write_bytes(b"3dsx")
