@@ -49,34 +49,66 @@ class ThreeDSAppStatus:
         return "detected" if self.detected else "not_detected"
 
     @property
+    def launch_surface(self) -> str:
+        if self.detected and self.source == "ftp_live":
+            return "live_service"
+        if self.detected and self.title_id:
+            return "home_menu"
+        marker = (self.marker or "").casefold()
+        if self.detected and "luma/payloads/" in marker:
+            return "luma_payload"
+        if self.detected and ".3dsx" in marker:
+            return "homebrew_launcher"
+        if self.marker and not self.definition.marker_confirms_launchable:
+            return "assets_only"
+        return "filesystem_evidence"
+
+    @property
+    def launch_note(self) -> str:
+        notes = {
+            "home_menu": "Expected launch location: HOME Menu.",
+            "homebrew_launcher": "Expected launch location: Homebrew Launcher, not necessarily the HOME Menu.",
+            "luma_payload": "Expected launch location: Luma3DS payload chainloader, not the HOME Menu or Homebrew Launcher.",
+            "live_service": "ftpd is currently running as a live console service.",
+            "assets_only": "Runtime assets are present, but no HOME Menu or Homebrew Launcher entry is confirmed.",
+        }
+        return notes.get(self.launch_surface, "")
+
+    @property
     def detection_note(self) -> str:
         if self.source == "unchecked":
             return "No mounted-SD or live-FTP inventory has been checked yet."
         if self.detected and self.source == "ftp_live":
-            return "A live ftpd connection is active on the console."
+            return "A live ftpd connection is active on the console. " + self.launch_note
         if self.detected and self.title_id:
             if self.source == "ftp":
-                return (
+                note = (
                     "Installed CIA title is visible in the live FTP SD title tree: "
                     f"{self.title_id}."
                 )
-            return (
-                "Installed CIA title is visible in the mounted SD title tree: "
-                f"{self.title_id}."
-            )
+            else:
+                note = (
+                    "Installed CIA title is visible in the mounted SD title tree: "
+                    f"{self.title_id}."
+                )
+            return f"{note} {self.launch_note}".strip()
         if self.detected and self.marker:
             if self.source == "ftp":
-                return f"Live FTP evidence found at {self.marker}."
-            return f"SD evidence found at {self.marker}."
+                note = f"Live FTP evidence found at {self.marker}."
+            else:
+                note = f"SD evidence found at {self.marker}."
+            return f"{note} {self.launch_note}".strip()
         if self.marker and not self.definition.marker_confirms_launchable:
             if self.source == "ftp":
                 return (
                     f"Runtime files are visible over FTP at {self.marker}, but these files do not "
-                    "prove that a launchable frontend or HOME Menu title is installed."
+                    "prove that a launchable frontend or HOME Menu title is installed. "
+                    + self.launch_note
                 )
             return (
                 f"Runtime files are present at {self.marker}, but these files do not prove that "
-                "a launchable frontend or HOME Menu title is installed."
+                "a launchable frontend or HOME Menu title is installed. "
+                + self.launch_note
             )
         if self.definition.installed_title_may_exist_without_sd_marker:
             if self.source == "ftp":
@@ -279,6 +311,30 @@ def _case_insensitive_exists(root: Path, marker: str) -> bool:
     return True
 
 
+def _known_title_status(
+    root: Path,
+    definition: ThreeDSAppDefinition,
+    visible_title_ids: frozenset[bytes] | None,
+) -> ThreeDSAppStatus | None:
+    if not definition.installed_title_ids:
+        return None
+    title_ids = mounted_sd_title_ids(root) if visible_title_ids is None else visible_title_ids
+    for raw_title_id in definition.installed_title_ids:
+        normalized = raw_title_id.strip().upper()
+        if bytes.fromhex(normalized) in title_ids:
+            title_tree_marker = (
+                "Nintendo 3DS/<ID0>/<ID1>/title/"
+                f"{normalized[:8]}/{normalized[8:]}"
+            )
+            return ThreeDSAppStatus(
+                definition,
+                True,
+                title_tree_marker,
+                normalized,
+            )
+    return None
+
+
 def detect_three_ds_app(
     root: Path,
     definition: ThreeDSAppDefinition,
@@ -288,6 +344,10 @@ def detect_three_ds_app(
     root = root.expanduser()
     if not root.is_dir():
         return ThreeDSAppStatus(definition, False, None)
+
+    title_status = _known_title_status(root, definition, visible_title_ids)
+    if title_status is not None:
+        return title_status
 
     matched = tuple(
         marker for marker in definition.markers if _case_insensitive_exists(root, marker)
@@ -300,26 +360,6 @@ def detect_three_ds_app(
     marker = "; ".join(matched) if marker_match and matched else None
     if marker_match and definition.marker_confirms_launchable:
         return ThreeDSAppStatus(definition, True, marker)
-
-    if definition.installed_title_ids:
-        title_ids = (
-            mounted_sd_title_ids(root)
-            if visible_title_ids is None
-            else visible_title_ids
-        )
-        for raw_title_id in definition.installed_title_ids:
-            normalized = raw_title_id.strip().upper()
-            if bytes.fromhex(normalized) in title_ids:
-                title_tree_marker = (
-                    "Nintendo 3DS/<ID0>/<ID1>/title/"
-                    f"{normalized[:8]}/{normalized[8:]}"
-                )
-                return ThreeDSAppStatus(
-                    definition,
-                    True,
-                    title_tree_marker,
-                    normalized,
-                )
 
     return ThreeDSAppStatus(definition, False, marker)
 
