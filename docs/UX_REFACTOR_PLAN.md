@@ -193,6 +193,13 @@ Existing Device actions now use state-aware primary emphasis rather than permane
 - 3DS Manager remains available for direct filesystem/deployment management
 - FTP connectivity kept separate from FBI Remote Install readiness
 - FBI Remote Install retained through package deployment flows
+- readiness gives one primary preparation action for the selected homebrew/runtime component rather than exposing installation mechanics at the same visual level
+- verified direct SD preparation is available for ftpd, Universal-Updater, Red Viper, FBI and Checkpoint 3DSX builds
+- direct FBI/Checkpoint preparation is explicitly the Homebrew Launcher `.3dsx` build and never claims that the corresponding CIA title is installed
+- complex packages such as DaedalusX64, TWiLight Menu++ and RetroArch use an assisted Universal-Updater flow: prepare the verified updater if missing, otherwise show the exact on-console search step
+- system-sensitive boot-chain components remain guide-only, while DSP firmware is explicitly generated on-console rather than downloaded
+
+The readiness primary action therefore adapts to the selected component: **Prepare <app>** for a verified direct package, **Prepare Universal-Updater** or **Show updater steps** for complex updater-owned packages, an upstream/install-guide action for system-sensitive components, and no misleading automatic-install claim where RommHeld cannot verify the operation safely.
 
 ### Nintendo DS / removable storage
 
@@ -310,11 +317,13 @@ Current regression areas include:
 - Vita Library transfer lifecycle guards across workspace-changing actions
 - offscreen Qt runtime construction/navigation for the real shell and local-library widgets
 - offscreen 3DS Manager dismissal while a background worker is still active, including detached QThread lifetime until safe completion
+- offscreen 3DS readiness installer actions for direct packages, Universal-Updater-assisted complex packages, guide-only system components and console-generated data
+- explicit direct-staging allowlist tests preventing complex/system-sensitive packages from being accidentally promoted
 - compact-layout bounds with long Vita library content and USB status-filter transitions
 - stable RommHeld `QStandardPaths` identity before and after `QApplication` creation
 - guarded migration of recognizable pre-identity RommHeld configuration
 
-CI remains headless, but it now installs the minimal EGL runtime needed for PySide6 and runs an offscreen Qt smoke layer. That layer constructs the real `ManagementShell` and `LocalLibraryWidget`, applies the shared application theme, exercises navigation, compact layout bounds with long content, selection/action state and USB status-filter transitions, and verifies that the 3DS Manager can dismiss while a worker remains alive safely in the background. This catches runtime widget-construction and state/layout regressions that source-contract tests cannot. It still does not validate native desktop compositor/theme/font rendering, DPI behavior, platform-specific window management or real-device interaction; those remain desktop and hardware responsibilities.
+CI remains headless, but it now installs the minimal EGL runtime needed for PySide6 and runs an offscreen Qt smoke layer. That layer constructs the real `ManagementShell`, `LocalLibraryWidget` and targeted 3DS dialogs, applies the shared application theme, exercises navigation, compact layout bounds with long content, selection/action state, USB status-filter transitions, 3DS readiness installer-state transitions, and verifies that the 3DS Manager can dismiss while a worker remains alive safely in the background. This catches runtime widget-construction and state/layout regressions that source-contract tests cannot. It still does not validate native desktop compositor/theme/font rendering, DPI behavior, platform-specific window management or real-device interaction; those remain desktop and hardware responsibilities.
 
 ## Remaining validation
 
@@ -334,6 +343,7 @@ CI remains headless, but it now installs the minimal EGL runtime needed for PySi
 - verify semantic status tones and keyboard focus remain readable in the target desktop theme
 - verify Device and Settings primary-action emphasis changes are visually obvious but not excessive
 - verify 3DS local and RomM library sources render consistently without hiding valid target differences
+- verify 3DS readiness changes its primary action cleanly between direct preparation, Universal-Updater assistance, guide-only and console-generated states
 
 ### PlayStation Vita hardware
 
@@ -355,6 +365,9 @@ CI remains headless, but it now installs the minimal EGL runtime needed for PySi
 - VC/native deployment paths under current hardware-validation work
 - FBI Remote Install completion and cleanup
 - 3DS Setup SD detection/validation and FTP-manager handoff
+- prepare ftpd, Universal-Updater, Red Viper, FBI and Checkpoint 3DSX packages to a validated mounted SD and confirm they appear/launch through Homebrew Launcher as expected
+- verify assisted complex-app flow by preparing Universal-Updater when absent, launching it on-console and completing at least one maintained complex package recipe such as DaedalusX64
+- confirm readiness still distinguishes a staged FBI/Checkpoint 3DSX from an installed CIA title
 
 No widget should be destroyed with a live `QThread` child.
 
