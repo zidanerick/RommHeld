@@ -191,6 +191,9 @@ class ConsoleTile(QFrame):
                 border:2px solid {accent};
                 background:{soft};
             }}
+            QFrame#consoleTile:focus {{
+                border:2px solid {DARK.text_primary};
+            }}
         """
 
     def set_selected(self, selected: bool) -> None:
