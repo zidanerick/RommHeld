@@ -8,6 +8,7 @@ import pytest
 
 from romm_vita_manager.three_ds_packages import (
     BACKUP_SUFFIX,
+    PACKAGES,
     ResolvedThreeDSPackage,
     download_package,
     get_package,
@@ -27,10 +28,36 @@ def test_only_simple_auditable_apps_have_direct_staging_packages():
     assert package_for_app("ftpd").asset_name == "ftpd.3dsx"
     assert package_for_app("universal-updater").asset_name == "Universal-Updater.3dsx"
     assert package_for_app("red-viper").asset_name == "red-viper.3dsx"
+    assert package_for_app("fbi").asset_name == "FBI.3dsx"
+    assert package_for_app("checkpoint").asset_name == "Checkpoint.3dsx"
     assert package_for_app("twilight") is None
     assert package_for_app("retroarch") is None
     assert package_for_app("daedalusx64") is None
+    assert package_for_app("open-agb-firm") is None
+    assert package_for_app("godmode9") is None
     assert package_for_app("luma") is None
+    assert package_for_app("homebrew-launcher") is None
+    assert package_for_app("dsp-firmware") is None
+
+
+def test_direct_staging_destinations_are_confined_relative_3dsx_paths():
+    for spec in PACKAGES.values():
+        destination = Path(spec.destination)
+        assert not destination.is_absolute()
+        assert ".." not in destination.parts
+        assert destination.suffix.casefold() == ".3dsx"
+
+
+def test_fbi_and_checkpoint_stage_homebrew_launcher_builds_not_cias():
+    fbi = package_for_app("fbi")
+    checkpoint = package_for_app("checkpoint")
+
+    assert fbi is not None
+    assert fbi.asset_name == "FBI.3dsx"
+    assert fbi.destination == "3ds/FBI/FBI.3dsx"
+    assert checkpoint is not None
+    assert checkpoint.asset_name == "Checkpoint.3dsx"
+    assert checkpoint.destination == "3ds/Checkpoint/Checkpoint.3dsx"
 
 
 def test_resolve_package_requires_exact_official_release_asset(monkeypatch):
