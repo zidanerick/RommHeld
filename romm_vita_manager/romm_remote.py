@@ -3,14 +3,14 @@ from __future__ import annotations
 import http.client
 import json
 import socket
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, request
-from urllib.parse import quote, urlencode, urlparse, urlunparse, parse_qsl
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 from .mappings import platform_label
 from .romm_api import RomMApiError, normalize_romm_url
-from .three_ds_targets import RETROARCH_PLATFORM_SLUGS
 
 
 @dataclass(frozen=True)
@@ -22,9 +22,20 @@ class RomMRemoteGame:
     size: int
     cover_url: str | None = None
     platform_slug: str = ""
+    publisher: str = ""
+    release_year: int | None = None
+    # Keep exact RomM source identity separate from normalized compatibility keys.
+    # compare=False preserves compatibility with older positional construction/tests.
+    source_platform_id: int | None = field(default=None, compare=False)
+    source_platform_slug: str = field(default="", compare=False)
 
 
-def _auth_headers(token: str, *, accept: str = "application/json", include_auth: bool = True) -> dict[str, str]:
+def _auth_headers(
+    token: str,
+    *,
+    accept: str = "application/json",
+    include_auth: bool = True,
+) -> dict[str, str]:
     headers = {
         "Accept": accept,
         "User-Agent": "RommHeld",
@@ -110,6 +121,22 @@ def _json_request(instance_url: str, token: str, path: str, params: dict | None 
         raise RomMApiError(f"Unable to reach the RomM server: {reason}") from exc
 
 
+def _http_origin(value: str) -> tuple[str, str, int] | None:
+    """Return the normalized HTTP(S) origin used for credential-scope checks."""
+    parsed = urlparse(value)
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").casefold()
+    if scheme not in {"http", "https"} or not host:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is None:
+        port = 443 if scheme == "https" else 80
+    return scheme, host, port
+
+
 def download_artwork(
     instance_url: str,
     token: str,
@@ -119,9 +146,9 @@ def download_artwork(
 ) -> bytes:
     """Fetch artwork with RomM's IPv4-first transport and bounded reads.
 
-    Authorization is only sent back to the configured RomM host. RomM can
+    Authorization is only sent back to the configured RomM origin. RomM can
     expose an external artwork URL, so bearer credentials must never be
-    forwarded to a third-party image host.
+    forwarded across scheme, host, or port boundaries.
     """
     target = str(url).strip()
     if not target:
@@ -133,20 +160,25 @@ def download_artwork(
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("RomM artwork URL must be an HTTP(S) resource.")
 
-    romm_host = urlparse(normalize_romm_url(instance_url)).hostname or ""
-    same_host = bool(parsed.hostname) and parsed.hostname.lower() == romm_host.lower()
-    # RomM cover metadata can contain timestamps with spaces (for example,
-    # "?ts=2026-08-10 12:36:56"). urllib rejects those raw control/space
-    # characters, so rebuild the URL with a properly encoded query string.
+    same_origin = _http_origin(target) == _http_origin(normalize_romm_url(instance_url))
     query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
     safe_query = urlencode(query_pairs, doseq=True)
-    target = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, safe_query, parsed.fragment))
+    target = urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            parsed.params,
+            safe_query,
+            parsed.fragment,
+        )
+    )
     req = request.Request(
         target,
         headers=_auth_headers(
             token,
             accept="image/avif,image/webp,image/png,image/jpeg,*/*",
-            include_auth=same_host,
+            include_auth=same_origin,
         ),
     )
     try:
@@ -155,9 +187,13 @@ def download_artwork(
     except error.HTTPError as exc:
         raise RomMApiError(f"Artwork request returned HTTP {exc.code}.", exc.code) from exc
     except (error.URLError, TimeoutError) as exc:
-        raise RomMApiError(f"Unable to download artwork: {getattr(exc, 'reason', exc)}") from exc
+        raise RomMApiError(
+            f"Unable to download artwork: {getattr(exc, 'reason', exc)}"
+        ) from exc
     if len(data) > max_bytes:
-        raise ValueError(f"Artwork is larger than {max_bytes // (1024 * 1024)} MiB.")
+        raise ValueError(
+            f"Artwork is larger than {max_bytes // (1024 * 1024)} MiB."
+        )
     return data
 
 
@@ -182,6 +218,88 @@ def _as_int(value) -> int | None:
         return int(text) if text else None
     except (TypeError, ValueError):
         return None
+
+
+def _publisher_name(item: dict) -> str:
+    """Best-effort publisher extraction across RomM metadata providers/versions."""
+
+    def text_value(value) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            for key in ("name", "company", "publisher"):
+                candidate = value.get(key)
+                if isinstance(candidate, str) and candidate.strip():
+                    return candidate.strip()
+        return ""
+
+    for source in (
+        item,
+        item.get("metadata") if isinstance(item.get("metadata"), dict) else {},
+    ):
+        for key in ("publisher", "publishers"):
+            value = source.get(key) if isinstance(source, dict) else None
+            direct = text_value(value)
+            if direct:
+                return direct
+            if isinstance(value, list):
+                names = [text_value(entry) for entry in value]
+                names = [name for name in names if name]
+                if names:
+                    return ", ".join(names[:2])
+
+    companies = item.get("companies")
+    if isinstance(companies, list):
+        publishers: list[str] = []
+        for company in companies:
+            if not isinstance(company, dict):
+                continue
+            role = str(company.get("role") or company.get("type") or "").casefold()
+            if role and "publish" not in role:
+                continue
+            name = text_value(company)
+            if name:
+                publishers.append(name)
+        if publishers:
+            return ", ".join(publishers[:2])
+    return ""
+
+
+def _release_year(item: dict) -> int | None:
+    """Best-effort release year extraction across RomM metadata providers."""
+    metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+    for source in (item, metadata):
+        if not isinstance(source, dict):
+            continue
+        for key in (
+            "release_year",
+            "year",
+            "first_release_date",
+            "release_date",
+            "released",
+            "date_released",
+        ):
+            value = source.get(key)
+            if value is None or isinstance(value, bool):
+                continue
+            if isinstance(value, int):
+                if 1900 <= value <= 2200:
+                    return value
+                if value < 100_000_000:
+                    continue
+                stamp = value / 1000 if value > 10_000_000_000 else value
+                try:
+                    year = datetime.fromtimestamp(stamp, tz=timezone.utc).year
+                except (OverflowError, OSError, ValueError):
+                    continue
+                if 1900 <= year <= 2200:
+                    return year
+            text = str(value).strip()
+            if len(text) >= 4 and text[:4].isdigit():
+                year = int(text[:4])
+                if 1900 <= year <= 2200:
+                    return year
+    return None
 
 
 def resolve_cover_url(instance_url: str, cover: str | None) -> str | None:
@@ -209,11 +327,21 @@ def _platform_name(item: dict) -> str:
     return platform_label(str(slug)) if slug else "Unknown platform"
 
 
+def _platform_id(item: dict) -> int | None:
+    direct = _as_int(item.get("platform_id"))
+    if direct is not None:
+        return direct
+    nested = item.get("platform")
+    if isinstance(nested, dict):
+        return _as_int(nested.get("id"))
+    return None
+
+
 def _platform_slug(item: dict, by_id: dict[int, str], by_name: dict[str, str]) -> str:
     value = item.get("platform_slug")
     if value:
         return str(value).lower()
-    platform_id = _as_int(item.get("platform_id"))
+    platform_id = _platform_id(item)
     if platform_id is not None and platform_id in by_id:
         return by_id[platform_id]
     nested = item.get("platform")
@@ -230,6 +358,32 @@ def _platform_slug(item: dict, by_id: dict[int, str], by_name: dict[str, str]) -
     return ""
 
 
+def _source_platform_slug(
+    item: dict,
+    platform_id: int | None,
+    source_by_id: dict[int, str],
+    source_by_name: dict[str, str],
+) -> str:
+    """Return the exact source platform slug without display normalization."""
+    value = item.get("platform_slug")
+    if value:
+        return str(value)
+    if platform_id is not None and platform_id in source_by_id:
+        return source_by_id[platform_id]
+    nested = item.get("platform")
+    if isinstance(nested, dict):
+        value = nested.get("slug")
+        if value:
+            return str(value)
+        name = nested.get("name")
+        if name and str(name).lower() in source_by_name:
+            return source_by_name[str(name).lower()]
+    name = item.get("platform_name") or item.get("platform_display_name")
+    if name and str(name).lower() in source_by_name:
+        return source_by_name[str(name).lower()]
+    return ""
+
+
 def _list_games_for_platform_slugs(
     instance_url: str,
     token: str,
@@ -242,19 +396,24 @@ def _list_games_for_platform_slugs(
     search_term: str = "",
     platform_slug: str | None = None,
 ) -> list[RomMRemoteGame]:
+    normalized_allowed = frozenset(str(slug).lower() for slug in allowed_slugs)
     if platform_items is None:
         platforms = _items(_json_request(instance_url, token, "platforms"))
         wanted = [
             item
             for item in platforms
             if isinstance(item, dict)
-            and str(item.get("slug", "")).lower() in allowed_slugs
+            and str(item.get("slug", "")).lower() in normalized_allowed
             and _as_int(item.get("id")) is not None
         ]
     else:
         wanted = platform_items
     if platform_slug:
-        wanted = [item for item in wanted if str(item.get("slug", "")).lower() == platform_slug.lower()]
+        wanted = [
+            item
+            for item in wanted
+            if str(item.get("slug", "")).lower() == platform_slug.lower()
+        ]
     if not wanted:
         raise RomMApiError(missing_message)
 
@@ -266,15 +425,30 @@ def _list_games_for_platform_slugs(
     if not platform_ids:
         raise RomMApiError(missing_message)
 
-    by_id = {
-        platform_id: str(item.get("slug") or "").lower()
+    source_by_id = {
+        platform_id: str(item.get("slug") or "")
         for item in wanted
         if (platform_id := _as_int(item.get("id"))) is not None
     }
-    by_name = {
-        str(item.get("name") or item.get("slug") or "").lower(): str(item.get("slug") or "").lower()
+    by_id = {
+        platform_id: source_slug.lower()
+        for platform_id, source_slug in source_by_id.items()
+    }
+    source_id_by_slug = {
+        source_slug.lower(): platform_id
+        for platform_id, source_slug in source_by_id.items()
+        if source_slug
+    }
+    source_by_name = {
+        str(item.get("name") or item.get("slug") or "").lower(): str(
+            item.get("slug") or ""
+        )
         for item in wanted
         if item.get("name") or item.get("slug")
+    }
+    by_name = {
+        name: source_slug.lower()
+        for name, source_slug in source_by_name.items()
     }
     names = {
         platform_id: str(item.get("name") or item.get("slug") or "Unknown platform")
@@ -307,13 +481,33 @@ def _list_games_for_platform_slugs(
         if rom_id is None:
             continue
         slug = _platform_slug(item, by_id, by_name)
-        if slug not in allowed_slugs:
+        if slug not in normalized_allowed:
             continue
-        platform_id = _as_int(item.get("platform_id"))
+        platform_id = _platform_id(item)
+        if platform_id is None:
+            platform_id = source_id_by_slug.get(slug)
+        source_slug = _source_platform_slug(
+            item,
+            platform_id,
+            source_by_id,
+            source_by_name,
+        ) or source_by_id.get(platform_id, "") or slug
         platform = names.get(platform_id, _platform_name(item))
-        filename = str(item.get("fs_name") or item.get("file_name") or item.get("name") or "")
+        filename = str(
+            item.get("fs_name")
+            or item.get("file_name")
+            or item.get("name")
+            or ""
+        )
         name = str(item.get("name") or filename)
-        size = _as_int(item.get("fs_size_bytes") or item.get("size_bytes") or item.get("size")) or 0
+        size = (
+            _as_int(
+                item.get("fs_size_bytes")
+                or item.get("size_bytes")
+                or item.get("size")
+            )
+            or 0
+        )
         cover = (
             item.get("path_cover_large")
             or item.get("path_cover_small")
@@ -330,23 +524,43 @@ def _list_games_for_platform_slugs(
                 size,
                 resolve_cover_url(instance_url, cover),
                 slug,
+                _publisher_name(item),
+                _release_year(item),
+                source_platform_id=platform_id,
+                source_platform_slug=source_slug,
             )
         )
     return games
 
 
-def list_compatible_games(instance_url: str, token: str, *, limit: int = 200) -> list[RomMRemoteGame]:
+def list_compatible_games(
+    instance_url: str,
+    token: str,
+    *,
+    limit: int = 200,
+) -> list[RomMRemoteGame]:
+    # Legacy 3DS compatibility helper. Keep target knowledge out of the generic
+    # remote mapping module until this function is called.
+    from .three_ds_targets import RETROARCH_PLATFORM_SLUGS
+
     return _list_games_for_platform_slugs(
         instance_url,
         token,
         RETROARCH_PLATFORM_SLUGS,
         limit=limit,
         offset=0,
-        missing_message="RomM has no platforms currently recognised as compatible with the 3DS targets.",
+        missing_message=(
+            "RomM has no platforms currently recognised as compatible with the 3DS targets."
+        ),
     )
 
 
-def list_3ds_games(instance_url: str, token: str, *, limit: int = 200) -> list[RomMRemoteGame]:
+def list_3ds_games(
+    instance_url: str,
+    token: str,
+    *,
+    limit: int = 200,
+) -> list[RomMRemoteGame]:
     games = _list_games_for_platform_slugs(
         instance_url,
         token,
@@ -356,30 +570,106 @@ def list_3ds_games(instance_url: str, token: str, *, limit: int = 200) -> list[R
         missing_message="RomM has no Nintendo 3DS platform (slug: 3ds).",
     )
     return [
-        RomMRemoteGame(game.rom_id, game.name, game.filename, game.platform, game.size, game.cover_url)
+        RomMRemoteGame(
+            game.rom_id,
+            game.name,
+            game.filename,
+            game.platform,
+            game.size,
+            game.cover_url,
+            game.platform_slug,
+            game.publisher,
+            game.release_year,
+            source_platform_id=game.source_platform_id,
+            source_platform_slug=game.source_platform_slug,
+        )
         for game in games
     ]
 
 
-def _download(instance_url: str, token: str, rom: RomMRemoteGame, destination: Path) -> Path:
+def _download(
+    instance_url: str,
+    token: str,
+    rom: RomMRemoteGame,
+    destination: Path,
+    *,
+    cancel_event=None,
+    progress=None,
+) -> Path:
+    """Download a ROM atomically with optional cancellation and byte progress."""
     base = normalize_romm_url(instance_url)
     url = f"{base}/api/roms/{rom.rom_id}/content/{quote(rom.filename, safe='')}"
     destination = destination.expanduser()
     destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.name + ".rommheld.part")
+    temporary.unlink(missing_ok=True)
+    completed = 0
+
     try:
+        if cancel_event is not None and cancel_event.is_set():
+            raise InterruptedError("RomM download cancelled.")
         with (
-            _ROMM_OPENER.open(request.Request(url, headers=_auth_headers(token)), timeout=30)
-            as response,
-            destination.open("wb") as target,
+            _ROMM_OPENER.open(
+                request.Request(url, headers=_auth_headers(token)),
+                timeout=30,
+            ) as response,
+            temporary.open("wb") as target,
         ):
-            while chunk := response.read(1024 * 1024):
+            headers = getattr(response, "headers", None)
+            content_length = headers.get("Content-Length") if headers is not None else None
+            try:
+                total = int(content_length) if content_length else int(rom.size or 0)
+            except (TypeError, ValueError):
+                total = int(rom.size or 0)
+
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise InterruptedError("RomM download cancelled.")
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
                 target.write(chunk)
+                completed += len(chunk)
+                if progress is not None:
+                    progress(completed, total)
+
+        if cancel_event is not None and cancel_event.is_set():
+            raise InterruptedError("RomM download cancelled.")
+        temporary.replace(destination)
+    except InterruptedError:
+        temporary.unlink(missing_ok=True)
+        raise
     except error.HTTPError as exc:
-        raise RomMApiError(f"RomM ROM download returned HTTP {exc.code}.", exc.code) from exc
+        temporary.unlink(missing_ok=True)
+        raise RomMApiError(
+            f"RomM ROM download returned HTTP {exc.code}.",
+            exc.code,
+        ) from exc
     except (error.URLError, TimeoutError) as exc:
-        raise RomMApiError(f"Unable to download from RomM: {getattr(exc, 'reason', exc)}") from exc
+        temporary.unlink(missing_ok=True)
+        raise RomMApiError(
+            f"Unable to download from RomM: {getattr(exc, 'reason', exc)}"
+        ) from exc
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
     return destination
 
 
-def download_rom(instance_url: str, token: str, rom: RomMRemoteGame, destination: Path) -> Path:
-    return _download(instance_url, token, rom, destination)
+def download_rom(
+    instance_url: str,
+    token: str,
+    rom: RomMRemoteGame,
+    destination: Path,
+    *,
+    cancel_event=None,
+    progress=None,
+) -> Path:
+    return _download(
+        instance_url,
+        token,
+        rom,
+        destination,
+        cancel_event=cancel_event,
+        progress=progress,
+    )

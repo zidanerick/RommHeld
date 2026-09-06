@@ -32,6 +32,10 @@ def _directory(root: Path, relative: str) -> bool:
     return (root / relative).is_dir()
 
 
+def _glob_file(root: Path, relative_pattern: str) -> bool:
+    return any(path.is_file() for path in root.glob(relative_pattern))
+
+
 def validate_3ds_sd(root: Path) -> StorageValidation:
     root = root.expanduser().resolve()
     if not root.is_dir():
@@ -58,14 +62,30 @@ def validate_ds_storage(root: Path) -> StorageValidation:
     if not root.is_dir():
         raise NotADirectoryError(f"Storage root does not exist: {root}")
 
+    bootstrap_nds = _glob_file(root, "_nds/nds-bootstrap*.nds")
+    bootstrap_ver = _glob_file(root, "_nds/nds-bootstrap*.ver")
     checks = (
         StorageCheck("nds-directory", "DS support directory", _directory(root, "_nds"), "_nds/"),
-        StorageCheck("boot-nds", "DS boot loader", _file(root, "BOOT.NDS"), "BOOT.NDS"),
+        StorageCheck("twilight", "TWiLight Menu++ files", _directory(root, "_nds/TWiLightMenu"), "_nds/TWiLightMenu/"),
+        StorageCheck("boot-nds", "DS root launcher", _file(root, "BOOT.NDS"), "BOOT.NDS"),
+        StorageCheck("boot-alt-nds", "Alternate flashcart launcher", _file(root, "BOOT_ALT.NDS"), "BOOT_ALT.NDS"),
+        StorageCheck("nds-bootstrap-nds", "nds-bootstrap runtime", bootstrap_nds, "_nds/nds-bootstrap*.nds"),
+        StorageCheck("nds-bootstrap-ver", "nds-bootstrap version marker", bootstrap_ver, "_nds/nds-bootstrap*.ver"),
         StorageCheck("roms", "ROM directory", _directory(root, "roms"), "roms/"),
+        StorageCheck("nds-roms", "NDS ROM directory", _directory(root, "roms/nds"), "roms/nds/"),
+        StorageCheck("nds-saves", "NDS save directory", _directory(root, "roms/nds/saves"), "roms/nds/saves/"),
     )
     signatures = tuple(check.path for check in checks if check.found)
-    matched = sum(check.found for check in checks)
-    confidence = "high" if matched == 3 else "medium" if matched == 2 else "low" if matched == 1 else "unknown"
+    core = sum(
+        (
+            _directory(root, "_nds"),
+            _directory(root, "_nds/TWiLightMenu"),
+            _file(root, "BOOT.NDS") or _file(root, "BOOT_ALT.NDS"),
+            bootstrap_nds and bootstrap_ver,
+            _directory(root, "roms"),
+        )
+    )
+    confidence = "high" if core >= 4 else "medium" if core >= 2 else "low" if core == 1 else "unknown"
     return StorageValidation("ds-storage", confidence, signatures, checks)
 
 
@@ -74,21 +94,29 @@ def validate_ds_flashcard(root: Path) -> StorageValidation:
     if not root.is_dir():
         raise NotADirectoryError(f"Storage root does not exist: {root}")
 
+    bootstrap_nds = _glob_file(root, "_nds/nds-bootstrap*.nds")
+    bootstrap_ver = _glob_file(root, "_nds/nds-bootstrap*.ver")
     checks = (
-        StorageCheck("nds-bootstrap", "nds-bootstrap", _file(root, "_nds/nds-bootstrap"), "_nds/nds-bootstrap"),
+        StorageCheck("nds-bootstrap-nds", "nds-bootstrap runtime", bootstrap_nds, "_nds/nds-bootstrap*.nds"),
+        StorageCheck("nds-bootstrap-ver", "nds-bootstrap version marker", bootstrap_ver, "_nds/nds-bootstrap*.ver"),
         StorageCheck("twilight", "TWiLight Menu++ files", _directory(root, "_nds/TWiLightMenu"), "_nds/TWiLightMenu/"),
+        StorageCheck("boot-nds", "TWiLight root launcher", _file(root, "BOOT.NDS"), "BOOT.NDS"),
+        StorageCheck("boot-alt-nds", "Alternate flashcart launcher", _file(root, "BOOT_ALT.NDS"), "BOOT_ALT.NDS"),
         StorageCheck("nds-roms", "NDS ROM directory", _directory(root, "roms/nds"), "roms/nds/"),
+        StorageCheck("nds-saves", "NDS save directory", _directory(root, "roms/nds/saves"), "roms/nds/saves/"),
         StorageCheck("gba-roms", "GBA ROM directory", _directory(root, "roms/gba"), "roms/gba/"),
         StorageCheck("dsi-roms", "DSi ROM directory", _directory(root, "roms/dsi"), "roms/dsi/"),
         StorageCheck("ysmenu", "YSMenu launcher", _file(root, "YSMenu.nds"), "YSMenu.nds"),
         StorageCheck("ttmenu", "TTMenu directory", _directory(root, "TTMenu"), "TTMenu/"),
         StorageCheck("r4-data", "R4.dat", _file(root, "R4.dat"), "R4.dat"),
-        StorageCheck("r4-kernel", "R4 kernel directory", _directory(root, "__rpg"), "__rpg/"),
+        StorageCheck("r4-kernel", "R4/Wood kernel directory", _directory(root, "__rpg"), "__rpg/"),
+        StorageCheck("ds-menu", "Flashcart boot marker", _file(root, "_DS_MENU.DAT"), "_DS_MENU.DAT"),
+        StorageCheck("dsmenu", "Flashcart boot marker", _file(root, "_DSMENU.DAT"), "_DSMENU.DAT"),
     )
     signatures = tuple(check.path for check in checks if check.found)
-    capability = sum(check.found for check in checks[:5])
-    explicit_marker = any(check.found for check in checks[5:])
-    confidence = "high" if capability >= 4 else "medium" if capability >= 2 or explicit_marker else "low" if capability == 1 else "unknown"
+    twilight_capability = sum(check.found for check in checks[:7])
+    explicit_marker = any(check.found for check in checks[9:])
+    confidence = "high" if twilight_capability >= 5 and explicit_marker else "medium" if twilight_capability >= 2 or explicit_marker else "low" if twilight_capability == 1 else "unknown"
     return StorageValidation("ds-flashcard", confidence, signatures, checks)
 
 
@@ -99,15 +127,24 @@ def validate_storage(root: Path) -> StorageValidation:
         raise NotADirectoryError(f"Storage root does not exist: {root}")
 
     names = {entry.name.lower() for entry in root.iterdir()}
-    has_3ds = {"boot.firm", "boot.3dsx", "luma", "gm9"}.issubset(names)
-    if has_3ds:
+    core_3ds = {"boot.firm", "boot.3dsx", "luma", "gm9"}
+    if "nintendo 3ds" in names or len(names.intersection(core_3ds)) >= 2:
         return validate_3ds_sd(root)
 
-    flashcard_markers = {"r4.dat", "ttmenu.dat", "ysmenu.nds", "ttmenu", "__rpg"}
+    flashcard_markers = {
+        "r4.dat",
+        "ttmenu.dat",
+        "ysmenu.nds",
+        "ttmenu",
+        "__rpg",
+        "_ds_menu.dat",
+        "_dsmenu.dat",
+        "boot_alt.nds",
+    }
     if names.intersection(flashcard_markers):
         return validate_ds_flashcard(root)
 
-    if "_nds" in names and "roms" in names:
+    if "_nds" in names and ("roms" in names or "boot.nds" in names):
         return validate_ds_storage(root)
 
     signatures: list[str] = []

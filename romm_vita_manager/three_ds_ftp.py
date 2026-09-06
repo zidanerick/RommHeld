@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import ftplib
+import hashlib
 import posixpath
 import re
+import socket
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import Callable
+from uuid import uuid4
 
 ProgressCallback = Callable[[int], None]
 
@@ -50,6 +53,37 @@ def join_remote_path(root: str, child: str) -> str:
     return target
 
 
+def describe_connection_error(exc: BaseException) -> str:
+    """Turn common 3DS FTP failures into actionable user-facing guidance."""
+    detail = str(exc).strip()
+    if isinstance(exc, (TimeoutError, socket.timeout)):
+        return (
+            "The 3DS did not respond. Open ftpd on the console and leave it running, "
+            "then confirm the PC and 3DS are on the same local network and retry."
+        )
+    if isinstance(exc, ConnectionRefusedError):
+        return (
+            "The 3DS refused the FTP connection. Open ftpd on the console and leave it "
+            "running, then confirm the IP address and port shown by ftpd."
+        )
+    if isinstance(exc, ftplib.error_perm) and re.search(r"\b530\b", detail):
+        return (
+            "ftpd rejected the FTP login. Check the configured username and password, or "
+            "use ftpd's default anonymous/no-password settings."
+        )
+    if isinstance(exc, OSError):
+        return (
+            "Could not reach the 3DS FTP server. Open ftpd on the console, verify the IP "
+            "address and port it shows, and make sure both devices are on the same network."
+            + (f" System detail: {detail}" if detail else "")
+        )
+    return detail or exc.__class__.__name__
+
+
+class ThreeDSFtpConnectionError(ConnectionError):
+    """Connection failure already translated into actionable 3DS FTP guidance."""
+
+
 class ThreeDSFtpBackend:
     """FTP transport for a Nintendo 3DS FTP server."""
 
@@ -66,27 +100,51 @@ class ThreeDSFtpBackend:
         """Resolve a path under the configured remote root."""
         return join_remote_path(self.settings.remote_root, path)
 
+    @staticmethod
+    def _close_client(ftp, *, graceful: bool = True) -> None:
+        if ftp is None:
+            return
+        if graceful:
+            try:
+                ftp.quit()
+                return
+            except Exception:
+                pass
+        try:
+            ftp.close()
+        except Exception:
+            pass
+
     def connect(self) -> str:
         if not self.settings.host.strip():
             raise ValueError("3DS FTP host is required.")
         ftp = self._ftp_factory(timeout=self.settings.timeout)
-        ftp.connect(self.settings.host.strip(), self.settings.port, timeout=self.settings.timeout)
-        ftp.login(self.settings.username or "anonymous", self.settings.password)
-        ftp.set_pasv(self.settings.passive)
+        try:
+            ftp.connect(self.settings.host.strip(), self.settings.port, timeout=self.settings.timeout)
+            ftp.login(self.settings.username or "anonymous", self.settings.password)
+            ftp.set_pasv(self.settings.passive)
+        except Exception as exc:
+            self._close_client(ftp, graceful=False)
+            raise ThreeDSFtpConnectionError(describe_connection_error(exc)) from exc
+
+        root = normalize_remote_path(self.settings.remote_root)
+        try:
+            ftp.cwd(root)
+            cwd = ftp.pwd()
+        except Exception as exc:
+            self._close_client(ftp, graceful=False)
+            detail = str(exc).strip()
+            raise ThreeDSFtpConnectionError(
+                f"Connected to ftpd, but the configured remote root {root} is unavailable."
+                + (f" Server detail: {detail}" if detail else "")
+            ) from exc
+
         self.ftp = ftp
-        return ftp.pwd()
+        return cwd
 
     def close(self) -> None:
         ftp, self.ftp = self.ftp, None
-        if ftp is None:
-            return
-        try:
-            ftp.quit()
-        except Exception:
-            try:
-                ftp.close()
-            except Exception:
-                pass
+        self._close_client(ftp)
 
     def _require_connection(self):
         if self.ftp is None:
@@ -111,14 +169,19 @@ class ThreeDSFtpBackend:
         ftp = self._require_connection()
         names = ftp.nlst(path)
         result: list[dict[str, str | int]] = []
+        prefix = path.rstrip("/") + "/"
         for raw_name in names:
             raw_name = str(raw_name)
-            name = raw_name.rstrip("/").split("/")[-1] or raw_name
-            candidate = normalize_remote_path(raw_name)
+            raw_candidate = normalize_remote_path(raw_name)
+            if raw_name.startswith("/") or raw_candidate == path or raw_candidate.startswith(prefix):
+                candidate = raw_candidate
+            else:
+                candidate = normalize_remote_path(posixpath.join(path, raw_name))
             if self.settings.remote_root != "/":
                 root = normalize_remote_path(self.settings.remote_root)
                 if candidate != root and not candidate.startswith(root.rstrip("/") + "/"):
                     continue
+            name = candidate.rstrip("/").split("/")[-1] or candidate
             is_dir = False
             current = ftp.pwd()
             try:
@@ -182,11 +245,54 @@ class ThreeDSFtpBackend:
 
     @staticmethod
     def _rest_not_supported(exc: BaseException) -> bool:
-        """Return True only for standard FTP responses indicating REST is unsupported."""
-        message = str(exc).upper()
-        if "REST" not in message:
-            return False
-        return bool(re.search(r"\b(?:500|501|502|504)\b", message))
+        """Return True for standard FTP responses rejecting the REST command."""
+        return bool(re.search(r"\b(?:500|501|502|504)\b", str(exc).upper()))
+
+    @staticmethod
+    def _source_digest(local_path: Path, cancel_event=None) -> str:
+        hasher = hashlib.sha256()
+        with local_path.open("rb") as source:
+            while True:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise InterruptedError("Transfer cancelled.")
+                chunk = source.read(1024 * 1024)
+                if not chunk:
+                    break
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    @staticmethod
+    def _staging_path(remote: str, source_digest: str) -> str:
+        parent = posixpath.dirname(remote)
+        remote_tag = hashlib.sha256(remote.encode("utf-8")).hexdigest()[:12]
+        name = f".rommheld-{source_digest[:24]}-{remote_tag}.part"
+        return posixpath.join(parent, name)
+
+    @staticmethod
+    def _backup_path(remote: str) -> str:
+        parent = posixpath.dirname(remote)
+        return posixpath.join(parent, f".rommheld-{uuid4().hex}.bak")
+
+    @staticmethod
+    def _delete(ftp, remote: str) -> None:
+        ftp.delete(remote)
+
+    @staticmethod
+    def _rename(ftp, source: str, destination: str) -> None:
+        ftp.rename(source, destination)
+
+    def _delete_if_present(self, ftp, remote: str) -> None:
+        try:
+            self._delete(ftp, remote)
+        except (ftplib.error_perm, ftplib.error_reply):
+            pass
+
+    def _restore_backup(self, ftp, backup: str | None, remote: str) -> None:
+        if backup is None:
+            self._delete_if_present(ftp, remote)
+            return
+        self._delete_if_present(ftp, remote)
+        self._rename(ftp, backup, remote)
 
     def upload(
         self,
@@ -198,7 +304,7 @@ class ThreeDSFtpBackend:
         cancel_event=None,
         progress: ProgressCallback | None = None,
     ) -> tuple[str, int]:
-        """Upload a local file, resuming partial files when the server supports REST."""
+        """Upload through a verified staging file, resuming only matching RommHeld stages."""
         ftp = self._require_connection()
         local_path = local_path.expanduser()
         if not local_path.is_file():
@@ -211,56 +317,57 @@ class ThreeDSFtpBackend:
 
         if remote_existing == source_size:
             return "skipped", source_size
-        if remote_existing is not None and remote_existing > source_size and not overwrite:
+        if remote_existing is not None and not overwrite:
             return "different", 0
-        if remote_existing is not None and remote_existing not in (0, source_size) and not overwrite and not (resume and remote_existing < source_size):
-            return "different", 0
+        if cancel_event is not None and cancel_event.is_set():
+            return "cancelled", 0
 
-        offset = remote_existing if resume and remote_existing and remote_existing < source_size else 0
-        blocksize = 256 * 1024
+        try:
+            source_digest = self._source_digest(local_path, cancel_event)
+        except InterruptedError:
+            return "cancelled", 0
+
+        temporary = self._staging_path(remote, source_digest)
+        try:
+            temp_existing = ftp.size(temporary)
+            temp_existing = int(temp_existing) if temp_existing is not None else None
+        except (ftplib.error_perm, ftplib.error_reply):
+            temp_existing = None
+
+        offset = 0
+        if resume and temp_existing is not None and 0 < temp_existing < source_size:
+            offset = temp_existing
+        elif temp_existing == source_size:
+            if progress is not None:
+                progress(source_size)
+            offset = source_size
+        elif temp_existing is not None and temp_existing > source_size:
+            self._delete_if_present(ftp, temporary)
+
+        transferred = offset
         did_resume = bool(offset)
+        blocksize = 256 * 1024
 
-        with local_path.open("rb") as src:
-            transferred = offset
-            if offset:
-                src.seek(offset)
+        if offset != source_size:
+            with local_path.open("rb") as src:
+                if offset:
+                    src.seek(offset)
 
-            def callback(chunk: bytes) -> None:
-                nonlocal transferred
-                transferred += len(chunk)
-                if progress is not None:
-                    progress(transferred)
-                if cancel_event is not None and cancel_event.is_set():
-                    raise InterruptedError("Transfer cancelled.")
+                def callback(chunk: bytes) -> None:
+                    nonlocal transferred
+                    transferred += len(chunk)
+                    if progress is not None:
+                        progress(transferred)
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise InterruptedError("Transfer cancelled.")
 
-            try:
-                ftp.storbinary(
-                    f"STOR {remote}",
-                    src,
-                    blocksize=blocksize,
-                    callback=callback,
-                    rest=offset or None,
-                )
-            except InterruptedError:
-                try:
-                    ftp.abort()
-                except Exception:
-                    pass
-                return "cancelled", transferred
-            except (ftplib.error_perm, ftplib.error_reply) as exc:
-                if not offset or not self._rest_not_supported(exc):
-                    raise
-                src.seek(0)
-                transferred = 0
-                did_resume = False
-                if progress is not None:
-                    progress(0)
                 try:
                     ftp.storbinary(
-                        f"STOR {remote}",
+                        f"STOR {temporary}",
                         src,
                         blocksize=blocksize,
                         callback=callback,
+                        rest=offset or None,
                     )
                 except InterruptedError:
                     try:
@@ -268,10 +375,64 @@ class ThreeDSFtpBackend:
                     except Exception:
                         pass
                     return "cancelled", transferred
+                except (ftplib.error_perm, ftplib.error_reply) as exc:
+                    if not offset or not self._rest_not_supported(exc):
+                        raise
+                    src.seek(0)
+                    transferred = 0
+                    did_resume = False
+                    if progress is not None:
+                        progress(0)
+                    try:
+                        ftp.storbinary(
+                            f"STOR {temporary}",
+                            src,
+                            blocksize=blocksize,
+                            callback=callback,
+                        )
+                    except InterruptedError:
+                        try:
+                            ftp.abort()
+                        except Exception:
+                            pass
+                        return "cancelled", transferred
+
+        try:
+            temp_size = ftp.size(temporary)
+            temp_size = int(temp_size) if temp_size is not None else None
+        except (ftplib.error_perm, ftplib.error_reply):
+            temp_size = None
+        if temp_size != source_size:
+            raise IOError(
+                f"FTP size verification failed for staged upload {temporary}: expected {source_size} bytes, got {temp_size}"
+            )
+
+        backup = None
+        if remote_existing is not None:
+            backup = self._backup_path(remote)
+            self._rename(ftp, remote, backup)
+
+        try:
+            self._rename(ftp, temporary, remote)
+        except Exception:
+            if backup is not None:
+                self._restore_backup(ftp, backup, remote)
+            raise
 
         final_size = self.remote_size(remote_path)
         if final_size != source_size:
+            try:
+                self._restore_backup(ftp, backup, remote)
+            finally:
+                if backup is None:
+                    self._delete_if_present(ftp, remote)
             raise IOError(
                 f"FTP size verification failed for {remote}: expected {source_size} bytes, got {final_size}"
             )
+
+        if backup is not None:
+            try:
+                self._delete(ftp, backup)
+            except Exception:
+                pass
         return ("resumed" if did_resume else "copied"), source_size

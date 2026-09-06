@@ -4,34 +4,63 @@ import threading
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QComboBox,
     QDialog,
-    QGridLayout,
-    QGroupBox,
+    QFrame,
+    QHBoxLayout,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
+    QWidget,
 )
 
 from .archive_utils import ArchiveEntry
-from .emulators import EMULATORS, detect_emulators
+from .config import load_config
+from .design_tokens import DARK, brand_for_platform
+from .emulators import EMULATORS
 from .package_manager import PACKAGES, download_package, inspect_package, package_path, stage_package
-from .vita import free_space, total_space
+from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
+from .vita import free_space, is_vita_mount, total_space
+from .vita_ftp import VitaFtpSettings
+from .vita_health import HEALTHY, PRESENT_UNVERIFIED, VitaComponentHealth, inspect_vita_health
+from .vita_package_transport import stage_package_via_ftp
+
+
+PLAYSTATION_BLUE = brand_for_platform("vita").accent
 
 
 class PackageWorker(QThread):
     progress = Signal(int, str)
     finished_ok = Signal(str, str)
     archive_ready = Signal(str, object)
+    cancelled = Signal(str)
     failed = Signal(str)
 
-    def __init__(self, package_key: str, action: str, vita: Path | None):
+    def __init__(
+        self,
+        package_key: str,
+        action: str,
+        vita: Path | None,
+        *,
+        transport: str = "usb",
+        ftp_settings: VitaFtpSettings | None = None,
+    ):
         super().__init__()
         self.package_key = package_key
         self.action = action
         self.vita = vita
+        self.transport = transport
+        self.ftp_settings = ftp_settings
         self.cancel_event = threading.Event()
+
+    def cancel(self) -> None:
+        self.cancel_event.set()
 
     def run(self):
         try:
@@ -39,9 +68,16 @@ class PackageWorker(QThread):
             if self.action == "download":
                 def report(done: int, total: int):
                     percent = int(done * 100 / total) if total else 0
-                    self.progress.emit(percent, f"Downloading {package.name}: {done / 1024**2:.1f} MiB")
+                    self.progress.emit(
+                        percent,
+                        f"Downloading {package.name}: {done / 1024**2:.1f} MiB",
+                    )
 
-                path = download_package(package, progress=report)
+                path = download_package(
+                    package,
+                    progress=report,
+                    cancel_event=self.cancel_event,
+                )
                 if package.requires_archive_review:
                     entries = inspect_package(package)
                     self.archive_ready.emit(str(path), entries)
@@ -52,103 +88,378 @@ class PackageWorker(QThread):
                 entries = inspect_package(package)
                 self.archive_ready.emit(str(package_path(package)), entries)
                 return
-            if self.vita is None:
-                raise RuntimeError("No Vita is connected.")
-            target = stage_package(package, self.vita)
+            if self.transport == "ftp":
+                if self.ftp_settings is None:
+                    raise RuntimeError("VitaShell FTP is not configured.")
+                source = package_path(package)
+                total = source.stat().st_size if source.is_file() else 0
+
+                def report_ftp(done: int):
+                    percent = int(done * 100 / total) if total else 0
+                    self.progress.emit(
+                        percent,
+                        f"Staging {package.name} over VitaShell FTP: {done / 1024**2:.1f} MiB",
+                    )
+
+                result, target = stage_package_via_ftp(
+                    package,
+                    self.ftp_settings,
+                    cancel_event=self.cancel_event,
+                    progress=report_ftp,
+                )
+                if result == "cancelled":
+                    raise InterruptedError(f"Staging {package.name} was cancelled.")
+                self.finished_ok.emit("stage", target)
+                return
+            if self.vita is None or not is_vita_mount(self.vita):
+                raise RuntimeError(
+                    "The VitaShell USB mount is no longer available. Reconnect the Vita or choose VitaShell FTP."
+                )
+            target = stage_package(
+                package,
+                self.vita,
+                cancel_event=self.cancel_event,
+            )
             self.finished_ok.emit("stage", str(target))
+        except InterruptedError as exc:
+            self.cancelled.emit(str(exc))
         except Exception as exc:
             self.failed.emit(str(exc))
 
 
 class VitaSetupDialog(QDialog):
+    """Vita setup workflow with evidence-based runtime and package states."""
+
     def __init__(self, vita: Path | None, parent=None):
         super().__init__(parent)
-        self.vita = vita
+        self.vita = vita if vita is not None and is_vita_mount(vita) else None
+        vita = self.vita
         self.worker: PackageWorker | None = None
-        self.setWindowTitle("Vita Setup")
-        self.resize(1040, 760)
+        self.action_buttons: list[QPushButton] = []
+        self._pending_stage_key: str | None = None
+        saved_ftp = load_config().get("devices", {}).get("vita_ftp", {})
+        self._ftp_host = str(saved_ftp.get("host", "")).strip()
+        try:
+            self._ftp_port = int(saved_ftp.get("port", 1337))
+            if not 1 <= self._ftp_port <= 65535:
+                raise ValueError
+        except (TypeError, ValueError):
+            self._ftp_port = 1337
 
-        layout = QVBoxLayout(self)
-        title = QLabel("Vita software, emulator setup, and RetroAchievements readiness")
-        title.setStyleSheet("font-size: 18px; font-weight: bold;")
-        layout.addWidget(title)
+        self.setWindowTitle("PlayStation Vita Setup")
+        self.resize(1040, 780)
+        self.setMinimumSize(860, 650)
+
+        runtime_health = inspect_vita_health(vita) if vita is not None else {}
+        free_text = "Unavailable"
+        storage_detail = "Storage capacity is available only while VitaShell exposes ux0 over USB."
+        if vita is not None:
+            try:
+                free = free_space(vita)
+                total = total_space(vita)
+                free_text = f"{free / 1024**3:.1f} GiB free"
+                storage_detail = f"{free / 1024**3:.1f} GiB free of {total / 1024**3:.1f} GiB"
+            except OSError:
+                free_text = "Mounted"
+                storage_detail = "The Vita filesystem is mounted, but storage capacity could not be read."
+
+        header = SectionHeader(
+            "Prepare your PlayStation Vita",
+            "Choose the VitaShell transport, inspect runtime evidence, then prepare only the packages you actually need. USB remains recommended on handheld Vita; FTP also supports wireless staging and PlayStation TV.",
+        )
+
+        status_row = QHBoxLayout()
+        status_row.setSpacing(8)
+        device_state = (
+            "USB mounted"
+            if vita is not None
+            else "FTP configured"
+            if self._ftp_host
+            else "Not connected"
+        )
+        self.device_status = StatusPill("Vita", device_state)
+        self.storage_status = StatusPill("Storage", free_text)
+        runtime_state = "ux0 evidence checked" if vita is not None else "Not checked"
+        self.runtime_status = StatusPill("Runtime", runtime_state)
+        status_row.addWidget(self.device_status)
+        status_row.addWidget(self.storage_status)
+        status_row.addWidget(self.runtime_status)
+        status_row.addStretch(1)
+
+        device_card = SurfaceCard()
+        device_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        device_card.content.addWidget(self._card_title("1 · Choose the VitaShell transport"))
+        device_card.content.addWidget(
+            self._secondary(
+                "USB is faster and exposes storage capacity, so it remains the recommended handheld path. FTP is useful for wireless transfers and PlayStation TV. FTP must already be configured from Device → Send file / configure FTP."
+            )
+        )
+        self.transport_combo = QComboBox()
+        self.transport_combo.addItem("VitaShell USB · Recommended", "usb")
+        self.transport_combo.addItem("VitaShell FTP · Wireless / PlayStation TV", "ftp")
+        if vita is None and self._ftp_host:
+            self.transport_combo.setCurrentIndex(1)
+        self.transport_combo.currentIndexChanged.connect(self._transport_changed)
+        device_card.content.addWidget(self.transport_combo)
 
         if vita is None:
-            message = QLabel(
-                "No Vita filesystem is currently mounted. Connect VitaShell in USB mode, then reopen this screen."
+            usb_detail = (
+                "USB: not mounted. In VitaShell press START, set SELECT button to USB, choose the USB device that contains ux0, close Settings, press SELECT, then connect a USB data cable."
             )
-            message.setWordWrap(True)
-            layout.addWidget(message)
-            close = QPushButton("Close")
-            close.clicked.connect(self.accept)
-            layout.addWidget(close)
-            return
+        else:
+            usb_detail = f"USB: {vita}"
+        ftp_detail = (
+            f"FTP: {self._ftp_host}:{self._ftp_port}"
+            if self._ftp_host
+            else "FTP: not configured. Use Device → Send file / configure FTP."
+        )
+        device_path = QLabel(f"{usb_detail}\n{ftp_detail}")
+        device_path.setWordWrap(True)
+        device_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        device_path.setStyleSheet(
+            f"color:{DARK.text_primary};font-weight:600;background:transparent;"
+        )
+        device_card.content.addWidget(device_path)
+        device_card.content.addWidget(self._secondary(storage_detail))
 
-        try:
-            free = free_space(vita)
-            total = total_space(vita)
-            layout.addWidget(QLabel(f"Storage: {free / 1024**3:.1f} GiB free of {total / 1024**3:.1f} GiB"))
-        except OSError:
-            pass
+        software_card = SurfaceCard()
+        software_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        software_card.content.addWidget(self._card_title("2 · Prepare runtime software"))
+        software_card.content.addWidget(
+            self._secondary(
+                "Runtime state comes from read-only Vita filesystem evidence. Installed application files remain ‘Present · launch not verified’ until tested on-console. A staged VPK is never treated as an installed app, and ux0-only USB inspection never fabricates ur0/taiHEN dependency state."
+            )
+        )
 
-        installed = detect_emulators(vita)
-        grid_box = QGroupBox("Detected components")
-        grid = QGridLayout(grid_box)
-        for column, text in enumerate(("Component", "Status", "RetroAchievements role", "Action")):
-            grid.addWidget(QLabel(f"<b>{text}</b>"), 0, column)
-
-        self.action_buttons: list[QPushButton] = []
-        row = 1
+        stage_available = vita is not None or bool(self._ftp_host)
         for emulator in EMULATORS:
-            grid.addWidget(QLabel(emulator.name), row, 0)
-            grid.addWidget(QLabel("✓ Installed" if installed.get(emulator.key) else "? Not detected"), row, 1)
-            grid.addWidget(QLabel(emulator.achievement_role), row, 2)
-
+            component = runtime_health.get(emulator.key)
+            row = self._runtime_row(
+                emulator.name,
+                component,
+                emulator.achievement_role,
+            )
+            row_layout = row.layout()
             package_keys = emulator.package_keys
             if not package_keys:
-                button = QPushButton("No package configured")
+                button = QPushButton("Manual / external setup")
                 button.setEnabled(False)
-            elif installed.get(emulator.key):
-                button = QPushButton("Package / inspect")
-                button.clicked.connect(lambda checked=False, key=package_keys[0]: self.prepare_package(key))
+            elif component is not None and component.state in {PRESENT_UNVERIFIED, HEALTHY}:
+                button = QPushButton("Prepare package")
+                button.clicked.connect(
+                    lambda checked=False, key=package_keys[0]: self.prepare_package(key)
+                )
             else:
-                button = QPushButton("Download / stage")
-                button.clicked.connect(lambda checked=False, key=package_keys[0]: self.prepare_package(key))
+                label = "Download / stage" if stage_available else "Download package"
+                button = AccentButton(label, PLAYSTATION_BLUE)
+                button.clicked.connect(
+                    lambda checked=False, key=package_keys[0]: self.prepare_package(key)
+                )
             self.action_buttons.append(button)
-            grid.addWidget(button, row, 3)
-            row += 1
+            row_layout.addWidget(button)
+            software_card.content.addWidget(row)
 
-        layout.addWidget(grid_box)
-
-        ra = QGroupBox("RetroAchievements")
-        ra_layout = QVBoxLayout(ra)
-        ra_text = QLabel(
-            "RetroFlow is a frontend, not the achievement implementation. For supported systems, "
-            "RetroArch plus the appropriate libretro core remains the achievement-first route. "
-            "Emu4Vita++ is a separate RetroFlow-supported emulator path, so it should not silently "
-            "replace RetroArch when achievement support is the priority."
+        evidence_card = SurfaceCard()
+        evidence_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        evidence_card.content.addWidget(self._card_title("3 · Inspect runtime dependencies"))
+        evidence_card.content.addWidget(
+            self._secondary(
+                "These checks are read-only. VitaShell USB normally exposes ux0 only, so dependencies stored on ur0 remain Not checked unless separate trusted evidence is supplied. RommHeld does not rewrite taiHEN config, redistribute libshacccg, or infer kubridge versions from filenames."
+            )
         )
-        ra_text.setWordWrap(True)
-        ra_layout.addWidget(ra_text)
-        layout.addWidget(ra)
+        for key, role in (
+            ("vitashell", "Required transport and package-installation utility"),
+            ("retroarch-cores", "Core executables available to the RetroArch frontend"),
+            ("libshacccg", "Runtime shader compiler required by vitaGL-based software and DSVita"),
+            ("kubridge", "Kernel bridge; DSVita requires version 0.3.1 or later under *KERNEL"),
+        ):
+            component = runtime_health.get(key)
+            evidence_card.content.addWidget(
+                self._runtime_row(
+                    component.name if component is not None else self._runtime_component_name(key),
+                    component,
+                    role,
+                )
+            )
 
-        progress = QGroupBox("Setup activity")
-        progress_layout = QVBoxLayout(progress)
+        achievements_card = SurfaceCard()
+        achievements_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        achievements_card.content.addWidget(
+            self._card_title("4 · Choose the achievement-capable route intentionally")
+        )
+        achievements_card.content.addWidget(
+            self._secondary(
+                "RetroFlow is a frontend, not the achievement implementation. For supported systems, RetroArch plus the appropriate libretro core remains the achievement-first route. Emu4Vita++ is a separate RetroFlow-supported emulator path and should not silently replace RetroArch when achievements are the priority."
+            )
+        )
+
+        activity_card = SurfaceCard()
+        activity_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        activity_card.content.addWidget(self._card_title("Setup activity"))
         self.activity = QLabel("Ready.")
-        self.activity.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        progress_layout.addWidget(self.activity)
-        layout.addWidget(progress)
-
-        note = QLabel(
-            "VPKs are staged for VitaShell installation. Archive packages are inspected before extraction; "
-            "the manager never assumes that a ZIP belongs in ux0:/data/."
+        self.activity.setWordWrap(True)
+        self.activity.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        activity_card.content.addWidget(self.activity)
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setVisible(False)
+        activity_card.content.addWidget(self.progress_bar)
+        self.cancel_button = QPushButton("Cancel current action")
+        self.cancel_button.setVisible(False)
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.clicked.connect(self._cancel_worker)
+        activity_card.content.addWidget(self.cancel_button)
+        activity_card.content.addWidget(
+            self._secondary(
+                "VPKs are staged for VitaShell installation. FTP staging uses the same verified temporary-upload and safe-replacement transport as other Vita FTP transfers. Archive packages are inspected before extraction."
+            )
         )
-        note.setWordWrap(True)
-        layout.addWidget(note)
 
-        close = QPushButton("Close")
-        close.clicked.connect(self.accept)
-        layout.addWidget(close)
+        scroll_content = QWidget()
+        scroll_content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.setSpacing(12)
+        scroll_layout.addWidget(device_card)
+        scroll_layout.addWidget(software_card)
+        scroll_layout.addWidget(evidence_card)
+        scroll_layout.addWidget(achievements_card)
+        scroll_layout.addWidget(activity_card)
+        scroll_layout.addStretch(1)
+
+        self.setup_scroll = QScrollArea()
+        self.setup_scroll.setObjectName("vitaSetupScroll")
+        self.setup_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.setup_scroll.setWidgetResizable(True)
+        self.setup_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setup_scroll.setWidget(scroll_content)
+
+        close_row = QHBoxLayout()
+        close_row.addStretch(1)
+        self.done_button = QPushButton("Done")
+        self.done_button.clicked.connect(self.accept)
+        close_row.addWidget(self.done_button)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(12)
+        layout.addWidget(header)
+        layout.addLayout(status_row)
+        layout.addWidget(self.setup_scroll, 1)
+        layout.addLayout(close_row)
+
+        self._transport_changed()
+
+    def _card_title(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setStyleSheet(
+            f"color:{DARK.text_primary};font-size:15px;font-weight:700;background:transparent;"
+        )
+        return label
+
+    def _secondary(self, text: str) -> QLabel:
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setStyleSheet(f"color:{DARK.text_secondary};background:transparent;")
+        return label
+
+    def _runtime_row(
+        self,
+        name_text: str,
+        component: VitaComponentHealth | None,
+        role: str,
+    ) -> QFrame:
+        row = QFrame()
+        row.setObjectName("vitaPackageRow")
+        row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        row.setStyleSheet(
+            f"QFrame#vitaPackageRow{{background:{DARK.surface_raised};"
+            f"border:1px solid {DARK.separator};border-radius:10px;}}"
+        )
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(12, 9, 10, 9)
+        row_layout.setSpacing(12)
+
+        text = QVBoxLayout()
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(2)
+        name = QLabel(name_text)
+        name.setStyleSheet(
+            f"color:{DARK.text_primary};font-weight:700;background:transparent;"
+        )
+        state_label = component.label if component is not None else "Not checked"
+        detail = QLabel(f"{state_label} · {role}")
+        detail.setWordWrap(True)
+        detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        detail.setStyleSheet(
+            f"color:{DARK.text_secondary};font-size:11px;background:transparent;"
+        )
+        if component is None:
+            detail.setToolTip(
+                "Runtime evidence was not inspected. FTP configuration alone does not prove application, dependency or launch state."
+            )
+        else:
+            evidence = "\n".join(component.evidence)
+            tooltip = component.summary
+            if evidence:
+                tooltip += f"\n\nEvidence:\n{evidence}"
+            detail.setToolTip(tooltip)
+        text.addWidget(name)
+        text.addWidget(detail)
+        row_layout.addLayout(text, 1)
+        return row
+
+    @staticmethod
+    def _runtime_component_name(key: str) -> str:
+        return {
+            "vitashell": "VitaShell",
+            "retroarch-cores": "RetroArch cores",
+            "libshacccg": "libshacccg.suprx",
+            "kubridge": "kubridge",
+        }.get(key, key)
+
+    def _selected_transport(self) -> str:
+        return str(self.transport_combo.currentData() or "usb")
+
+    def _ftp_settings(self) -> VitaFtpSettings | None:
+        if not self._ftp_host:
+            return None
+        return VitaFtpSettings(host=self._ftp_host, port=self._ftp_port)
+
+    def _can_stage(self) -> bool:
+        if self._selected_transport() == "ftp":
+            return self._ftp_settings() is not None
+        return self.vita is not None and is_vita_mount(self.vita)
+
+    def _transport_changed(self, _index: int | None = None) -> None:
+        if self._selected_transport() == "ftp":
+            if self._ftp_host:
+                self.device_status.set_value("FTP configured")
+                self.storage_status.set_value("Checked during transfer")
+                self.activity.setText(
+                    "FTP selected. Start VitaShell FTP with SELECT before staging a package."
+                )
+            else:
+                self.device_status.set_value("FTP setup required")
+                self.storage_status.set_value("Unavailable")
+                self.activity.setText(
+                    "Configure VitaShell FTP from Device → Send file / configure FTP before staging."
+                )
+        else:
+            usb_available = self.vita is not None and is_vita_mount(self.vita)
+            if not usb_available:
+                self.vita = None
+            self.device_status.set_value("USB mounted" if usb_available else "Not mounted")
+            if not usb_available:
+                self.storage_status.set_value("Unavailable")
+                self.activity.setText("USB selected. Mount ux0 through VitaShell before staging.")
+            else:
+                try:
+                    self.storage_status.set_value(f"{free_space(self.vita) / 1024**3:.1f} GiB free")
+                except OSError:
+                    self.storage_status.set_value("Mounted")
+                self.activity.setText("USB selected. Ready to prepare runtime packages.")
 
     def prepare_package(self, package_key: str) -> None:
         package = PACKAGES[package_key]
@@ -161,49 +472,120 @@ class VitaSetupDialog(QDialog):
 
     def _start_worker(self, package_key: str, action: str) -> None:
         package = PACKAGES[package_key]
-        if action == "stage" and not self.vita:
-            QMessageBox.warning(self, "Vita not connected", "Connect the Vita in VitaShell USB mode first.")
+        transport = self._selected_transport()
+        ftp_settings = self._ftp_settings()
+        if action == "stage" and not self._can_stage():
+            if transport == "ftp":
+                message = (
+                    "VitaShell FTP is not configured. Open Device → Send file / configure FTP, "
+                    "enter the IP address and port shown by VitaShell, then retry."
+                )
+            else:
+                message = (
+                    "Open VitaShell, press START, set SELECT button to USB, close Settings, "
+                    "press SELECT, then connect the Vita with a USB data cable before staging files."
+                )
+            QMessageBox.warning(self, "Vita transport unavailable", message)
             return
         self.activity.setText(f"Preparing {package.name}…")
         self._set_actions_enabled(False)
-        self.worker = PackageWorker(package_key, action, self.vita)
-        self.worker.progress.connect(lambda value, text: self.activity.setText(f"{value}% • {text}"))
+        self.transport_combo.setEnabled(False)
+        self.done_button.setEnabled(False)
+        self.progress_bar.setVisible(True)
+        cancellable = action in {"download", "stage"}
+        self.cancel_button.setVisible(cancellable)
+        self.cancel_button.setEnabled(cancellable)
+        if cancellable:
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+        else:
+            self.progress_bar.setRange(0, 0)
+        self.worker = PackageWorker(
+            package_key,
+            action,
+            self.vita,
+            transport=transport,
+            ftp_settings=ftp_settings,
+        )
+        self.worker.progress.connect(self._package_progress)
         self.worker.finished_ok.connect(self._package_finished)
         self.worker.archive_ready.connect(self._archive_ready)
+        self.worker.cancelled.connect(self._package_cancelled)
         self.worker.failed.connect(self._package_failed)
+        self.worker.finished.connect(self._worker_finished)
         self.worker.start()
+
+    def _cancel_worker(self) -> None:
+        if self.worker is None or not self.worker.isRunning():
+            return
+        self.worker.cancel()
+        self.cancel_button.setEnabled(False)
+        package = PACKAGES[self.worker.package_key]
+        self.activity.setText(f"Cancelling {package.name}…")
+
+    def _package_progress(self, value: int, text: str) -> None:
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(value)
+        self.activity.setText(f"{value}% · {text}")
+
+    def _finish_activity(self) -> None:
+        self.progress_bar.setVisible(False)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.cancel_button.setVisible(False)
+        self.cancel_button.setEnabled(False)
 
     def _set_actions_enabled(self, enabled: bool) -> None:
         for button in self.action_buttons:
-            button.setEnabled(enabled)
+            if button.text() != "Manual / external setup":
+                button.setEnabled(enabled)
+
+    def _worker_finished(self) -> None:
+        pending_stage = self._pending_stage_key
+        self._pending_stage_key = None
+        self.worker = None
+        self.transport_combo.setEnabled(True)
+        self.done_button.setEnabled(True)
+        self._set_actions_enabled(True)
+
+        if pending_stage is None or not self._can_stage():
+            return
+        package = PACKAGES[pending_stage]
+        transport_label = (
+            "VitaShell FTP" if self._selected_transport() == "ftp" else "VitaShell USB"
+        )
+        reply = QMessageBox.question(
+            self,
+            "Download complete",
+            f"{package.name} was downloaded successfully. Stage it using {transport_label} now?",
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self._start_worker(package.key, "stage")
 
     def _package_finished(self, action: str, path: str) -> None:
-        self._set_actions_enabled(True)
+        self._finish_activity()
         self.activity.setText(f"Ready: {path}")
         package = PACKAGES[self.worker.package_key] if self.worker else None
-        if action == "download" and package is not None and self.vita is not None:
-            reply = QMessageBox.question(
-                self,
-                "Download complete",
-                f"{package.name} was downloaded and verified. Stage it to the Vita now?",
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                self._start_worker(package.key, "stage")
+        if action == "download" and package is not None and self._can_stage():
+            self._pending_stage_key = package.key
         elif action == "stage":
             QMessageBox.information(
                 self,
                 "Package staged",
-                f"Copied to:\n{path}\n\nInstall VPK packages with VitaShell.",
+                f"Staged to:\n{path}\n\nInstall VPK packages with VitaShell.",
             )
 
     def _archive_ready(self, path: str, entries: object) -> None:
-        self._set_actions_enabled(True)
+        self._finish_activity()
         package = PACKAGES[self.worker.package_key] if self.worker else None
         archive_entries = [item for item in entries if isinstance(item, ArchiveEntry)]
         lines = []
         for item in archive_entries[:80]:
             prefix = "[DIR] " if item.is_directory else "      "
-            lines.append(f"{prefix}{item.name}" + ("" if item.is_directory else f" ({item.size / 1024**2:.1f} MiB)"))
+            lines.append(
+                f"{prefix}{item.name}"
+                + ("" if item.is_directory else f" ({item.size / 1024**2:.1f} MiB)")
+            )
         extra = len(archive_entries) - len(lines)
         if extra > 0:
             lines.append(f"… {extra} more entries")
@@ -217,17 +599,51 @@ class VitaSetupDialog(QDialog):
         self._maybe_stage_archive(package)
 
     def _maybe_stage_archive(self, package) -> None:
-        if package is None or self.vita is None:
+        if package is None:
             return
         reply = QMessageBox.information(
             self,
             "Archive requires review",
             f"{package.name} is an archive and its Vita extraction layout has not been verified by the manager.\n\n"
-            "It will not be extracted automatically. Leave it in the Linux cache until an explicit package rule is added.",
+            "It will not be extracted automatically. Leave it in the local cache until an explicit package rule is added."
         )
         _ = reply
 
+    def _package_cancelled(self, message: str) -> None:
+        self._pending_stage_key = None
+        self._finish_activity()
+        self.activity.setText(message or "Setup action cancelled.")
+
     def _package_failed(self, message: str) -> None:
-        self._set_actions_enabled(True)
+        self._finish_activity()
         self.activity.setText("Setup action failed.")
         QMessageBox.critical(self, "Vita setup failed", message)
+
+    def _worker_active(self) -> bool:
+        return self.worker is not None and self.worker.isRunning()
+
+    def _show_setup_action_in_progress(self) -> None:
+        QMessageBox.information(
+            self,
+            "Setup action in progress",
+            "Cancel the current package action or allow it to finish before closing this window.",
+        )
+
+    def accept(self) -> None:
+        if self._worker_active():
+            self._show_setup_action_in_progress()
+            return
+        super().accept()
+
+    def reject(self) -> None:
+        if self._worker_active():
+            self._show_setup_action_in_progress()
+            return
+        super().reject()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        if self._worker_active():
+            self._show_setup_action_in_progress()
+            event.ignore()
+            return
+        super().closeEvent(event)

@@ -1,44 +1,27 @@
 from __future__ import annotations
 
 from pathlib import Path
-from urllib.request import Request, urlopen
 
-from PySide6.QtCore import QThread, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPixmap
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from .platform_assets import get_platform_assets
 
 
-class _PhotoLoader(QThread):
-    loaded = Signal(bytes)
-
-    def __init__(self, url: str, parent: QWidget | None = None):
-        super().__init__(parent)
-        self.url = url
-
-    def run(self) -> None:
-        try:
-            request = Request(
-                self.url,
-                headers={"User-Agent": "RommHeld/1.0 hardware-artwork"},
-            )
-            with urlopen(request, timeout=10) as response:
-                data = response.read(16 * 1024 * 1024)
-            if data:
-                self.loaded.emit(data)
-        except Exception:
-            return
+MAX_HARDWARE_IMAGE_BYTES = 16 * 1024 * 1024
 
 
 class ConsoleIdentity(QWidget):
-    """Render real hardware photos when available, with bundled vectors as an offline fallback."""
+    """Render optional hardware photos with bundled vectors as the offline fallback."""
 
     DISPLAY_SIZE = {
-        "vita": (198, 96),
-        "3ds": (158, 154),
-        "ds": (158, 154),
-        "psp": (192, 118),
+        "vita": (166, 64),
+        "3ds": (94, 78),
+        "ds": (94, 78),
+        "psp": (164, 68),
+        "mobile": (78, 72),
     }
 
     def __init__(self, console_key: str, name: str, parent: QWidget | None = None):
@@ -46,12 +29,14 @@ class ConsoleIdentity(QWidget):
         self.console_key = console_key
         self.name = name
         self.assets = get_platform_assets(console_key)
-        self._photo_loader: _PhotoLoader | None = None
-        width, height = self.DISPLAY_SIZE.get(console_key, (170, 132))
+        self._network = QNetworkAccessManager(self)
+        self._reply: QNetworkReply | None = None
+        self._download = bytearray()
+        width, height = self.DISPLAY_SIZE.get(console_key, (150, 72))
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(7)
+        root.setSpacing(3)
         root.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.device = QLabel()
@@ -61,11 +46,11 @@ class ConsoleIdentity(QWidget):
         self.device.setStyleSheet("background:transparent;border:none;")
         root.addWidget(self.device, 0, Qt.AlignmentFlag.AlignCenter)
 
-        self.name_label = QLabel(self.name.upper())
+        self.name_label = QLabel(self.name)
         self.name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.name_label.setWordWrap(False)
         self.name_label.setStyleSheet(
-            "background:transparent;border:none;color:#f2f4f8;font-size:13px;font-weight:700;"
+            "background:transparent;border:none;color:#F5F5F7;font-size:13px;font-weight:700;"
         )
         root.addWidget(self.name_label, 0, Qt.AlignmentFlag.AlignCenter)
 
@@ -74,14 +59,59 @@ class ConsoleIdentity(QWidget):
 
     def _load_fallback_artwork(self) -> None:
         if not self.assets:
+            self._load_generic_artwork()
             return
-        artwork_path: Path = self.assets.path("device_large")
+        try:
+            artwork_path: Path = self.assets.path("device_large")
+        except ValueError:
+            self._load_generic_artwork()
+            return
         if not artwork_path.is_file():
+            self._load_generic_artwork()
             return
         pixmap = QPixmap(str(artwork_path))
         if pixmap.isNull():
+            self._load_generic_artwork()
             return
         self.device.setPixmap(self._fit_pixmap(pixmap))
+
+    def _load_generic_artwork(self) -> None:
+        """Draw a neutral device silhouette when a platform has no bundled art."""
+        if self.console_key != "mobile":
+            return
+
+        size = self.device.size()
+        pixmap = QPixmap(size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        width = min(40, max(28, size.width() - 24))
+        height = min(66, max(50, size.height() - 6))
+        left = (size.width() - width) // 2
+        top = (size.height() - height) // 2
+
+        painter.setPen(QPen(QColor("#77777D"), 2))
+        painter.setBrush(QColor("#242428"))
+        painter.drawRoundedRect(left, top, width, height, 8, 8)
+
+        screen_margin = 5
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#111114"))
+        painter.drawRoundedRect(
+            left + screen_margin,
+            top + 8,
+            width - screen_margin * 2,
+            height - 18,
+            4,
+            4,
+        )
+
+        painter.setPen(QPen(QColor("#77777D"), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        center = left + width // 2
+        painter.drawLine(center - 5, top + height - 5, center + 5, top + height - 5)
+        painter.end()
+        self.device.setPixmap(pixmap)
 
     def _cache_path(self) -> Path:
         cache_root = Path.home() / ".cache" / "rommheld" / "handhelds"
@@ -99,30 +129,61 @@ class ConsoleIdentity(QWidget):
                 self.device.setPixmap(self._fit_photo(pixmap))
                 return
 
-        self._photo_loader = _PhotoLoader(self.assets.photo_url, self)
-        self._photo_loader.loaded.connect(self._photo_loaded)
-        self._photo_loader.finished.connect(self._photo_thread_finished)
-        self._photo_loader.start()
+        request = QNetworkRequest(QUrl(self.assets.photo_url))
+        request.setRawHeader(b"User-Agent", b"RommHeld/1.0 hardware-artwork")
+        self._download.clear()
+        self._reply = self._network.get(request)
+        self._reply.readyRead.connect(self._photo_ready_read)
+        self._reply.finished.connect(self._photo_finished)
 
-    def _photo_loaded(self, data: bytes) -> None:
+    def _photo_ready_read(self) -> None:
+        reply = self._reply
+        if reply is None:
+            return
+        self._download.extend(bytes(reply.readAll()))
+        if len(self._download) > MAX_HARDWARE_IMAGE_BYTES:
+            self._download.clear()
+            reply.abort()
+
+    def _photo_finished(self) -> None:
+        reply = self._reply
+        if reply is None:
+            return
+
+        if reply.bytesAvailable() and len(self._download) <= MAX_HARDWARE_IMAGE_BYTES:
+            self._download.extend(bytes(reply.readAll()))
+
+        data = (
+            bytes(self._download)
+            if len(self._download) <= MAX_HARDWARE_IMAGE_BYTES
+            else b""
+        )
+        succeeded = (
+            reply.error() == QNetworkReply.NetworkError.NoError and bool(data)
+        )
+        reply.deleteLater()
+        self._reply = None
+        self._download.clear()
+
+        if not succeeded:
+            return
         pixmap = QPixmap()
         if not pixmap.loadFromData(data):
             return
         try:
             pixmap.save(str(self._cache_path()), "PNG")
-        except Exception:
+        except OSError:
             pass
         self.device.setPixmap(self._fit_photo(pixmap))
 
-    def _photo_thread_finished(self) -> None:
-        if self._photo_loader is not None:
-            self._photo_loader.deleteLater()
-            self._photo_loader = None
+    def stop_loading(self) -> None:
+        reply = self._reply
+        if reply is not None and reply.isRunning():
+            reply.abort()
 
     def _fit_pixmap(self, pixmap: QPixmap) -> QPixmap:
-        target = self.device.size()
         return pixmap.scaled(
-            target,
+            self.device.size(),
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
@@ -131,8 +192,6 @@ class ConsoleIdentity(QWidget):
         target = self.device.size()
         image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
 
-        # Vita's source image is a white-background photograph. Remove near-white
-        # pixels after scaling so the real hardware sits cleanly on the dark UI.
         if self.assets and self.assets.photo_remove_white:
             preview = image.scaled(
                 target,
@@ -142,7 +201,11 @@ class ConsoleIdentity(QWidget):
             for y in range(preview.height()):
                 for x in range(preview.width()):
                     pixel = preview.pixelColor(x, y)
-                    if pixel.red() >= 245 and pixel.green() >= 245 and pixel.blue() >= 245:
+                    if (
+                        pixel.red() >= 245
+                        and pixel.green() >= 245
+                        and pixel.blue() >= 245
+                    ):
                         pixel.setAlpha(0)
                         preview.setPixelColor(x, y, pixel)
             image = preview
@@ -153,7 +216,6 @@ class ConsoleIdentity(QWidget):
                 Qt.TransformationMode.SmoothTransformation,
             )
 
-        # Crop transparent margins introduced by the source photograph/canvas.
         left = image.width()
         top = image.height()
         right = -1
@@ -169,3 +231,7 @@ class ConsoleIdentity(QWidget):
             image = image.copy(left, top, right - left + 1, bottom - top + 1)
 
         return QPixmap.fromImage(image)
+
+    def closeEvent(self, event) -> None:
+        self.stop_loading()
+        super().closeEvent(event)

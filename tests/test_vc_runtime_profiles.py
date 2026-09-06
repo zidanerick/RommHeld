@@ -1,0 +1,279 @@
+import hashlib
+
+import pytest
+
+from romm_vita_manager.vc_runtime_profiles import (
+    build_classic_runtime_profile,
+    build_gba_runtime_profile,
+    classic_runtime_profile_matches,
+    configured_runtime_profile,
+    gba_runtime_profile_matches,
+    guidance_for_family,
+    runtime_guidance_details,
+    runtime_guidance_summary,
+)
+
+
+def test_gba_guidance_accepts_any_genuine_gba_vc_donor():
+    guidance = guidance_for_family("gba")
+    assert guidance.classification == "recommended"
+    assert "AGB_FIRM" in guidance.recommendation
+    assert "genuine GBA Virtual Console donor" in guidance.recommendation
+
+
+def test_gb_guidance_warns_against_special_pokemon_runtime_as_general_donor():
+    guidance = guidance_for_family("gb")
+    assert guidance.classification == "profile-unverified"
+    assert "Pokemon" in guidance.recommendation
+    assert "standard late retail" in guidance.recommendation
+
+
+def test_nes_and_snes_guidance_keep_hardware_limits_explicit():
+    nes = guidance_for_family("nes")
+    snes = guidance_for_family("snes")
+    assert nes.classification == "hardware-retest-required"
+    assert "later standard retail" in nes.recommendation
+    assert snes.classification == "experimental"
+    assert "preset" in snes.recommendation
+
+
+def test_runtime_guidance_summary_reports_policy_before_profile_exists():
+    summary = runtime_guidance_summary({}, "gb")
+    assert summary.startswith("Donor guidance:")
+    assert "standard late retail Game Boy VC donor" in summary
+    assert "Pokemon" in summary
+
+
+def test_runtime_guidance_summary_reports_cached_profile_status_and_id():
+    config = {
+        "classic_vc": {
+            "nes": {
+                "runtime_profile": {
+                    "classification": "hardware-retest-required",
+                    "profile_id": "abc123def456",
+                }
+            }
+        }
+    }
+    summary = runtime_guidance_summary(config, "nes")
+    assert summary.startswith("Cached profile: hardware retest required • abc123def456.")
+    assert "later standard retail NES VC donor" in summary
+
+
+def test_runtime_guidance_surfaces_emulator_build_and_safe_profile_details():
+    config_hash = hashlib.sha256(b"[NES]\nWidth=256\n").hexdigest()
+    config = {
+        "classic_vc": {
+            "nes": {
+                "runtime_profile": {
+                    "classification": "hardware-retest-required",
+                    "profile_id": "abc123def456",
+                    "donor_title_id": "0004000001234500",
+                    "emulator_build": "  2016-02-03   04:05:06  ",
+                    "config_ini_sha256": config_hash,
+                }
+            }
+        }
+    }
+
+    summary = runtime_guidance_summary(config, "nes")
+    assert "build 2016-02-03 04:05:06" in summary
+    assert "abc123def456" in summary
+
+    details = runtime_guidance_details(config, "nes")
+    assert "Runtime profile ID: abc123def456" in details
+    assert "Donor Title ID: 0004000001234500" in details
+    assert "Emulator build: 2016-02-03 04:05:06" in details
+    assert f"config.ini SHA-256: {config_hash}" in details
+
+
+def test_runtime_guidance_flags_donor_specific_patch_data_without_reclassifying_runtime():
+    profile = build_classic_runtime_profile(
+        "gbc",
+        {"title_id": "0004000001234500"},
+        code=b"code",
+        exheader=b"exheader",
+        romfs_template=b"romfs",
+        rom_path="/rom/game.gbc",
+        donor_patch_names=("pokemon.patch", "wireless.patch"),
+    )
+    config = {"classic_vc": {"gbc": {"runtime_profile": profile}}}
+
+    assert profile["classification"] == "profile-unverified"
+    assert profile["donor_patch_names"] == ["pokemon.patch", "wireless.patch"]
+    summary = runtime_guidance_summary(config, "gbc")
+    assert "Donor-specific .patch data was detected and is stripped before reuse." in summary
+    details = runtime_guidance_details(config, "gbc")
+    assert "Donor game-specific patch files: pokemon.patch, wireless.patch" in details
+
+
+def test_classic_runtime_profile_is_deterministic_and_sensitive_to_runtime_code():
+    kwargs = {
+        "family": "nes",
+        "donor_info": {"title_id": "0004000001234500"},
+        "code": b"runtime-code-a",
+        "exheader": b"exheader",
+        "romfs_template": b"romfs-template",
+        "rom_path": "/rom/game.tnes",
+    }
+    first = build_classic_runtime_profile(**kwargs)
+    second = build_classic_runtime_profile(**kwargs)
+    changed = build_classic_runtime_profile(**{**kwargs, "code": b"runtime-code-b"})
+
+    assert first == second
+    assert first["profile_id"] != changed["profile_id"]
+    assert first["code_sha256"] == hashlib.sha256(b"runtime-code-a").hexdigest()
+    assert first["classification"] == "hardware-retest-required"
+    assert classic_runtime_profile_matches(
+        first,
+        "nes",
+        code=kwargs["code"],
+        exheader=kwargs["exheader"],
+        romfs_template=kwargs["romfs_template"],
+        rom_path=kwargs["rom_path"],
+    )
+    assert not classic_runtime_profile_matches(
+        first,
+        "nes",
+        code=b"tampered-runtime",
+        exheader=kwargs["exheader"],
+        romfs_template=kwargs["romfs_template"],
+        rom_path=kwargs["rom_path"],
+    )
+
+
+def test_classic_profile_can_cover_reusable_presentation_assets_compatibly():
+    profile = build_classic_runtime_profile(
+        "gbc",
+        {"title_id": "0004000001234500"},
+        code=b"code",
+        exheader=b"exheader",
+        romfs_template=b"romfs",
+        rom_path="/rom/game.gbc",
+        donor_banner=b"banner",
+        donor_icon=b"icon",
+        logo=b"logo",
+    )
+    assert profile["donor_banner_sha256"] == hashlib.sha256(b"banner").hexdigest()
+    assert profile["donor_icon_sha256"] == hashlib.sha256(b"icon").hexdigest()
+    assert profile["logo_sha256"] == hashlib.sha256(b"logo").hexdigest()
+    assert classic_runtime_profile_matches(
+        profile,
+        "gbc",
+        code=b"code",
+        exheader=b"exheader",
+        romfs_template=b"romfs",
+        rom_path="/rom/game.gbc",
+        donor_banner=b"banner",
+        donor_icon=b"icon",
+        logo=b"logo",
+    )
+    assert not classic_runtime_profile_matches(
+        profile,
+        "gbc",
+        code=b"code",
+        exheader=b"exheader",
+        romfs_template=b"romfs",
+        rom_path="/rom/game.gbc",
+        donor_banner=b"tampered-banner",
+        donor_icon=b"icon",
+        logo=b"logo",
+    )
+
+
+def test_classic_profile_records_build_metadata_without_changing_core_profile_id():
+    config_hash = hashlib.sha256(b"config").hexdigest()
+    base = build_classic_runtime_profile(
+        "nes",
+        {"title_id": "0004000001234500"},
+        code=b"code",
+        exheader=b"exheader",
+        romfs_template=b"romfs",
+        rom_path="/rom/game.tnes",
+    )
+    profiled = build_classic_runtime_profile(
+        "nes",
+        {"title_id": "0004000001234500"},
+        code=b"code",
+        exheader=b"exheader",
+        romfs_template=b"romfs",
+        rom_path="/rom/game.tnes",
+        emulator_build="  2016-02-03\x00 04:05:06  ",
+        config_ini_sha256=config_hash.upper(),
+    )
+
+    assert profiled["profile_id"] == base["profile_id"]
+    assert profiled["emulator_build"] == "2016-02-03 04:05:06"
+    assert profiled["config_ini_sha256"] == config_hash
+
+
+def test_classic_profile_rejects_invalid_config_fingerprint():
+    with pytest.raises(ValueError, match="config.ini SHA-256"):
+        build_classic_runtime_profile(
+            "nes",
+            {},
+            code=b"code",
+            exheader=b"exheader",
+            romfs_template=b"romfs",
+            rom_path="/rom/game.tnes",
+            config_ini_sha256="not-a-hash",
+        )
+
+
+def test_gba_runtime_profile_records_retail_donor_identity_and_runtime_structure():
+    code_hash = hashlib.sha256(b"retail-gba-code").hexdigest()
+    profile = build_gba_runtime_profile(
+        {"title_id": "0004000000075400"},
+        boot_logo=b"logo",
+        donor_banner=b"banner",
+        donor_icon=b"icon",
+        donor_code_sha256=code_hash,
+        donor_rom_size=0x200000,
+    )
+    assert profile["family"] == "gba"
+    assert profile["classification"] == "recommended"
+    assert profile["donor_title_id"] == "0004000000075400"
+    assert profile["donor_code_sha256"] == code_hash
+    assert profile["donor_rom_size"] == 0x200000
+    assert profile["boot_logo_sha256"] == hashlib.sha256(b"logo").hexdigest()
+    assert gba_runtime_profile_matches(
+        profile,
+        boot_logo=b"logo",
+        donor_banner=b"banner",
+        donor_icon=b"icon",
+    )
+    assert not gba_runtime_profile_matches(
+        profile,
+        boot_logo=b"changed-logo",
+        donor_banner=b"banner",
+        donor_icon=b"icon",
+    )
+
+
+def test_gba_runtime_profile_rejects_invalid_structural_fingerprint():
+    with pytest.raises(ValueError, match="SHA-256"):
+        build_gba_runtime_profile(
+            {"title_id": "0004000000075400"},
+            boot_logo=b"logo",
+            donor_banner=b"banner",
+            donor_icon=b"icon",
+            donor_code_sha256="not-a-hash",
+            donor_rom_size=0x200000,
+        )
+
+
+def test_configured_runtime_profile_reads_gba_and_classic_locations():
+    gba = {"profile_id": "gba-profile"}
+    nes = {"profile_id": "nes-profile"}
+    config = {
+        "gba_vc": {"runtime_profile": gba},
+        "classic_vc": {"nes": {"runtime_profile": nes}},
+    }
+    assert configured_runtime_profile(config, "gba") == gba
+    assert configured_runtime_profile(config, "nes") == nes
+    assert configured_runtime_profile(config, "gb") is None
+
+
+def test_unknown_family_guidance_is_rejected():
+    with pytest.raises(ValueError, match="Unsupported Virtual Console donor guidance family"):
+        guidance_for_family("genesis")
