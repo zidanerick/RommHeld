@@ -127,19 +127,43 @@ def destination_for_game(
     )
 
 
+def copy_job_target(game: Game, destination: Path, mode: str) -> Path:
+    """Return the final filesystem target for one planned Vita USB copy job."""
+    if mode == "game-folder":
+        return destination / adrenaline_game_folder_name(game) / "EBOOT.PBP"
+    return destination / game.path.name
+
+
+def required_usb_batch_space(jobs) -> int:
+    """Return initial free bytes required for a sequential safe-staged USB batch.
+
+    Each copy writes a complete temporary sibling before replacing its final target.
+    New files permanently consume space as earlier jobs finish, while replacements
+    only change permanent usage by the difference between new and old file sizes.
+    This computes the peak initial headroom required by the actual job order rather
+    than summing every source file in the batch.
+    """
+    committed_delta = 0
+    required = 0
+    for game, destination, mode, _label in jobs:
+        target = copy_job_target(game, destination, mode)
+        existing_size = target.stat().st_size if target.is_file() else None
+        if existing_size == game.size:
+            continue
+
+        required = max(required, committed_delta + game.size)
+        committed_delta += game.size - (existing_size or 0)
+
+    return max(required, 0)
+
+
 def destination_target(
     vita: Path,
     game: Game,
     mappings: dict[str, str | None],
 ) -> tuple[str, Path, str]:
     label, destination, mode = destination_for_game(vita, game, mappings)
-    if mode == "game-folder":
-        return (
-            label,
-            destination / adrenaline_game_folder_name(game) / "EBOOT.PBP",
-            mode,
-        )
-    return label, destination / game.path.name, mode
+    return label, copy_job_target(game, destination, mode), mode
 
 
 def game_status(
@@ -189,14 +213,7 @@ class CopyWorker(QThread):
                     cancelled += 1
                     break
 
-                if mode == "game-folder":
-                    target = (
-                        destination
-                        / adrenaline_game_folder_name(game)
-                        / "EBOOT.PBP"
-                    )
-                else:
-                    target = destination / game.path.name
+                target = copy_job_target(game, destination, mode)
 
                 if (
                     target.exists()
@@ -240,10 +257,12 @@ class CopyWorker(QThread):
 __all__ = [
     "CopyWorker",
     "adrenaline_game_folder_name",
+    "copy_job_target",
     "destination_for_game",
     "destination_target",
     "game_status",
     "human_size",
+    "required_usb_batch_space",
     "sanitize_name",
     "validate_game_source",
 ]
