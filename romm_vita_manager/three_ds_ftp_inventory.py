@@ -123,16 +123,17 @@ def scan_three_ds_apps_ftp(
             matched = tuple(
                 marker for marker in definition.markers if tree.resolve(marker) is not None
             )
-            detected = (
+            marker_match = (
                 len(matched) == len(definition.markers)
                 if definition.marker_policy == "all"
                 else bool(matched)
             )
-            if detected:
+            marker = "; ".join(matched) if marker_match and matched else None
+            if marker_match and definition.marker_confirms_launchable:
                 statuses[definition.key] = ThreeDSAppStatus(
                     definition,
                     True,
-                    marker="; ".join(matched) if matched else None,
+                    marker=marker,
                     source="ftp",
                 )
                 continue
@@ -159,6 +160,7 @@ def scan_three_ds_apps_ftp(
                 statuses[definition.key] = ThreeDSAppStatus(
                     definition,
                     False,
+                    marker=marker,
                     source="ftp",
                 )
         return statuses
@@ -169,7 +171,7 @@ def scan_three_ds_apps_ftp(
 def merge_three_ds_app_inventories(
     *inventories: dict[str, ThreeDSAppStatus],
 ) -> dict[str, ThreeDSAppStatus]:
-    """Prefer any positive evidence while preserving the latest checked source."""
+    """Prefer any positive evidence while preserving the strongest negative evidence."""
 
     result: dict[str, ThreeDSAppStatus] = {}
     for definition in THREE_DS_APPS:
@@ -178,7 +180,14 @@ def merge_three_ds_app_inventories(
         if detected is not None:
             result[definition.key] = detected
             continue
-        fallback = next((status for status in reversed(candidates) if status is not None), None)
+        evidence = next(
+            (status for status in reversed(candidates) if status is not None and status.marker),
+            None,
+        )
+        fallback = evidence or next(
+            (status for status in reversed(candidates) if status is not None),
+            None,
+        )
         result[definition.key] = fallback or ThreeDSAppStatus(
             definition,
             False,
