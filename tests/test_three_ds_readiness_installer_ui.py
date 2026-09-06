@@ -19,7 +19,6 @@ ASSISTED_APPS = (
     "daedalusx64",
     "twilight",
     "retroarch",
-    "open-agb-firm",
     "godmode9",
 )
 
@@ -80,6 +79,11 @@ def test_readiness_installer_actions_match_package_safety_boundary(tmp_path: Pat
         assert dialog.stage_button.text() == "Prepare Universal-Updater"
         assert f"search for {APP_BY_KEY[app_key].name}" in dialog.detail_text.text()
 
+    _select(dialog, "open-agb-firm")
+    assert not dialog.stage_button.isEnabled()
+    assert dialog.stage_button.text() == "No automatic install"
+    assert "Universal-Updater is currently not recommended" in dialog.detail_text.text()
+
     _select(dialog, "luma")
     assert not dialog.stage_button.isEnabled()
     assert dialog.stage_button.text() == "No automatic install"
@@ -116,6 +120,10 @@ def test_complex_apps_switch_to_updater_steps_when_updater_is_present(tmp_path: 
         assert dialog.stage_button.text() == "Show updater steps"
         assert "launch Universal-Updater on the 3DS" in dialog.detail_text.text()
         assert f"search for {app_name}" in dialog.detail_text.text()
+
+    _select(dialog, "open-agb-firm")
+    assert not dialog.stage_button.isEnabled()
+    assert dialog.stage_button.text() == "No automatic install"
 
     dialog.close()
     app.processEvents()
