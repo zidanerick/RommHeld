@@ -22,6 +22,7 @@ class ThreeDSAppDefinition:
     marker_policy: str = "any"
     installed_title_ids: tuple[str, ...] = ()
     marker_confirms_launchable: bool = True
+    health_markers: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.marker_policy not in {"any", "all"}:
@@ -43,10 +44,61 @@ class ThreeDSAppStatus:
     marker: str | None = None
     title_id: str | None = None
     source: str = "mounted_sd"
+    matched_health_markers: tuple[str, ...] = ()
+
+    @property
+    def missing_health_markers(self) -> tuple[str, ...]:
+        matched = {marker.casefold() for marker in self.matched_health_markers}
+        return tuple(
+            marker
+            for marker in self.definition.health_markers
+            if marker.casefold() not in matched
+        )
 
     @property
     def state(self) -> str:
-        return "detected" if self.detected else "not_detected"
+        """Return source-independent evidence health without claiming launch success.
+
+        ``detected`` remains the compatibility presence flag used by older callers.
+        This richer state adds the distinction needed by readiness UI and tests:
+        live operational evidence, complete presence, partial installation,
+        assets-only evidence, unknown CIA/on-console state, and definite absence.
+        """
+
+        if self.detected and self.source == "ftp_live":
+            return "healthy"
+        if self.title_id:
+            return "present"
+
+        has_evidence = bool(self.marker or self.matched_health_markers)
+        if (
+            self.definition.health_markers
+            and has_evidence
+            and self.missing_health_markers
+        ):
+            return "partial"
+        if self.detected:
+            return "present"
+        if self.marker:
+            if not self.definition.marker_confirms_launchable:
+                return "assets_only"
+            return "partial"
+        if self.matched_health_markers:
+            return "partial"
+        if self.definition.installed_title_may_exist_without_sd_marker:
+            return "unknown"
+        return "missing"
+
+    @property
+    def state_label(self) -> str:
+        return {
+            "healthy": "Healthy",
+            "present": "Present · Launch not verified",
+            "partial": "Partial installation",
+            "assets_only": "Assets only · Launch not verified",
+            "unknown": "Unknown · Console confirmation required",
+            "missing": "Missing",
+        }[self.state]
 
     @property
     def launch_surface(self) -> str:
@@ -92,6 +144,25 @@ class ThreeDSAppStatus:
                     f"{self.title_id}."
                 )
             return f"{note} {self.launch_note}".strip()
+        if self.state == "partial":
+            source_name = "Live FTP" if self.source == "ftp" else "SD"
+            evidence: list[str] = []
+            if self.marker:
+                evidence.append(self.marker)
+            evidence.extend(
+                marker for marker in self.matched_health_markers if marker not in evidence
+            )
+            found = "; ".join(evidence) if evidence else "supporting files"
+            missing = ", ".join(self.missing_health_markers)
+            if missing:
+                return (
+                    f"{source_name} evidence found at {found}, but the installation is incomplete. "
+                    f"Missing expected support files: {missing}."
+                )
+            return (
+                f"{source_name} evidence related to {self.definition.name} was found at {found}, "
+                "but it is not sufficient to establish a complete installation."
+            )
         if self.detected and self.marker:
             if self.source == "ftp":
                 note = f"Live FTP evidence found at {self.marker}."
@@ -199,11 +270,12 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         "open-agb-firm",
         "open_agb_firm",
         "runtime",
-        "Direct GBA runtime using the 3DS GBA hardware path.",
+        "Direct GBA runtime using the 3DS GBA hardware path. The Luma payload is launch-surface evidence; the upstream release also requires its bundled support data under /3ds/open_agb_firm.",
         ("luma/payloads/open_agb_firm.firm",),
         "https://github.com/profi200/open_agb_firm/releases",
         "Use the official upstream release manually. Universal-Updater is currently not recommended for this package because its archive extraction path has active corruption reports.",
         ("gba",),
+        health_markers=("3ds/open_agb_firm/gba_db.bin",),
     ),
     ThreeDSAppDefinition(
         "twilight",
@@ -352,6 +424,11 @@ def detect_three_ds_app(
     matched = tuple(
         marker for marker in definition.markers if _case_insensitive_exists(root, marker)
     )
+    matched_health = tuple(
+        marker
+        for marker in definition.health_markers
+        if _case_insensitive_exists(root, marker)
+    )
     marker_match = (
         len(matched) == len(definition.markers)
         if definition.marker_policy == "all"
@@ -359,9 +436,19 @@ def detect_three_ds_app(
     )
     marker = "; ".join(matched) if marker_match and matched else None
     if marker_match and definition.marker_confirms_launchable:
-        return ThreeDSAppStatus(definition, True, marker)
+        return ThreeDSAppStatus(
+            definition,
+            True,
+            marker,
+            matched_health_markers=matched_health,
+        )
 
-    return ThreeDSAppStatus(definition, False, marker)
+    return ThreeDSAppStatus(
+        definition,
+        False,
+        marker,
+        matched_health_markers=matched_health,
+    )
 
 
 def scan_three_ds_apps(root: Path) -> dict[str, ThreeDSAppStatus]:

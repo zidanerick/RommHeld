@@ -113,10 +113,10 @@ def scan_three_ds_apps_ftp(
 ) -> dict[str, ThreeDSAppStatus]:
     """Inspect runtime/homebrew evidence through a live 3DS ftpd connection.
 
-    The scan reuses the declarative marker and known-title rules from
-    ``three_ds_apps``. It does not decrypt title databases or infer installed
-    CIA state from unrelated files. A successful connection itself is reliable
-    evidence that ftpd is currently available.
+    The scan reuses the declarative marker, health-marker and known-title rules
+    from ``three_ds_apps``. It does not decrypt title databases or infer
+    installed CIA state from unrelated files. A successful connection itself is
+    reliable evidence that ftpd is currently available.
     """
 
     scan_settings = replace(settings, timeout=min(float(settings.timeout), 8.0))
@@ -163,6 +163,11 @@ def scan_three_ds_apps_ftp(
             matched = tuple(
                 marker for marker in definition.markers if tree.marker_present(marker)
             )
+            matched_health = tuple(
+                marker
+                for marker in definition.health_markers
+                if tree.marker_present(marker)
+            )
             marker_match = (
                 len(matched) == len(definition.markers)
                 if definition.marker_policy == "all"
@@ -175,6 +180,7 @@ def scan_three_ds_apps_ftp(
                     True,
                     marker=marker,
                     source="ftp",
+                    matched_health_markers=matched_health,
                 )
             else:
                 statuses[definition.key] = ThreeDSAppStatus(
@@ -182,41 +188,76 @@ def scan_three_ds_apps_ftp(
                     False,
                     marker=marker,
                     source="ftp",
+                    matched_health_markers=matched_health,
                 )
         return statuses
     finally:
         backend.close()
 
 
+def _combined_health_markers(
+    candidates: list[ThreeDSAppStatus | None],
+) -> tuple[str, ...]:
+    result: list[str] = []
+    for status in candidates:
+        if status is None:
+            continue
+        for marker in status.matched_health_markers:
+            if marker.casefold() not in {existing.casefold() for existing in result}:
+                result.append(marker)
+    return tuple(result)
+
+
 def merge_three_ds_app_inventories(
     *inventories: dict[str, ThreeDSAppStatus],
 ) -> dict[str, ThreeDSAppStatus]:
-    """Prefer the strongest positive evidence, then preserve useful file evidence."""
+    """Prefer the strongest positive evidence, then preserve useful file evidence.
+
+    Health-only support markers are unioned across sources so a mounted scan and
+    a live FTP scan of the same SD cannot accidentally downgrade a component
+    merely because one source supplied the primary marker and the other supplied
+    a supporting marker.
+    """
 
     result: dict[str, ThreeDSAppStatus] = {}
     for definition in THREE_DS_APPS:
         candidates = [inventory.get(definition.key) for inventory in inventories]
+        health_markers = _combined_health_markers(candidates)
         detected_candidates = [status for status in candidates if status and status.detected]
         detected = next(
             (status for status in detected_candidates if status.title_id),
             detected_candidates[0] if detected_candidates else None,
         )
         if detected is not None:
-            result[definition.key] = detected
+            result[definition.key] = replace(
+                detected,
+                matched_health_markers=health_markers,
+            )
             continue
         evidence = next(
-            (status for status in reversed(candidates) if status is not None and status.marker),
+            (
+                status
+                for status in reversed(candidates)
+                if status is not None
+                and (status.marker or status.matched_health_markers)
+            ),
             None,
         )
         fallback = evidence or next(
             (status for status in reversed(candidates) if status is not None),
             None,
         )
-        result[definition.key] = fallback or ThreeDSAppStatus(
-            definition,
-            False,
-            source="unchecked",
-        )
+        if fallback is not None:
+            result[definition.key] = replace(
+                fallback,
+                matched_health_markers=health_markers,
+            )
+        else:
+            result[definition.key] = ThreeDSAppStatus(
+                definition,
+                False,
+                source="unchecked",
+            )
     return result
 
 

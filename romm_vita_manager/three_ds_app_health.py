@@ -39,11 +39,10 @@ def assess_three_ds_app_health(
 ) -> ThreeDSAppHealth:
     """Describe operational confidence separately from installation evidence.
 
-    Readiness evidence can prove that files, a known CIA title directory, or a live
-    service exists. Except for a successful live ftpd connection, it cannot prove
-    that the application launches correctly on-console. This helper therefore
-    keeps presence and health as separate concepts and provides conservative,
-    application-specific recovery guidance without claiming an automatic repair.
+    ``ThreeDSAppStatus.state`` carries source-independent evidence semantics.
+    This helper adds user-facing diagnosis and the safest repair boundary. File
+    presence never becomes a launch-success claim; only a successful live ftpd
+    connection is currently operationally verified by RommHeld itself.
     """
 
     app = status.definition
@@ -80,6 +79,47 @@ def assess_three_ds_app_health(
                 "Enter the displayed IP address and port in RommHeld, then refresh readiness to perform a live service check.",
                 "If the application will not launch, update or reinstall it with Universal-Updater or use RommHeld's verified 3DSX preparation path.",
             )
+
+    if status.state == "partial":
+        if key == "open-agb-firm":
+            missing = ", ".join(status.missing_health_markers) or "the bundled support files"
+            return ThreeDSAppHealth(
+                "needs_attention",
+                "Partial installation · Support files missing",
+                (
+                    "The open_agb_firm payload is present, but the upstream release layout is incomplete. "
+                    f"Missing expected support data: {missing}."
+                ),
+                (
+                    "Download the current official open_agb_firm release from upstream.",
+                    "Copy both open_agb_firm.firm to /luma/payloads and the release's 3ds folder to the SD root, merging folders rather than deleting unrelated files.",
+                    "Do not create config.ini by hand. Launch open_agb_firm once so the installed version can generate a version-matched configuration file.",
+                    "Refresh RommHeld readiness. RommHeld will not automatically reconstruct this multi-file runtime while the maintained/manual boundary remains safer.",
+                ),
+            )
+        return ThreeDSAppHealth(
+            "needs_attention",
+            "Partial installation",
+            f"RommHeld found only part of the expected {app.name} filesystem evidence.",
+            (
+                "Use the application's maintained install/update path rather than deleting unknown files or copying isolated pieces.",
+                "Launch the repaired application once on the console, then refresh RommHeld readiness.",
+            ),
+        )
+
+    if status.state == "unknown":
+        return ThreeDSAppHealth(
+            "missing",
+            "Unknown · Console confirmation required",
+            (
+                f"RommHeld has no reliable evidence from the checked sources that {app.name} is available, but an installed CIA title may still exist on the console."
+            ),
+            (
+                "Check the console directly for the application before reinstalling anything.",
+                "If it is absent or broken, use the preparation/updater/upstream action offered by readiness for this component.",
+                "Refresh readiness after installation or repair.",
+            ),
+        )
 
     if key == "fbi" and status.detected:
         return _detected_not_verified(
@@ -130,10 +170,10 @@ def assess_three_ds_app_health(
     if key == "open-agb-firm" and status.detected:
         return _detected_not_verified(
             status,
-            "open_agb_firm payload files are present, but RommHeld cannot prove that the Luma payload chainloader can launch them.",
+            "The open_agb_firm payload and required bundled support data are present, but RommHeld cannot prove that the Luma payload chainloader can launch them.",
             "Power on while holding START and confirm open_agb_firm appears in the Luma3DS chainloader.",
-            "If the payload is missing or fails to start, replace it with the current official upstream release rather than relying on an unverified updater archive path.",
-            "If the payload starts but a game fails, validate the ROM and open_agb_firm configuration separately from the payload installation.",
+            "If the payload is missing or fails to start, replace the full runtime from the current official upstream release rather than copying only the .firm file.",
+            "If the payload starts but a game fails, validate the ROM and open_agb_firm configuration separately from the installation files.",
         )
 
     if key == "twilight":
@@ -148,7 +188,7 @@ def assess_three_ds_app_health(
         if status.marker:
             return ThreeDSAppHealth(
                 "needs_attention",
-                "Needs attention · Runtime assets only",
+                "Needs attention · Runtime assets only · Launcher not verified",
                 "TWiLight Menu++/nds-bootstrap assets are present, but a launchable frontend is not confirmed.",
                 (
                     "Launch the console and check whether TWiLight Menu++ has a HOME Menu or Homebrew Launcher entry.",
@@ -169,11 +209,11 @@ def assess_three_ds_app_health(
         if status.marker:
             return ThreeDSAppHealth(
                 "needs_attention",
-                "Needs attention · Runtime assets only",
-                "RetroArch data/core files are visible, but a launchable frontend is not confirmed.",
+                "Needs attention · Runtime assets only · Launchable core not verified",
+                "RetroArch data/core files are visible, but a launchable frontend is not confirmed; the selected 3DS core may also be absent.",
                 (
-                    "Check the console for a RetroArch frontend entry and launch it directly.",
-                    "Repair the frontend/core bundle through the maintained upstream or Universal-Updater path if the frontend is absent or broken.",
+                    "Check the console for a RetroArch frontend/core entry and launch it directly.",
+                    "Repair the frontend/core bundle through the maintained upstream or Universal-Updater path if the launchable core is absent or broken.",
                     "Then confirm the platform-specific core and firmware required by the selected game route.",
                 ),
             )
