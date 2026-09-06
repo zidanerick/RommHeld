@@ -23,11 +23,12 @@ from PySide6.QtWidgets import (
 from .archive_utils import ArchiveEntry
 from .config import load_config
 from .design_tokens import DARK, brand_for_platform
-from .emulators import EMULATORS, detect_emulators
+from .emulators import EMULATORS
 from .package_manager import PACKAGES, download_package, inspect_package, package_path, stage_package
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 from .vita import free_space, is_vita_mount, total_space
 from .vita_ftp import VitaFtpSettings
+from .vita_health import HEALTHY, PRESENT_UNVERIFIED, VitaComponentHealth, inspect_vita_health
 from .vita_package_transport import stage_package_via_ftp
 
 
@@ -127,7 +128,7 @@ class PackageWorker(QThread):
 
 
 class VitaSetupDialog(QDialog):
-    """Vita setup workflow with explicit device, package and achievement states."""
+    """Vita setup workflow with evidence-based runtime and package states."""
 
     def __init__(self, vita: Path | None, parent=None):
         super().__init__(parent)
@@ -149,7 +150,7 @@ class VitaSetupDialog(QDialog):
         self.resize(1040, 780)
         self.setMinimumSize(860, 650)
 
-        installed = detect_emulators(vita) if vita is not None else {}
+        runtime_health = inspect_vita_health(vita) if vita is not None else {}
         free_text = "Unavailable"
         storage_detail = "Storage capacity is available only while VitaShell exposes ux0 over USB."
         if vita is not None:
@@ -164,7 +165,7 @@ class VitaSetupDialog(QDialog):
 
         header = SectionHeader(
             "Prepare your PlayStation Vita",
-            "Choose the VitaShell transport, then prepare only the runtime packages you actually need. USB remains recommended on handheld Vita; FTP also supports wireless staging and PlayStation TV.",
+            "Choose the VitaShell transport, inspect runtime evidence, then prepare only the packages you actually need. USB remains recommended on handheld Vita; FTP also supports wireless staging and PlayStation TV.",
         )
 
         status_row = QHBoxLayout()
@@ -178,10 +179,11 @@ class VitaSetupDialog(QDialog):
         )
         self.device_status = StatusPill("Vita", device_state)
         self.storage_status = StatusPill("Storage", free_text)
-        self.ra_status = StatusPill("Achievements", "RetroArch route")
+        runtime_state = "ux0 evidence checked" if vita is not None else "Not checked"
+        self.runtime_status = StatusPill("Runtime", runtime_state)
         status_row.addWidget(self.device_status)
         status_row.addWidget(self.storage_status)
-        status_row.addWidget(self.ra_status)
+        status_row.addWidget(self.runtime_status)
         status_row.addStretch(1)
 
         device_card = SurfaceCard()
@@ -225,51 +227,24 @@ class VitaSetupDialog(QDialog):
         software_card.content.addWidget(self._card_title("2 · Prepare runtime software"))
         software_card.content.addWidget(
             self._secondary(
-                "Detected software is USB-side evidence only. Package actions verify SHA-256 when the upstream source provides a digest; staging is separate, and archive packages are never extracted blindly."
+                "Runtime state comes from read-only Vita filesystem evidence. Installed application files remain ‘Present · launch not verified’ until tested on-console. A staged VPK is never treated as an installed app, and ux0-only USB inspection never fabricates ur0/taiHEN dependency state."
             )
         )
 
         stage_available = vita is not None or bool(self._ftp_host)
         for emulator in EMULATORS:
-            row = QFrame()
-            row.setObjectName("vitaPackageRow")
-            row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-            row.setStyleSheet(
-                f"QFrame#vitaPackageRow{{background:{DARK.surface_raised};"
-                f"border:1px solid {DARK.separator};border-radius:10px;}}"
+            component = runtime_health.get(emulator.key)
+            row = self._runtime_row(
+                emulator.name,
+                component,
+                emulator.achievement_role,
             )
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(12, 9, 10, 9)
-            row_layout.setSpacing(12)
-
-            text = QVBoxLayout()
-            text.setContentsMargins(0, 0, 0, 0)
-            text.setSpacing(2)
-            name = QLabel(emulator.name)
-            name.setStyleSheet(
-                f"color:{DARK.text_primary};font-weight:700;background:transparent;"
-            )
-            state = (
-                "Not checked"
-                if vita is None
-                else "Detected"
-                if installed.get(emulator.key)
-                else "Not detected"
-            )
-            detail = QLabel(f"{state} · {emulator.achievement_role}")
-            detail.setWordWrap(True)
-            detail.setStyleSheet(
-                f"color:{DARK.text_secondary};font-size:11px;background:transparent;"
-            )
-            text.addWidget(name)
-            text.addWidget(detail)
-            row_layout.addLayout(text, 1)
-
+            row_layout = row.layout()
             package_keys = emulator.package_keys
             if not package_keys:
-                button = QPushButton("No package configured")
+                button = QPushButton("Manual / external setup")
                 button.setEnabled(False)
-            elif installed.get(emulator.key):
+            elif component is not None and component.state in {PRESENT_UNVERIFIED, HEALTHY}:
                 button = QPushButton("Prepare package")
                 button.clicked.connect(
                     lambda checked=False, key=package_keys[0]: self.prepare_package(key)
@@ -284,10 +259,33 @@ class VitaSetupDialog(QDialog):
             row_layout.addWidget(button)
             software_card.content.addWidget(row)
 
+        evidence_card = SurfaceCard()
+        evidence_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        evidence_card.content.addWidget(self._card_title("3 · Inspect runtime dependencies"))
+        evidence_card.content.addWidget(
+            self._secondary(
+                "These checks are read-only. VitaShell USB normally exposes ux0 only, so dependencies stored on ur0 remain Not checked unless separate trusted evidence is supplied. RommHeld does not rewrite taiHEN config, redistribute libshacccg, or infer kubridge versions from filenames."
+            )
+        )
+        for key, role in (
+            ("vitashell", "Required transport and package-installation utility"),
+            ("retroarch-cores", "Core executables available to the RetroArch frontend"),
+            ("libshacccg", "Runtime shader compiler required by vitaGL-based software and DSVita"),
+            ("kubridge", "Kernel bridge; DSVita requires version 0.3.1 or later under *KERNEL"),
+        ):
+            component = runtime_health.get(key)
+            evidence_card.content.addWidget(
+                self._runtime_row(
+                    component.name if component is not None else self._runtime_component_name(key),
+                    component,
+                    role,
+                )
+            )
+
         achievements_card = SurfaceCard()
         achievements_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         achievements_card.content.addWidget(
-            self._card_title("3 · Choose the achievement-capable route intentionally")
+            self._card_title("4 · Choose the achievement-capable route intentionally")
         )
         achievements_card.content.addWidget(
             self._secondary(
@@ -325,6 +323,7 @@ class VitaSetupDialog(QDialog):
         scroll_layout.setSpacing(12)
         scroll_layout.addWidget(device_card)
         scroll_layout.addWidget(software_card)
+        scroll_layout.addWidget(evidence_card)
         scroll_layout.addWidget(achievements_card)
         scroll_layout.addWidget(activity_card)
         scroll_layout.addStretch(1)
@@ -364,6 +363,61 @@ class VitaSetupDialog(QDialog):
         label.setWordWrap(True)
         label.setStyleSheet(f"color:{DARK.text_secondary};background:transparent;")
         return label
+
+    def _runtime_row(
+        self,
+        name_text: str,
+        component: VitaComponentHealth | None,
+        role: str,
+    ) -> QFrame:
+        row = QFrame()
+        row.setObjectName("vitaPackageRow")
+        row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        row.setStyleSheet(
+            f"QFrame#vitaPackageRow{{background:{DARK.surface_raised};"
+            f"border:1px solid {DARK.separator};border-radius:10px;}}"
+        )
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(12, 9, 10, 9)
+        row_layout.setSpacing(12)
+
+        text = QVBoxLayout()
+        text.setContentsMargins(0, 0, 0, 0)
+        text.setSpacing(2)
+        name = QLabel(name_text)
+        name.setStyleSheet(
+            f"color:{DARK.text_primary};font-weight:700;background:transparent;"
+        )
+        state_label = component.label if component is not None else "Not checked"
+        detail = QLabel(f"{state_label} · {role}")
+        detail.setWordWrap(True)
+        detail.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        detail.setStyleSheet(
+            f"color:{DARK.text_secondary};font-size:11px;background:transparent;"
+        )
+        if component is None:
+            detail.setToolTip(
+                "Runtime evidence was not inspected. FTP configuration alone does not prove application, dependency or launch state."
+            )
+        else:
+            evidence = "\n".join(component.evidence)
+            tooltip = component.summary
+            if evidence:
+                tooltip += f"\n\nEvidence:\n{evidence}"
+            detail.setToolTip(tooltip)
+        text.addWidget(name)
+        text.addWidget(detail)
+        row_layout.addLayout(text, 1)
+        return row
+
+    @staticmethod
+    def _runtime_component_name(key: str) -> str:
+        return {
+            "vitashell": "VitaShell",
+            "retroarch-cores": "RetroArch cores",
+            "libshacccg": "libshacccg.suprx",
+            "kubridge": "kubridge",
+        }.get(key, key)
 
     def _selected_transport(self) -> str:
         return str(self.transport_combo.currentData() or "usb")
@@ -483,7 +537,7 @@ class VitaSetupDialog(QDialog):
 
     def _set_actions_enabled(self, enabled: bool) -> None:
         for button in self.action_buttons:
-            if button.text() != "No package configured":
+            if button.text() != "Manual / external setup":
                 button.setEnabled(enabled)
 
     def _worker_finished(self) -> None:
