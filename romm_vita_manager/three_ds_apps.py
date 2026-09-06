@@ -155,14 +155,16 @@ class ThreeDSAppStatus:
             found = "; ".join(evidence) if evidence else "supporting files"
             missing = ", ".join(self.missing_health_markers)
             if missing:
-                return (
+                note = (
                     f"{source_name} evidence found at {found}, but the installation is incomplete. "
                     f"Missing expected support files: {missing}."
                 )
-            return (
+                return f"{note} {self.launch_note}".strip()
+            note = (
                 f"{source_name} evidence related to {self.definition.name} was found at {found}, "
                 "but it is not sufficient to establish a complete installation."
             )
+            return f"{note} {self.launch_note}".strip()
         if self.detected and self.marker:
             if self.source == "ftp":
                 note = f"Live FTP evidence found at {self.marker}."

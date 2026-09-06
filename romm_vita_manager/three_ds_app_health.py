@@ -92,7 +92,7 @@ def assess_three_ds_app_health(
                 ),
                 (
                     "Download the current official open_agb_firm release from upstream.",
-                    "Copy both open_agb_firm.firm to /luma/payloads and the release's 3ds folder to the SD root, merging folders rather than deleting unrelated files.",
+                    "When repairing manually, copy both open_agb_firm.firm to /luma/payloads and the release's 3ds folder to the SD root, merging folders rather than deleting unrelated files.",
                     "Do not create config.ini by hand. Launch open_agb_firm once so the installed version can generate a version-matched configuration file.",
                     "Refresh RommHeld readiness. RommHeld will not automatically reconstruct this multi-file runtime while the maintained/manual boundary remains safer.",
                 ),
