@@ -170,7 +170,7 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         "Direct GBA runtime using the 3DS GBA hardware path.",
         ("luma/payloads/open_agb_firm.firm",),
         "https://github.com/profi200/open_agb_firm/releases",
-        "universal_updater_or_manual",
+        "Use the official upstream release manually. Universal-Updater is currently not recommended for this package because its archive extraction path has active corruption reports.",
         ("gba",),
     ),
     ThreeDSAppDefinition(
@@ -269,7 +269,14 @@ def _case_insensitive_exists(root: Path, marker: str) -> bool:
         if match is None:
             return False
         current = match
-    return current.exists()
+    if not current.exists():
+        return False
+    if current.is_file():
+        try:
+            return current.stat().st_size > 0
+        except OSError:
+            return False
+    return True
 
 
 def detect_three_ds_app(
