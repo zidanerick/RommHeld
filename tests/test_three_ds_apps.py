@@ -104,7 +104,7 @@ def test_unrelated_sd_title_does_not_false_positive_cia_capable_apps(tmp_path: P
         assert not statuses[app_key].detected
 
 
-def test_scan_detects_foundation_transfer_and_coherent_twilight_runtime(tmp_path: Path):
+def test_scan_detects_foundation_transfer_and_twilight_assets_without_launcher_claim(tmp_path: Path):
     (tmp_path / "boot.firm").write_bytes(b"firm")
     (tmp_path / "boot.3dsx").write_bytes(b"3dsx")
     ftpd = tmp_path / "3ds" / "ftpd"
@@ -118,17 +118,33 @@ def test_scan_detects_foundation_transfer_and_coherent_twilight_runtime(tmp_path
     assert statuses["luma"].detected
     assert statuses["homebrew-launcher"].detected
     assert statuses["ftpd"].detected
-    assert statuses["twilight"].detected
+    assert not statuses["twilight"].detected
     assert statuses["twilight"].marker == "_nds/TWiLightMenu; _nds/nds-bootstrap"
+    assert "do not prove" in statuses["twilight"].detection_note
     assert not statuses["red-viper"].detected
 
 
-def test_twilight_partial_installation_is_not_called_ready(tmp_path: Path):
+def test_twilight_assets_require_launcher_confirmation(tmp_path: Path):
     (tmp_path / "_nds" / "TWiLightMenu").mkdir(parents=True)
-    assert not detect_three_ds_app(tmp_path, APP_BY_KEY["twilight"]).detected
+    partial = detect_three_ds_app(tmp_path, APP_BY_KEY["twilight"])
+    assert not partial.detected
+    assert partial.marker is None
 
     (tmp_path / "_nds" / "nds-bootstrap").mkdir()
-    assert detect_three_ds_app(tmp_path, APP_BY_KEY["twilight"]).detected
+    complete = detect_three_ds_app(tmp_path, APP_BY_KEY["twilight"])
+    assert not complete.detected
+    assert complete.marker == "_nds/TWiLightMenu; _nds/nds-bootstrap"
+    assert "launchable frontend or HOME Menu title" in complete.detection_note
+
+
+def test_retroarch_data_folders_do_not_prove_launchable_frontend(tmp_path: Path):
+    (tmp_path / "RetroArch" / "Cores").mkdir(parents=True)
+
+    status = detect_three_ds_app(tmp_path, APP_BY_KEY["retroarch"])
+
+    assert not status.detected
+    assert status.marker is not None
+    assert "do not prove" in status.detection_note
 
 
 def test_content_directories_do_not_false_positive_as_runtime_installations(tmp_path: Path):
@@ -150,6 +166,7 @@ def test_retroarch_app_metadata_matches_audited_3ds_target_set():
     assert "n64" not in APP_BY_KEY["retroarch"].platform_slugs
     assert "amiga" not in APP_BY_KEY["retroarch"].platform_slugs
     assert "scummvm" not in APP_BY_KEY["retroarch"].platform_slugs
+    assert not APP_BY_KEY["retroarch"].marker_confirms_launchable
 
 
 def test_all_readiness_apps_have_valid_web_upstream_urls():
