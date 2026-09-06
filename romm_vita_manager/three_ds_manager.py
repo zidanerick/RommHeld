@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import threading
+import weakref
 from pathlib import Path
 
 from PySide6.QtCore import QThread, QTimer, Qt, Signal
@@ -44,6 +45,23 @@ from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 
 NINTENDO_RED = brand_for_platform("3ds").accent
 PACKAGE_GENERATION_TARGETS = frozenset({"native_gba", "vc_cia"})
+_DETACHED_WORKERS: set[QThread] = set()
+
+
+def _keep_worker_alive(worker: QThread) -> None:
+    """Keep a dismissed dialog's QThread alive until its blocking call returns."""
+    if worker in _DETACHED_WORKERS:
+        return
+    _DETACHED_WORKERS.add(worker)
+    worker_ref = weakref.ref(worker)
+
+    def release() -> None:
+        current = worker_ref()
+        if current is not None:
+            _DETACHED_WORKERS.discard(current)
+            current.deleteLater()
+
+    worker.finished.connect(release)
 
 
 def _platform_slug(game) -> str:
@@ -937,24 +955,32 @@ class ThreeDSManagerDialog(QDialog):
             if worker is not None and worker.isRunning()
         )
 
-    def _maybe_finish_close(self) -> None:
-        if self._closing_requested and not self._running_workers():
-            QTimer.singleShot(0, self.close)
-
-    def closeEvent(self, event) -> None:
+    def _request_background_shutdown(self) -> tuple[QThread, ...]:
         running = self._running_workers()
         if not running:
-            super().closeEvent(event)
-            return
+            return ()
 
         self._closing_requested = True
         if self.library_worker and self.library_worker.isRunning():
             self.library_worker.requestInterruption()
         if self.artwork_worker and self.artwork_worker.isRunning():
             self.artwork_worker.requestInterruption()
+        if self.connection_worker and self.connection_worker.isRunning():
+            self.connection_worker.requestInterruption()
         if self.worker and self.worker.isRunning():
             self.worker.cancel()
+        for background_worker in running:
+            _keep_worker_alive(background_worker)
+        return running
 
-        self.status.setText("Finishing the current background operation before closing…")
-        self.setEnabled(False)
-        event.ignore()
+    def _maybe_finish_close(self) -> None:
+        if self._closing_requested and not self._running_workers():
+            QTimer.singleShot(0, self.close)
+
+    def reject(self) -> None:
+        self._request_background_shutdown()
+        super().reject()
+
+    def closeEvent(self, event) -> None:
+        self._request_background_shutdown()
+        super().closeEvent(event)
