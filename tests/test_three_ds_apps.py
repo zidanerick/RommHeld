@@ -21,7 +21,20 @@ def test_app_detection_is_case_insensitive(tmp_path: Path):
 
     assert status.detected
     assert status.marker == "luma/payloads/open_agb_firm.firm"
+    assert status.launch_surface == "luma_payload"
+    assert "Luma3DS payload chainloader" in status.detection_note
     assert "SD evidence" in status.detection_note
+
+
+def test_zero_byte_payload_is_not_called_detected(tmp_path: Path):
+    payload = tmp_path / "luma" / "payloads" / "open_agb_firm.firm"
+    payload.parent.mkdir(parents=True)
+    payload.write_bytes(b"")
+
+    status = detect_three_ds_app(tmp_path, APP_BY_KEY["open-agb-firm"])
+
+    assert not status.detected
+    assert status.marker is None
 
 
 def test_open_agb_database_without_firm_payload_is_not_called_ready(tmp_path: Path):
@@ -82,8 +95,45 @@ def test_known_cia_titles_are_detected_from_mounted_sd_title_tree(tmp_path: Path
             f"Nintendo 3DS/<ID0>/<ID1>/title/{title_id[:8]}/{title_id[8:]}"
         )
         assert status.title_id == title_id
+        assert status.launch_surface == "home_menu"
         assert title_id in status.detection_note
         assert "Installed CIA title" in status.detection_note
+        assert "HOME Menu" in status.detection_note
+
+
+def test_installed_cia_title_is_preferred_over_3dsx_marker(tmp_path: Path):
+    fbi_3dsx = tmp_path / "3ds" / "FBI" / "FBI.3dsx"
+    fbi_3dsx.parent.mkdir(parents=True)
+    fbi_3dsx.write_bytes(b"3dsx")
+    title_id = "000400000F800100"
+    (
+        tmp_path
+        / "Nintendo 3DS"
+        / ("1" * 32)
+        / ("2" * 32)
+        / "title"
+        / title_id[:8]
+        / title_id[8:]
+    ).mkdir(parents=True)
+
+    status = detect_three_ds_app(tmp_path, APP_BY_KEY["fbi"])
+
+    assert status.detected
+    assert status.title_id == title_id
+    assert status.launch_surface == "home_menu"
+
+
+def test_3dsx_marker_reports_homebrew_launcher_surface(tmp_path: Path):
+    fbi_3dsx = tmp_path / "3ds" / "FBI" / "FBI.3dsx"
+    fbi_3dsx.parent.mkdir(parents=True)
+    fbi_3dsx.write_bytes(b"3dsx")
+
+    status = detect_three_ds_app(tmp_path, APP_BY_KEY["fbi"])
+
+    assert status.detected
+    assert status.title_id is None
+    assert status.launch_surface == "homebrew_launcher"
+    assert "Homebrew Launcher" in status.detection_note
 
 
 def test_unrelated_sd_title_does_not_false_positive_cia_capable_apps(tmp_path: Path):
@@ -120,6 +170,7 @@ def test_scan_detects_foundation_transfer_and_twilight_assets_without_launcher_c
     assert statuses["ftpd"].detected
     assert not statuses["twilight"].detected
     assert statuses["twilight"].marker == "_nds/TWiLightMenu; _nds/nds-bootstrap"
+    assert statuses["twilight"].launch_surface == "assets_only"
     assert "do not prove" in statuses["twilight"].detection_note
     assert not statuses["red-viper"].detected
 
@@ -134,6 +185,7 @@ def test_twilight_assets_require_launcher_confirmation(tmp_path: Path):
     complete = detect_three_ds_app(tmp_path, APP_BY_KEY["twilight"])
     assert not complete.detected
     assert complete.marker == "_nds/TWiLightMenu; _nds/nds-bootstrap"
+    assert complete.launch_surface == "assets_only"
     assert "launchable frontend or HOME Menu title" in complete.detection_note
 
 
@@ -144,6 +196,7 @@ def test_retroarch_data_folders_do_not_prove_launchable_frontend(tmp_path: Path)
 
     assert not status.detected
     assert status.marker is not None
+    assert status.launch_surface == "assets_only"
     assert "do not prove" in status.detection_note
 
 
