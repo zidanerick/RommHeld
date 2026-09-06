@@ -60,6 +60,52 @@ def _relative_child(parent: str, name: str) -> str:
     return posixpath.join(parent, name) if parent else name
 
 
+def _listed_child_name(
+    parent: str,
+    raw_name: str,
+    *,
+    rooted_parent: str | None = None,
+) -> str | None:
+    """Normalize one server LIST/MLSD row to a direct child basename.
+
+    Some 3DS ftpd builds include the requested directory itself in an MLSD
+    response, including ``/`` while listing the FTP root. Servers may also
+    return an absolute direct-child path rather than a bare basename. Those
+    protocol quirks should not make the entire browser fail, but listing data
+    must never weaken the path-confinement rules used for mutations.
+    """
+
+    raw = str(raw_name).strip().replace("\\", "/")
+    if raw in {"", ".", "..", "/"}:
+        return None
+
+    if "/" not in raw:
+        return raw
+
+    normalized = posixpath.normpath(raw)
+    if normalized in {".", "/"}:
+        return None
+
+    if raw.startswith("/"):
+        expected_parent = posixpath.normpath(rooted_parent or ("/" + parent.strip("/")))
+        if normalized == expected_parent:
+            return None
+        if posixpath.dirname(normalized) != expected_parent:
+            return None
+        child = posixpath.basename(normalized)
+    else:
+        expected_parent = parent.strip("/")
+        if normalized == expected_parent:
+            return None
+        if posixpath.dirname(normalized) != expected_parent:
+            return None
+        child = posixpath.basename(normalized)
+
+    if child in {"", ".", ".."} or "/" in child or "\\" in child:
+        return None
+    return child
+
+
 def _atomic_download_target(destination: Path) -> Path:
     return destination.with_name(
         f".{destination.name}.rommheld-{uuid4().hex}.part"
@@ -194,9 +240,14 @@ class ThreeDSFtpFilesystemAdapter(_BaseFtpFilesystemAdapter):
     def list_directory(self, path: str = "") -> list[RemoteEntry]:
         rows = self.backend.list_directory(path)
         entries: list[RemoteEntry] = []
+        rooted_parent = self.backend._rooted_path(path)
         for row in rows:
-            name = str(row.get("name", ""))
-            if not name or name in {".", ".."}:
+            name = _listed_child_name(
+                path,
+                str(row.get("name", "")),
+                rooted_parent=rooted_parent,
+            )
+            if name is None:
                 continue
             kind = "dir" if str(row.get("type", "file")) == "dir" else "file"
             try:
@@ -204,7 +255,7 @@ class ThreeDSFtpFilesystemAdapter(_BaseFtpFilesystemAdapter):
             except (TypeError, ValueError):
                 size = 0
             entries.append(RemoteEntry(name, _relative_child(path, name), kind, size))
-        return entries
+        return sorted(entries, key=lambda entry: (not entry.is_dir, entry.name.casefold()))
 
     def upload(
         self,
