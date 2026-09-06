@@ -29,7 +29,7 @@ def _buttons(dialog: VitaSetupDialog) -> list[str]:
     return [button.text() for button in dialog.findChildren(QPushButton)]
 
 
-def test_vita_setup_labels_usb_filesystem_evidence_as_detected(
+def test_vita_setup_labels_usb_filesystem_evidence_conservatively(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -37,8 +37,9 @@ def test_vita_setup_labels_usb_filesystem_evidence_as_detected(
     vita = tmp_path / "ux0"
     (vita / "app" / "VITASHELL").mkdir(parents=True)
     (vita / "VitaShell").mkdir()
-    (vita / "data" / "retroarch").mkdir(parents=True)
+    (vita / "data" / "retroarch" / "assets").mkdir(parents=True)
     (vita / "app" / "RETROARCH").mkdir(parents=True)
+    (vita / "app" / "RETROARCH" / "eboot.bin").write_bytes(b"retroarch")
 
     monkeypatch.setattr(vita_setup_module, "load_config", lambda: {"devices": {}})
 
@@ -50,11 +51,21 @@ def test_vita_setup_labels_usb_filesystem_evidence_as_detected(
     buttons = _buttons(dialog)
 
     assert any(
-        text.startswith("Detected · Preferred route for supported RetroAchievements systems")
+        text.startswith(
+            "Present · launch not verified · Preferred route for supported RetroAchievements systems"
+        )
         for text in labels
     )
     assert any(
-        text.startswith("Detected · Required companion data for RetroArch")
+        text.startswith("Healthy · Required companion data for RetroArch")
+        for text in labels
+    )
+    assert any(
+        text.startswith("Not checked · Runtime shader compiler")
+        for text in labels
+    )
+    assert any(
+        text.startswith("Not checked · Kernel bridge")
         for text in labels
     )
     assert not any(text.startswith("Installed ·") for text in labels)
@@ -98,8 +109,11 @@ def test_vita_setup_marks_runtime_state_not_checked_without_usb_inspection(
         text.startswith("Not checked · Required companion data for RetroArch")
         for text in labels
     )
-    assert not any(text.startswith("Detected ·") for text in labels)
-    assert not any(text.startswith("Not detected ·") for text in labels)
+    assert any(text.startswith("Not checked · Kernel bridge") for text in labels)
+    assert any(text.startswith("Not checked · Runtime shader compiler") for text in labels)
+    assert not any(text.startswith("Present ·") for text in labels)
+    assert not any(text.startswith("Healthy ·") for text in labels)
+    assert not any(text.startswith("Missing ·") for text in labels)
 
     dialog.close()
     dialog.deleteLater()
