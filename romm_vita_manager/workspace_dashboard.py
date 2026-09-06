@@ -23,6 +23,9 @@ from .classic_vc_deploy import ClassicVcDeployDialog
 from .config import load_config, reset_config, save_config
 from .console_selector import PlatformSelectorDialog, RomMConnectionWorker
 from .design_tokens import DARK
+from .ds_repair import create_ds_content_directories, plan_ds_repairs
+from .ds_runtime import inspect_ds_runtime
+from .ds_runtime_ui import DsRuntimeHealthPanel
 from .ftp_file_manager_ui import FtpFileManagerDialog
 from .gba_vc_deploy import GbaVcDeployDialog
 from .library_sources import LibrarySource, get_library_source, save_library_source
@@ -32,7 +35,7 @@ from .management_shell import ManagementShell, WORKSPACE_PROFILES
 from .preferences import get_device_preference, preference_options, set_device_preference
 from .romm_api import normalize_romm_url
 from .romm_remote import RomMRemoteGame
-from .storage_validation import validate_3ds_sd, validate_storage
+from .storage_validation import validate_3ds_sd
 from .three_ds_ftp import ThreeDSFtpSettings
 from .three_ds_library import ThreeDSLibraryWidget
 from .three_ds_manager import ThreeDSManagerDialog
@@ -62,6 +65,7 @@ class WorkspaceDashboardWindow(QMainWindow):
 
         self.vita: Path | None = None
         self.three_ds_library: ThreeDSLibraryWidget | None = None
+        self.ds_health_panel: DsRuntimeHealthPanel | None = None
         self._settings_romm_thread: QThread | None = None
         self._settings_romm_worker: RomMConnectionWorker | None = None
         self._settings_romm_verified = False
@@ -142,6 +146,7 @@ class WorkspaceDashboardWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         accent = WORKSPACE_PROFILES[self.workspace_key].accent
+        self.ds_health_panel = None
 
         card = SurfaceCard()
         card.content.addWidget(self._card_title("Device connection"))
@@ -249,30 +254,34 @@ class WorkspaceDashboardWindow(QMainWindow):
             configured = str(self.config.get("ds_sd_root", "")).strip()
             self.ds_root = QLabel(configured if configured else "No SD root selected")
             self.ds_root.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            self.ds_validation = QLabel("Not validated")
+            self.ds_validation = QLabel("Not inspected")
             form = QFormLayout()
             form.setContentsMargins(0, 0, 0, 0)
-            form.addRow("SD root", self.ds_root)
-            form.addRow("Validation", self.ds_validation)
+            form.addRow("Storage root", self.ds_root)
+            form.addRow("Environment", self.ds_validation)
             card.content.addLayout(form)
             card.content.addWidget(
                 self._secondary(
-                    "Choose the mounted flashcard SD root. RommHeld validates it before writing."
+                    "Choose the mounted Nintendo DS / DSi removable-storage root. RommHeld inspects runtime evidence before writing and does not require FTP."
                 )
             )
             actions = QHBoxLayout()
-            self.ds_browse_action = AccentButton("Choose SD card", accent)
+            self.ds_browse_action = AccentButton("Choose storage", accent)
             self.ds_browse_action.clicked.connect(self.choose_ds_root)
-            self.ds_validate_action = AccentButton("Validate storage", accent)
+            self.ds_validate_action = QPushButton("Refresh readiness")
             self.ds_validate_action.clicked.connect(self.validate_ds_root)
             self.ds_browse_action.set_emphasized(not bool(configured))
-            self.ds_validate_action.set_emphasized(bool(configured))
+            self.ds_validate_action.setEnabled(bool(configured))
             actions.addWidget(self.ds_browse_action)
             actions.addStretch()
             actions.addWidget(self.ds_validate_action)
             card.content.addLayout(actions)
+            self.ds_health_panel = DsRuntimeHealthPanel(accent)
+            self.ds_health_panel.action_requested.connect(self._handle_ds_health_action)
 
         layout.addWidget(card)
+        if self.ds_health_panel is not None:
+            layout.addWidget(self.ds_health_panel)
         layout.addStretch(1)
         return page
 
@@ -738,7 +747,8 @@ class WorkspaceDashboardWindow(QMainWindow):
             root = str(self.config.get("ds_sd_root", "")).strip()
             self.ds_root.setText(root if root else "No SD root selected")
             self.ds_browse_action.set_emphasized(not bool(root))
-            self.ds_validate_action.set_emphasized(bool(root))
+            self.ds_validate_action.setEnabled(bool(root))
+            self._refresh_ds_health()
 
         if self.workspace_key == "vita":
             saved_ftp = self.config.get("devices", {}).get("vita_ftp", {})
@@ -765,7 +775,7 @@ class WorkspaceDashboardWindow(QMainWindow):
             else "Not configured"
         )
         ds_root = str(self.config.get("ds_sd_root", "")).strip()
-        ds_text = "SD selected" if ds_root else "Not configured"
+        ds_text = "Storage selected" if ds_root else "Not configured"
         self.shell.set_device_statuses(vita_text, three_ds_text, ds_text)
 
     @staticmethod
@@ -845,29 +855,69 @@ class WorkspaceDashboardWindow(QMainWindow):
 
     def choose_ds_root(self) -> None:
         path = QFileDialog.getExistingDirectory(
-            self, "Select mounted DS flashcard SD root"
+            self, "Select mounted Nintendo DS / DSi storage root"
         )
         if path:
             self.config["ds_sd_root"] = path
             save_config(self.config)
             self.ds_root.setText(path)
             self.ds_browse_action.set_emphasized(False)
-            self.ds_validate_action.set_emphasized(True)
+            self.ds_validate_action.setEnabled(True)
             self.validate_ds_root()
 
     def validate_ds_root(self) -> None:
-        raw = str(self.ds_root.text()).strip()
-        if not raw or raw == "No SD root selected":
-            self.ds_validation.setText("Select the mounted SD card first.")
+        self._refresh_ds_health()
+
+    def _refresh_ds_health(self) -> None:
+        if self.ds_health_panel is None:
+            return
+        raw = str(self.config.get("ds_sd_root", "")).strip()
+        if not raw:
+            self.ds_validation.setText("Not configured")
+            self.ds_health_panel.set_unavailable(
+                "Select Nintendo DS / DSi removable storage to inspect runtime readiness."
+            )
             return
         try:
-            result = validate_storage(Path(raw))
+            report = inspect_ds_runtime(Path(raw))
         except (OSError, ValueError) as exc:
-            self.ds_validation.setText(str(exc))
+            self.ds_validation.setText("Storage unavailable")
+            self.ds_health_panel.set_error(str(exc))
             return
-        self.ds_validation.setText(
-            f"{result.kind} • confidence: {result.confidence}"
-        )
+        self.ds_validation.setText(report.profile.name)
+        self.ds_health_panel.set_report(report, plan_ds_repairs(report))
+
+    def _handle_ds_health_action(self, action_key: str) -> None:
+        raw = str(self.config.get("ds_sd_root", "")).strip()
+        if not raw:
+            self._refresh_ds_health()
+            return
+        try:
+            report = inspect_ds_runtime(Path(raw))
+        except (OSError, ValueError) as exc:
+            if self.ds_health_panel is not None:
+                self.ds_health_panel.set_error(str(exc))
+            return
+        actions = {action.key: action for action in plan_ds_repairs(report)}
+        action = actions.get(action_key)
+        if action is None:
+            self._refresh_ds_health()
+            return
+        if action.key == "create-content-directories" and action.scope == "safe":
+            try:
+                created = create_ds_content_directories(Path(raw))
+            except (OSError, ValueError) as exc:
+                QMessageBox.warning(self, "Unable to repair DS storage", str(exc))
+                self._refresh_ds_health()
+                return
+            if created:
+                paths = ", ".join(path.relative_to(Path(raw)).as_posix() for path in created)
+                self.statusBar().showMessage(f"Created DS directories: {paths}", 5000)
+            else:
+                self.statusBar().showMessage("DS content/save directories are already present.", 4000)
+            self._refresh_ds_health()
+            return
+        QMessageBox.information(self, action.label, action.description)
 
     def open_vita_send_file(self) -> None:
         if self._block_for_library_transfer("opening Send file"):
