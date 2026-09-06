@@ -124,7 +124,7 @@ def test_installed_red_viper_cia_satisfies_target_runtime_preflight(tmp_path: Pa
     assert "detected from the mounted 3DS SD card" in result.note
 
 
-def test_partial_twilight_sd_assets_are_definitely_missing_for_nds_route(tmp_path: Path):
+def test_partial_twilight_sd_assets_require_console_confirmation_for_nds_route(tmp_path: Path):
     (tmp_path / "boot.firm").write_bytes(b"firm")
     (tmp_path / "_nds" / "TWiLightMenu").mkdir(parents=True)
 
@@ -137,8 +137,27 @@ def test_partial_twilight_sd_assets_are_definitely_missing_for_nds_route(tmp_pat
 
     missing = {item.requirement.app_key for item in report.missing_required}
     unconfirmed = {item.requirement.app_key for item in report.unconfirmed_required}
-    assert "twilight" in missing
-    assert "twilight" not in unconfirmed
+    assert "twilight" not in missing
+    assert "twilight" in unconfirmed
+
+
+def test_complete_twilight_assets_still_do_not_claim_home_launcher(tmp_path: Path):
+    (tmp_path / "boot.firm").write_bytes(b"firm")
+    (tmp_path / "_nds" / "TWiLightMenu").mkdir(parents=True)
+    (tmp_path / "_nds" / "nds-bootstrap").mkdir()
+
+    report = evaluate_readiness(
+        tmp_path,
+        ["twilight"],
+        needs_ftp=False,
+        include_utilities=False,
+    )
+
+    twilight = next(item for item in report.items if item.requirement.app_key == "twilight")
+    assert not twilight.status.detected
+    assert twilight.status.marker == "_nds/TWiLightMenu; _nds/nds-bootstrap"
+    assert twilight.needs_console_confirmation
+    assert "do not prove" in twilight.status.detection_note
 
 
 def test_report_is_ready_when_required_sd_evidence_is_present(tmp_path: Path):
