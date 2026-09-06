@@ -16,6 +16,18 @@ def test_choice_controls_do_not_paint_app_background_inside_cards() -> None:
     assert "background: transparent;" in choice_rule
 
 
+def test_handheld_selector_cards_keep_visible_keyboard_focus() -> None:
+    source = _source("romm_vita_manager/console_selector.py")
+
+    assert "Qt.FocusPolicy.StrongFocus if self.selectable" in source
+    assert "QFrame#consoleTile:focus" in source
+    focus_rule = source.split("QFrame#consoleTile:focus", 1)[1].split("}", 1)[0]
+    assert "border:2px solid {DARK.text_primary};" in focus_rule
+    assert "Qt.Key.Key_Return" in source
+    assert "Qt.Key.Key_Enter" in source
+    assert "Qt.Key.Key_Space" in source
+
+
 def test_3ds_setup_scrolls_cards_instead_of_compressing_them() -> None:
     source = _source("romm_vita_manager/three_ds_setup.py")
 
