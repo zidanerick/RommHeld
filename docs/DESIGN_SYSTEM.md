@@ -214,6 +214,46 @@ Selection must remain obvious without overwhelming the artwork or metadata.
 
 Use cards for grouped state and choices, not for every row. A screen made entirely of nested cards is a design failure.
 
+## Device and runtime health presentation
+
+Device/runtime services own health facts. Qt widgets consume the service result and must not infer health from filesystem paths, marker names, package versions, connectivity details or console-specific rules.
+
+A health result may provide:
+
+- an explicit state key
+- a user-facing state label and summary
+- evidence/details
+- a primary or secondary action identifier and label
+- a repair plan
+- current operation/progress/failure detail
+- workflow-specific readiness results
+
+The presentation contract is:
+
+1. Show one overall device-health summary first. It should answer whether the user can proceed and expose the most useful supplied next action.
+2. Present individual components as compact rows inside a grouped surface rather than turning every component into a nested card.
+3. Keep evidence and diagnostic detail behind progressive disclosure by default. Evidence must remain selectable, wrap long paths/text and be keyboard accessible.
+4. Use the action supplied by the service. Labels such as `Repair`, `Complete setup`, `Verify` and `Open guide` describe capability; the UI must not manufacture a repair path because a state looks unhealthy.
+5. Manual-only or system-sensitive states use a restrained warning notice. They must state that automatic modification is unavailable and expose only the service-supplied manual/guide/verification action.
+6. A repairable state must show the service-supplied repair plan for review before the caller executes any changes. The review surface lists planned changes and warnings and requires explicit confirmation. The dialog itself never performs repair logic.
+7. Progress stays inline when practical and names the current operation or stage. Failure states name the failing boundary, preserve service detail and expose supplied Retry, Verify, Show details or guide actions rather than a generic failure modal.
+8. Workflow readiness is a service result, not a UI calculation. Rows may show outcomes such as `GBA ready`, `NDS ready` or `RetroAchievements route incomplete`, but the device/runtime service determines those outcomes and their corrective action.
+
+Explicit health states use semantic tones independently from older free-form `status_tone()` text classification:
+
+| Service state | Default presentation | Meaning |
+| --- | --- | --- |
+| `healthy`, `ready`, `verified` | Success | Service reports the relevant health/readiness condition satisfied |
+| `present`, `not_verified` | Neutral | Evidence exists but operational success is not claimed |
+| `partial`, `assets_only`, `repairable`, `needs_attention`, `incomplete` | Warning | Intervention or verification may be useful |
+| `manual_only`, `system_sensitive`, `unknown/manual-only` | Warning | User or maintained external procedure is required |
+| `misconfigured`, `failed`, `error` | Error | Service reports a concrete invalid or failed condition |
+| `missing`, `unknown` | Muted | Absence or uncertainty alone is not automatically a hard failure |
+
+A service-supplied label may refine these defaults. In particular, `missing` or `unknown` must not be promoted to a red error merely because a marker was absent. If absence blocks a workflow or is safely repairable, the service should supply the corresponding explicit blocking/repairable state and action.
+
+Health presentation does not add permanent navigation. Device/runtime readiness, repair review and manual guidance remain contextual under `Device`; permanent navigation stays `Library / Device / Settings`.
+
 ## Empty, loading and error states
 
 ### Empty
