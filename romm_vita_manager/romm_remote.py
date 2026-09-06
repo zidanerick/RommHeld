@@ -3,7 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import socket
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib import error, request
@@ -11,7 +11,6 @@ from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 from .mappings import platform_label
 from .romm_api import RomMApiError, normalize_romm_url
-from .three_ds_targets import RETROARCH_PLATFORM_SLUGS
 
 
 @dataclass(frozen=True)
@@ -25,6 +24,10 @@ class RomMRemoteGame:
     platform_slug: str = ""
     publisher: str = ""
     release_year: int | None = None
+    # Keep exact RomM source identity separate from normalized compatibility keys.
+    # compare=False preserves compatibility with older positional construction/tests.
+    source_platform_id: int | None = field(default=None, compare=False)
+    source_platform_slug: str = field(default="", compare=False)
 
 
 def _auth_headers(
@@ -118,6 +121,22 @@ def _json_request(instance_url: str, token: str, path: str, params: dict | None 
         raise RomMApiError(f"Unable to reach the RomM server: {reason}") from exc
 
 
+def _http_origin(value: str) -> tuple[str, str, int] | None:
+    """Return the normalized HTTP(S) origin used for credential-scope checks."""
+    parsed = urlparse(value)
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or "").casefold()
+    if scheme not in {"http", "https"} or not host:
+        return None
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is None:
+        port = 443 if scheme == "https" else 80
+    return scheme, host, port
+
+
 def download_artwork(
     instance_url: str,
     token: str,
@@ -127,9 +146,9 @@ def download_artwork(
 ) -> bytes:
     """Fetch artwork with RomM's IPv4-first transport and bounded reads.
 
-    Authorization is only sent back to the configured RomM host. RomM can
+    Authorization is only sent back to the configured RomM origin. RomM can
     expose an external artwork URL, so bearer credentials must never be
-    forwarded to a third-party image host.
+    forwarded across scheme, host, or port boundaries.
     """
     target = str(url).strip()
     if not target:
@@ -141,8 +160,7 @@ def download_artwork(
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("RomM artwork URL must be an HTTP(S) resource.")
 
-    romm_host = urlparse(normalize_romm_url(instance_url)).hostname or ""
-    same_host = bool(parsed.hostname) and parsed.hostname.lower() == romm_host.lower()
+    same_origin = _http_origin(target) == _http_origin(normalize_romm_url(instance_url))
     query_pairs = parse_qsl(parsed.query, keep_blank_values=True)
     safe_query = urlencode(query_pairs, doseq=True)
     target = urlunparse(
@@ -160,7 +178,7 @@ def download_artwork(
         headers=_auth_headers(
             token,
             accept="image/avif,image/webp,image/png,image/jpeg,*/*",
-            include_auth=same_host,
+            include_auth=same_origin,
         ),
     )
     try:
@@ -309,11 +327,21 @@ def _platform_name(item: dict) -> str:
     return platform_label(str(slug)) if slug else "Unknown platform"
 
 
+def _platform_id(item: dict) -> int | None:
+    direct = _as_int(item.get("platform_id"))
+    if direct is not None:
+        return direct
+    nested = item.get("platform")
+    if isinstance(nested, dict):
+        return _as_int(nested.get("id"))
+    return None
+
+
 def _platform_slug(item: dict, by_id: dict[int, str], by_name: dict[str, str]) -> str:
     value = item.get("platform_slug")
     if value:
         return str(value).lower()
-    platform_id = _as_int(item.get("platform_id"))
+    platform_id = _platform_id(item)
     if platform_id is not None and platform_id in by_id:
         return by_id[platform_id]
     nested = item.get("platform")
@@ -330,6 +358,32 @@ def _platform_slug(item: dict, by_id: dict[int, str], by_name: dict[str, str]) -
     return ""
 
 
+def _source_platform_slug(
+    item: dict,
+    platform_id: int | None,
+    source_by_id: dict[int, str],
+    source_by_name: dict[str, str],
+) -> str:
+    """Return the exact source platform slug without display normalization."""
+    value = item.get("platform_slug")
+    if value:
+        return str(value)
+    if platform_id is not None and platform_id in source_by_id:
+        return source_by_id[platform_id]
+    nested = item.get("platform")
+    if isinstance(nested, dict):
+        value = nested.get("slug")
+        if value:
+            return str(value)
+        name = nested.get("name")
+        if name and str(name).lower() in source_by_name:
+            return source_by_name[str(name).lower()]
+    name = item.get("platform_name") or item.get("platform_display_name")
+    if name and str(name).lower() in source_by_name:
+        return source_by_name[str(name).lower()]
+    return ""
+
+
 def _list_games_for_platform_slugs(
     instance_url: str,
     token: str,
@@ -342,13 +396,14 @@ def _list_games_for_platform_slugs(
     search_term: str = "",
     platform_slug: str | None = None,
 ) -> list[RomMRemoteGame]:
+    normalized_allowed = frozenset(str(slug).lower() for slug in allowed_slugs)
     if platform_items is None:
         platforms = _items(_json_request(instance_url, token, "platforms"))
         wanted = [
             item
             for item in platforms
             if isinstance(item, dict)
-            and str(item.get("slug", "")).lower() in allowed_slugs
+            and str(item.get("slug", "")).lower() in normalized_allowed
             and _as_int(item.get("id")) is not None
         ]
     else:
@@ -370,17 +425,30 @@ def _list_games_for_platform_slugs(
     if not platform_ids:
         raise RomMApiError(missing_message)
 
-    by_id = {
-        platform_id: str(item.get("slug") or "").lower()
+    source_by_id = {
+        platform_id: str(item.get("slug") or "")
         for item in wanted
         if (platform_id := _as_int(item.get("id"))) is not None
     }
-    by_name = {
+    by_id = {
+        platform_id: source_slug.lower()
+        for platform_id, source_slug in source_by_id.items()
+    }
+    source_id_by_slug = {
+        source_slug.lower(): platform_id
+        for platform_id, source_slug in source_by_id.items()
+        if source_slug
+    }
+    source_by_name = {
         str(item.get("name") or item.get("slug") or "").lower(): str(
             item.get("slug") or ""
-        ).lower()
+        )
         for item in wanted
         if item.get("name") or item.get("slug")
+    }
+    by_name = {
+        name: source_slug.lower()
+        for name, source_slug in source_by_name.items()
     }
     names = {
         platform_id: str(item.get("name") or item.get("slug") or "Unknown platform")
@@ -413,9 +481,17 @@ def _list_games_for_platform_slugs(
         if rom_id is None:
             continue
         slug = _platform_slug(item, by_id, by_name)
-        if slug not in allowed_slugs:
+        if slug not in normalized_allowed:
             continue
-        platform_id = _as_int(item.get("platform_id"))
+        platform_id = _platform_id(item)
+        if platform_id is None:
+            platform_id = source_id_by_slug.get(slug)
+        source_slug = _source_platform_slug(
+            item,
+            platform_id,
+            source_by_id,
+            source_by_name,
+        ) or source_by_id.get(platform_id, "") or slug
         platform = names.get(platform_id, _platform_name(item))
         filename = str(
             item.get("fs_name")
@@ -450,6 +526,8 @@ def _list_games_for_platform_slugs(
                 slug,
                 _publisher_name(item),
                 _release_year(item),
+                source_platform_id=platform_id,
+                source_platform_slug=source_slug,
             )
         )
     return games
@@ -461,6 +539,10 @@ def list_compatible_games(
     *,
     limit: int = 200,
 ) -> list[RomMRemoteGame]:
+    # Legacy 3DS compatibility helper. Keep target knowledge out of the generic
+    # remote mapping module until this function is called.
+    from .three_ds_targets import RETROARCH_PLATFORM_SLUGS
+
     return _list_games_for_platform_slugs(
         instance_url,
         token,
@@ -498,6 +580,8 @@ def list_3ds_games(
             game.platform_slug,
             game.publisher,
             game.release_year,
+            source_platform_id=game.source_platform_id,
+            source_platform_slug=game.source_platform_slug,
         )
         for game in games
     ]
