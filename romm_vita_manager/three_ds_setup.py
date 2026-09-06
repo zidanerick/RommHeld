@@ -29,6 +29,7 @@ from .platform_services import is_web_url, open_external_url, temp_dir
 from .storage_detection import detect_3ds_sd_candidates
 from .storage_validation import validate_3ds_sd
 from .three_ds_apps import APP_BY_KEY, detect_three_ds_app
+from .three_ds_ftp import ThreeDSFtpSettings
 from .three_ds_readiness_ui import ThreeDSReadinessDialog
 from .ui_components import AccentButton, SectionHeader, StatusPill, SurfaceCard
 
@@ -299,7 +300,7 @@ class ThreeDSSetupDialog(QDialog):
         runtime_card.content.addWidget(self._card_title("Runtime and homebrew checks"))
         runtime_card.content.addWidget(
             self._secondary(
-                "The quick list below shows common SD-side signals. Open Readiness & Runtimes for required/recommended status, dedicated emulator checks, safe 3DSX staging, and supported runtime configuration."
+                "The quick list below shows common SD-side signals. Open Readiness & Runtimes for required/recommended status, live FTP checks, dedicated emulator checks, safe 3DSX staging, and supported runtime configuration."
             )
         )
         self.component_list = QListWidget()
@@ -370,6 +371,23 @@ class ThreeDSSetupDialog(QDialog):
         if not self._ftp_host:
             return "No FTP endpoint configured yet"
         return f"ftp://{self._ftp_host}:{self._ftp_port}"
+
+    def _ftp_settings(self) -> ThreeDSFtpSettings | None:
+        saved = self.config.get("devices", {}).get("3ds", {})
+        host = str(saved.get("host", self._ftp_host)).strip()
+        if not host:
+            return None
+        try:
+            port = int(saved.get("port", self._ftp_port or 5000))
+        except (TypeError, ValueError):
+            port = 5000
+        return ThreeDSFtpSettings(
+            host=host,
+            port=port,
+            username=str(saved.get("username", "anonymous")).strip() or "anonymous",
+            password=str(saved.get("password", "")),
+            remote_root=str(saved.get("remote_root", "/")).strip() or "/",
+        )
 
     def _storage_selection_changed(self) -> None:
         if self.root_edit.text().strip():
@@ -476,7 +494,11 @@ class ThreeDSSetupDialog(QDialog):
         )
         if not root or not root.is_dir():
             self.fbi_status.set_value("Not checked")
-            self.fbi_evidence.setText("Validate an SD card to check for FBI-related files.")
+            self.fbi_evidence.setText(
+                "No mounted SD evidence is available. Open Readiness & Runtimes to check the live FTP filesystem when ftpd is configured."
+                if self._ftp_settings() is not None
+                else "Validate an SD card to check for FBI-related files."
+            )
         elif fbi_present and fbi_marker:
             self.fbi_status.set_value("SD evidence found")
             self.fbi_evidence.setText(
@@ -492,7 +514,7 @@ class ThreeDSSetupDialog(QDialog):
             present, marker = (
                 component_presence(root, component) if root and root.is_dir() else (False, None)
             )
-            state = f"Detected • {marker}" if present and marker else "No SD evidence"
+            state = f"Detected • {marker}" if present and marker else "No mounted-SD evidence"
             item = QListWidgetItem(f"{component.name} — {state}")
             item.setToolTip(component.description)
             item.setData(Qt.ItemDataRole.UserRole, component.upstream_url)
@@ -500,29 +522,41 @@ class ThreeDSSetupDialog(QDialog):
 
     def open_readiness(self) -> None:
         raw = self.root_edit.text().strip()
-        if not raw:
+        root: Path | None = None
+        if raw:
+            candidate = Path(raw).expanduser()
+            try:
+                validation = validate_3ds_sd(candidate)
+            except (OSError, ValueError) as exc:
+                QMessageBox.warning(self, "3DS SD card unavailable", str(exc))
+                return
+            if validation.confidence not in {"medium", "high"}:
+                QMessageBox.warning(
+                    self,
+                    "3DS SD card not recognised",
+                    "Validate a medium or high-confidence Nintendo 3DS SD-card root before using it for runtime readiness.",
+                )
+                return
+            self._save_storage_root(candidate)
+            root = candidate.resolve()
+
+        ftp_settings = self._ftp_settings()
+        if root is None and ftp_settings is None:
             QMessageBox.information(
                 self,
-                "Select the 3DS SD card",
-                "Choose or detect the mounted Nintendo 3DS SD-card root first.",
+                "Configure a 3DS filesystem route",
+                "Validate a mounted Nintendo 3DS SD card or configure ftpd first. Runtime readiness can inspect either source.",
             )
             return
-        root = Path(raw).expanduser()
-        try:
-            validation = validate_3ds_sd(root)
-        except (OSError, ValueError) as exc:
-            QMessageBox.warning(self, "3DS SD card unavailable", str(exc))
-            return
-        if validation.confidence not in {"medium", "high"}:
-            QMessageBox.warning(
-                self,
-                "3DS SD card not recognised",
-                "Validate a medium or high-confidence Nintendo 3DS SD-card root before opening runtime readiness.",
-            )
-            return
-        self._save_storage_root(root)
-        ThreeDSReadinessDialog(root.resolve(), needs_ftp=True, parent=self).exec()
-        self.validate_sd()
+
+        ThreeDSReadinessDialog(
+            root,
+            ftp_settings=ftp_settings,
+            needs_ftp=True,
+            parent=self,
+        ).exec()
+        if root is not None:
+            self.validate_sd()
         self.refresh_components()
 
     def _open_web_url(self, url: str, label: str) -> None:
