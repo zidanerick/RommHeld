@@ -207,7 +207,7 @@ _HEALTH_STATE_LABELS = {
     "failed": "Failed",
     "error": "Error",
     "missing": "Missing",
-    "unknown": "Not checked",
+    "unknown": "Unknown",
     "not_applicable": "Not applicable",
 }
 
