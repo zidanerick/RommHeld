@@ -49,11 +49,29 @@ def test_ftp_inventory_detects_homebrew_files_case_insensitively():
 
     assert statuses["universal-updater"].detected
     assert statuses["universal-updater"].source == "ftp"
+    assert statuses["universal-updater"].launch_surface == "homebrew_launcher"
     assert "Live FTP evidence" in statuses["universal-updater"].detection_note
+    assert "Homebrew Launcher" in statuses["universal-updater"].detection_note
     assert statuses["daedalusx64"].detected
     assert statuses["ftpd"].detected
     assert statuses["ftpd"].source == "ftp_live"
     assert "live ftpd connection" in statuses["ftpd"].detection_note.lower()
+
+
+def test_ftp_inventory_rejects_zero_byte_payload_marker():
+    FakeInventoryBackend.tree = {
+        "": [_dir("luma")],
+        "luma": [_dir("payloads")],
+        "luma/payloads": [_file("open_agb_firm.firm", size=0)],
+    }
+
+    statuses = scan_three_ds_apps_ftp(
+        ThreeDSFtpSettings("192.0.2.3"),
+        backend_factory=FakeInventoryBackend,
+    )
+
+    assert not statuses["open-agb-firm"].detected
+    assert statuses["open-agb-firm"].marker is None
 
 
 def test_ftp_inventory_detects_known_cia_title_tree():
@@ -78,7 +96,34 @@ def test_ftp_inventory_detects_known_cia_title_tree():
     assert checkpoint.detected
     assert checkpoint.title_id == title_id
     assert checkpoint.source == "ftp"
+    assert checkpoint.launch_surface == "home_menu"
     assert "live FTP SD title tree" in checkpoint.detection_note
+    assert "HOME Menu" in checkpoint.detection_note
+
+
+def test_ftp_cia_title_evidence_is_preferred_over_3dsx_marker():
+    id0 = "A" * 32
+    id1 = "B" * 32
+    title_id = "000400000BCFFF00"
+    FakeInventoryBackend.tree = {
+        "": [_dir("3ds"), _dir("Nintendo 3DS")],
+        "3ds": [_dir("Checkpoint")],
+        "3ds/Checkpoint": [_file("Checkpoint.3dsx")],
+        "Nintendo 3DS": [_dir(id0)],
+        f"Nintendo 3DS/{id0}": [_dir(id1)],
+        f"Nintendo 3DS/{id0}/{id1}": [_dir("title")],
+        f"Nintendo 3DS/{id0}/{id1}/title": [_dir(title_id[:8])],
+        f"Nintendo 3DS/{id0}/{id1}/title/{title_id[:8]}": [_dir(title_id[8:])],
+        f"Nintendo 3DS/{id0}/{id1}/title/{title_id[:8]}/{title_id[8:]}": [],
+    }
+
+    status = scan_three_ds_apps_ftp(
+        ThreeDSFtpSettings("192.0.2.3"),
+        backend_factory=FakeInventoryBackend,
+    )["checkpoint"]
+
+    assert status.title_id == title_id
+    assert status.launch_surface == "home_menu"
 
 
 def test_twilight_remote_assets_require_launcher_confirmation():
@@ -102,6 +147,7 @@ def test_twilight_remote_assets_require_launcher_confirmation():
     )
     assert not complete["twilight"].detected
     assert complete["twilight"].marker == "_nds/TWiLightMenu; _nds/nds-bootstrap"
+    assert complete["twilight"].launch_surface == "assets_only"
     assert "do not prove" in complete["twilight"].detection_note
 
 
@@ -122,6 +168,31 @@ def test_merge_prefers_positive_ftp_evidence_over_negative_mounted_scan():
 
     assert merged["checkpoint"].detected
     assert merged["checkpoint"].source == "ftp"
+
+
+def test_merge_prefers_installed_title_over_3dsx_positive_evidence():
+    local = {
+        "checkpoint": ThreeDSAppStatus(
+            APP_BY_KEY["checkpoint"],
+            True,
+            "3ds/Checkpoint/Checkpoint.3dsx",
+            source="mounted_sd",
+        ),
+    }
+    remote = {
+        "checkpoint": ThreeDSAppStatus(
+            APP_BY_KEY["checkpoint"],
+            True,
+            "Nintendo 3DS/<ID0>/<ID1>/title/00040000/0BCFFF00",
+            title_id="000400000BCFFF00",
+            source="ftp",
+        ),
+    }
+
+    merged = merge_three_ds_app_inventories(local, remote)
+
+    assert merged["checkpoint"].title_id == "000400000BCFFF00"
+    assert merged["checkpoint"].launch_surface == "home_menu"
 
 
 def test_merge_keeps_unconfirmed_remote_runtime_file_evidence():
