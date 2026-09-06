@@ -24,7 +24,9 @@ launcher.py
                 -> LocalLibraryWidget for Vita / DS local-library presentation
                 -> ThreeDSLibraryWidget for RomM or local 3DS-compatible browsing
             -> Device
+                -> connection/storage state
                 -> contextual Vita / 3DS setup and advanced device actions
+                -> service-driven DS / DSi runtime health and repair guidance
             -> Settings
                 -> library source
                 -> RomM connection verification
@@ -39,6 +41,8 @@ Supporting focused modules include:
 - `three_ds_manager.py` for 3DS browsing/deployment
 - `three_ds_setup.py` for guided 3DS readiness
 - `vita_setup.py` for Vita package/runtime preparation
+- `ds_runtime.py` and `ds_repair.py` for DS/DSi health and repair semantics
+- `ds_runtime_ui.py` for presentation of service-supplied DS/DSi health, evidence and actions
 
 The old `ui.py`, `app.py`, `platform_selector.py`, `audited_workspace.py` and `device_dashboard.py` surfaces have been removed. The root `romm_vita_manager.py` script forwards to the current launcher rather than exposing a second application architecture.
 
@@ -75,6 +79,8 @@ The UI uses a neutral graphite base with restrained manufacturer accents:
 Platform color is an orientation/accent tool, not a full-screen background.
 
 Shared primary buttons now have distinct hover, pressed, disabled and keyboard-focus states rather than relying on a static accent fill. Shared status pills use restrained semantic tones so connected/ready, busy/action-needed and actual error states remain distinguishable without colouring every surface.
+
+Shared device-health presentation now includes explicit health-state badges, overall summaries, component rows, progressive evidence disclosure, manual/system-sensitive notices, repair-plan review, inline operation status and workflow-readiness rows. These components render service-supplied states/actions and do not infer console health from text or filesystem markers.
 
 ## Phase 2: startup and handheld selection
 
@@ -154,7 +160,7 @@ Further 3DS deployment changes should be coordinated with hardware/runtime work.
 
 ## Phase 4: device readiness and contextual setup
 
-Status: simplified shell implemented; target-specific dialogs retained.
+Status: simplified shell implemented; reusable health presentation and DS service integration implemented; target-specific dialogs retained.
 
 The permanent `Setup`, `Queue` and `Tools` navigation destinations have been removed. The shell now exposes only:
 
@@ -173,7 +179,7 @@ Each Device page should answer:
 
 The sidebar shows compact state for the active handheld only rather than unrelated disconnected devices.
 
-Existing Device actions now use state-aware primary emphasis rather than permanently highlighting the same control. A missing Vita route emphasizes connection/configuration first. A 3DS route is considered ready when either ftpd is configured or a validated mounted SD root is available. Once a usable route exists, the manager becomes the emphasized action. DS emphasizes storage selection before validation, then validation after a root is selected. This changes presentation only, not the underlying handlers or validation semantics.
+Existing Device actions use state-aware primary emphasis rather than permanently highlighting the same control. A missing Vita route emphasizes connection/configuration first. A 3DS route is considered ready when either ftpd is configured or a validated mounted SD root is available. Once a usable route exists, the manager becomes the emphasized action. DS emphasizes storage selection only until a root exists; `Refresh readiness` remains secondary and the runtime-health summary presents the primary service-supplied next action. This is presentation only: DS environment detection, health classification, repair scope and repair planning remain in DS services.
 
 ### Vita
 
@@ -183,6 +189,7 @@ Existing Device actions now use state-aware primary emphasis rather than permane
 - normal selected-game copy moved to Library
 - redesigned Vita Setup with PlayStation-blue primary actions
 - explicit RetroArch/RetroAchievements route messaging
+- richer Vita health states remain owned by `vita_health.py` / hardware adapters rather than by Qt widgets
 
 ### Nintendo 3DS
 
@@ -198,14 +205,21 @@ Existing Device actions now use state-aware primary emphasis rather than permane
 - direct FBI/Checkpoint preparation is explicitly the Homebrew Launcher `.3dsx` build and never claims that the corresponding CIA title is installed
 - complex packages such as DaedalusX64, TWiLight Menu++ and RetroArch use an assisted Universal-Updater flow: prepare the verified updater if missing, otherwise show the exact on-console search step
 - system-sensitive boot-chain components remain guide-only, while DSP firmware is explicitly generated on-console rather than downloaded
+- richer app/runtime evidence states remain owned by the 3DS health/readiness services and can use the shared semantic presentation vocabulary without moving their rules into Qt
 
 The readiness primary action therefore adapts to the selected component: **Prepare <app>** for a verified direct package, **Prepare Universal-Updater** or **Show updater steps** for complex updater-owned packages, an upstream/install-guide action for system-sensitive components, and no misleading automatic-install claim where RommHeld cannot verify the operation safely.
 
 ### Nintendo DS / removable storage
 
-- SD root and storage validation
-- redesigned removable-storage dialog
-- explicit destination path constrained to the selected storage root
+- removable-storage root selection remains contextual on Device
+- runtime inspection is supplied by `inspect_ds_runtime()` and rendered by `DsRuntimeHealthPanel`
+- explicit environment presentation for DSi homebrew/CFW, DS/DS Lite flashcart, 3DS-hosted TWiLight and generic removable storage
+- overall readiness summary plus component rows for TWiLight Menu++, nds-bootstrap, launcher/bootstrap, environment/kernel evidence, ROM/save directories and configuration
+- service-supplied paths/version markers are progressively disclosed as evidence rather than collapsed into status text
+- repair-plan review occurs before the only currently safe automatic change, creation of `/roms/nds/` and `/roms/nds/saves/`
+- guided/manual repair steps are presented without automatic writes; DSi NAND/Unlaunch and unknown flashcart-specific work remain manual-only
+- 3DS-hosted TWiLight media exposes the DS service handoff/deferral rather than duplicating the 3DS runtime owner
+- removable-storage transfer destinations remain constrained to the selected storage root
 
 ## Phase 5: settings and service configuration
 
@@ -310,10 +324,13 @@ Current regression areas include:
 - mounted-Vita status-filter availability plus lazy/cached status inspection and contextual DS/FTP metadata
 - staged VPK planning not requeueing already complete USB destinations
 - local and RomM-backed 3DS library source handling
-- Device primary-action emphasis following usable route state
+- Device primary-action emphasis following usable route/state without competing DS refresh emphasis
 - RomM connection verification and test/save emphasis in Settings
 - direct configured startup bypassing onboarding
 - shared keyboard-focus styling
+- reusable explicit health-state semantics for current and future service state keys
+- health summary/component/evidence/manual-warning/repair-review/progress/failure/workflow-readiness offscreen rendering
+- DS service-to-Device integration, component evidence, repair-plan acceptance/cancellation, manual-action non-emission and 3DS handoff presentation
 - Vita Library transfer lifecycle guards across workspace-changing actions
 - offscreen Qt runtime construction/navigation for the real shell and local-library widgets
 - offscreen 3DS Manager dismissal while a background worker is still active, including detached QThread lifetime until safe completion
@@ -323,7 +340,7 @@ Current regression areas include:
 - stable RommHeld `QStandardPaths` identity before and after `QApplication` creation
 - guarded migration of recognizable pre-identity RommHeld configuration
 
-CI remains headless, but it now installs the minimal EGL runtime needed for PySide6 and runs an offscreen Qt smoke layer. That layer constructs the real `ManagementShell`, `LocalLibraryWidget` and targeted 3DS dialogs, applies the shared application theme, exercises navigation, compact layout bounds with long content, selection/action state, USB status-filter transitions, 3DS readiness installer-state transitions, and verifies that the 3DS Manager can dismiss while a worker remains alive safely in the background. This catches runtime widget-construction and state/layout regressions that source-contract tests cannot. It still does not validate native desktop compositor/theme/font rendering, DPI behavior, platform-specific window management or real-device interaction; those remain desktop and hardware responsibilities.
+CI remains headless, but it installs the minimal EGL runtime needed for PySide6 and runs an offscreen Qt smoke layer. That layer constructs the real `ManagementShell`, `LocalLibraryWidget`, the shared health components, the DS runtime-health presentation and targeted 3DS dialogs; applies the shared application theme; exercises navigation, compact layout bounds with long content, evidence disclosure, selection/action state, USB status-filter transitions, DS repair-review boundaries, 3DS readiness installer-state transitions, and verifies that the 3DS Manager can dismiss while a worker remains alive safely in the background. This catches runtime widget-construction and state/layout regressions that source-contract tests cannot. It still does not validate native desktop compositor/theme/font rendering, DPI behavior, platform-specific window management or real-device interaction; those remain desktop and hardware responsibilities.
 
 ## Remaining validation
 
@@ -342,6 +359,10 @@ CI remains headless, but it now installs the minimal EGL runtime needed for PySi
 - verify friendly platform labels and the reduced library filter row at realistic widths
 - verify semantic status tones and keyboard focus remain readable in the target desktop theme
 - verify Device and Settings primary-action emphasis changes are visually obvious but not excessive
+- verify the DS Device page at normal and reduced widths with service-driven overall health, component rows, long evidence, manual warnings and exactly one primary next action
+- verify DS evidence disclosure and action controls remain keyboard reachable with visible focus
+- verify DS repair-plan review clearly separates safe automatic changes from guided/manual actions before confirmation
+- verify a generic unknown state remains visually muted/neutral and is not automatically rewritten to `Not checked` unless that wording is supplied for the specific context
 - verify 3DS local and RomM library sources render consistently without hiding valid target differences
 - verify 3DS readiness changes its primary action cleanly between direct preparation, Universal-Updater assistance, guide-only and console-generated states
 
