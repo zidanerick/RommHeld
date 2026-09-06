@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Mapping
 
 from .three_ds_apps import APP_BY_KEY, ThreeDSAppStatus, detect_three_ds_app
 
@@ -48,7 +48,7 @@ class ReadinessItem:
 
 @dataclass(frozen=True)
 class ThreeDSReadinessReport:
-    root: Path
+    root: Path | None
     items: tuple[ReadinessItem, ...]
 
     @property
@@ -284,14 +284,17 @@ def build_readiness_requirements(
     return tuple(result)
 
 
-def evaluate_readiness(
-    root: Path,
+def evaluate_readiness_statuses(
+    statuses: Mapping[str, ThreeDSAppStatus],
     target_keys: Iterable[str] = (),
     *,
+    root: Path | None = None,
     needs_ftp: bool = True,
     needs_cia_install: bool = False,
     include_utilities: bool = True,
 ) -> ThreeDSReadinessReport:
+    """Evaluate readiness from already-collected filesystem/transport evidence."""
+
     requirements = build_readiness_requirements(
         target_keys,
         needs_ftp=needs_ftp,
@@ -301,8 +304,43 @@ def evaluate_readiness(
     items = tuple(
         ReadinessItem(
             requirement,
-            detect_three_ds_app(root, APP_BY_KEY[requirement.app_key]),
+            statuses.get(requirement.app_key)
+            or ThreeDSAppStatus(
+                APP_BY_KEY[requirement.app_key],
+                False,
+                source="unchecked",
+            ),
         )
         for requirement in requirements
     )
-    return ThreeDSReadinessReport(root.expanduser(), items)
+    return ThreeDSReadinessReport(root.expanduser() if root is not None else None, items)
+
+
+def evaluate_readiness(
+    root: Path,
+    target_keys: Iterable[str] = (),
+    *,
+    needs_ftp: bool = True,
+    needs_cia_install: bool = False,
+    include_utilities: bool = True,
+) -> ThreeDSReadinessReport:
+    statuses = {
+        requirement.app_key: detect_three_ds_app(
+            root,
+            APP_BY_KEY[requirement.app_key],
+        )
+        for requirement in build_readiness_requirements(
+            target_keys,
+            needs_ftp=needs_ftp,
+            needs_cia_install=needs_cia_install,
+            include_utilities=include_utilities,
+        )
+    }
+    return evaluate_readiness_statuses(
+        statuses,
+        target_keys,
+        root=root,
+        needs_ftp=needs_ftp,
+        needs_cia_install=needs_cia_install,
+        include_utilities=include_utilities,
+    )
