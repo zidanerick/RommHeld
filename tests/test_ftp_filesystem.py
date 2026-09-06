@@ -185,6 +185,47 @@ def test_three_ds_listing_returns_root_relative_entries():
     ]
 
 
+def test_three_ds_listing_ignores_ftpd_root_self_entry_and_normalizes_absolute_children():
+    adapter = ThreeDSFtpFilesystemAdapter(
+        ThreeDSFtpSettings("192.0.2.3"),
+        backend_factory=FakeThreeDSBackend,
+    )
+    adapter.connect()
+    adapter.backend.list_directory = lambda path="": [
+        {"name": "/", "type": "dir", "size": 0},
+        {"name": "/3ds", "type": "dir", "size": 0},
+        {"name": "/boot.firm", "type": "file", "size": 42},
+        {"name": "/3ds/not-a-direct-root-child", "type": "dir", "size": 0},
+        {"name": "../escape", "type": "file", "size": 1},
+    ]
+
+    entries = adapter.list_directory("")
+
+    assert [(entry.name, entry.path, entry.kind, entry.size) for entry in entries] == [
+        ("3ds", "3ds", "dir", 0),
+        ("boot.firm", "boot.firm", "file", 42),
+    ]
+
+
+def test_three_ds_listing_ignores_current_directory_self_entry_below_root():
+    adapter = ThreeDSFtpFilesystemAdapter(
+        ThreeDSFtpSettings("192.0.2.3"),
+        backend_factory=FakeThreeDSBackend,
+    )
+    adapter.connect()
+    adapter.backend.list_directory = lambda path="": [
+        {"name": "/3ds", "type": "dir", "size": 0},
+        {"name": "/3ds/ftpd", "type": "dir", "size": 0},
+        {"name": "/other/escape", "type": "dir", "size": 0},
+    ]
+
+    entries = adapter.list_directory("3ds")
+
+    assert [(entry.name, entry.path, entry.kind) for entry in entries] == [
+        ("ftpd", "3ds/ftpd", "dir"),
+    ]
+
+
 def test_vita_listing_uses_list_not_unsupported_mlsd_or_nlst():
     adapter = VitaFtpFilesystemAdapter(
         VitaFtpSettings("192.0.2.4"),
