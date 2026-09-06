@@ -488,7 +488,11 @@ class WorkspaceDashboardWindow(QMainWindow):
                     "success" if root.is_dir() else "neutral",
                     "Local library ready" if root.is_dir() else "Choose an existing ROM directory",
                 )
-            elif not self.settings_source_status.text():
+            elif self.settings_source_status.text() in {
+                "",
+                "Local library ready",
+                "Choose an existing ROM directory",
+            }:
                 self._set_settings_source_state(
                     "neutral",
                     "Test the RomM connection before saving if these credentials changed.",
