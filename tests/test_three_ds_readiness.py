@@ -11,6 +11,18 @@ def _importance(requirements):
     return {item.app_key: item.importance for item in requirements}
 
 
+def _install_sd_title(root: Path, title_id: str) -> None:
+    (
+        root
+        / "Nintendo 3DS"
+        / ("1" * 32)
+        / ("2" * 32)
+        / "title"
+        / title_id[:8]
+        / title_id[8:]
+    ).mkdir(parents=True, exist_ok=True)
+
+
 def test_ftp_readiness_requires_luma_and_ftpd_but_only_recommends_homebrew_launcher():
     requirements = build_readiness_requirements(
         needs_ftp=True,
@@ -80,6 +92,36 @@ def test_report_distinguishes_definite_missing_from_installed_title_confirmation
     assert "luma" in missing
     assert "red-viper" in unconfirmed
     assert report.state == "missing_required"
+
+
+def test_installed_ftpd_cia_satisfies_required_ftp_readiness(tmp_path: Path):
+    (tmp_path / "boot.firm").write_bytes(b"firm")
+    _install_sd_title(tmp_path, "000400000BEEF500")
+
+    report = evaluate_readiness(
+        tmp_path,
+        needs_ftp=True,
+        include_utilities=False,
+    )
+
+    assert report.missing_required == ()
+    assert report.unconfirmed_required == ()
+    assert report.state == "ready"
+    ftpd_item = next(
+        item for item in report.items if item.requirement.app_key == "ftpd"
+    )
+    assert ftpd_item.status.detected
+    assert ftpd_item.status.title_id == "000400000BEEF500"
+
+
+def test_installed_red_viper_cia_satisfies_target_runtime_preflight(tmp_path: Path):
+    _install_sd_title(tmp_path, "000400000FE7CB00")
+
+    result = evaluate_target_runtime(tmp_path, "red_viper")
+
+    assert result is not None
+    assert result.state == "detected"
+    assert "detected from the mounted 3DS SD card" in result.note
 
 
 def test_partial_twilight_sd_assets_are_definitely_missing_for_nds_route(tmp_path: Path):
