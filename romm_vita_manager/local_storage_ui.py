@@ -118,6 +118,7 @@ class MountedStorageDialog(QDialog):
 
         self.storage_status = QLabel("Choose the mounted SD/card directory.")
         self.storage_status.setWordWrap(True)
+        self.storage_status.setMinimumHeight(40)
         self.storage_status.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
