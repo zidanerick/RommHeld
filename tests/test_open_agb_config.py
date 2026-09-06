@@ -110,6 +110,23 @@ def test_write_creates_backup_and_replaces_config_atomically(tmp_path: Path):
     assert not config_path.with_name(config_path.name + ".rommheld.tmp").exists()
 
 
+def test_write_preserves_first_backup_across_later_edits(tmp_path: Path):
+    config_dir = tmp_path / "3ds" / "open_agb_firm"
+    config_dir.mkdir(parents=True)
+    config_path = config_dir / "config.ini"
+    config_path.write_text(CURRENT_CONFIG, encoding="utf-8")
+
+    write_open_agb_config(tmp_path, {("general", "directBoot"): True})
+    first_edit = config_path.read_text(encoding="utf-8")
+    write_open_agb_config(tmp_path, {("audio", "volume"): 96})
+
+    backup = config_path.with_name(config_path.name + BACKUP_SUFFIX)
+    assert backup.read_text(encoding="utf-8") == CURRENT_CONFIG
+    assert first_edit != CURRENT_CONFIG
+    assert "directBoot=true" in config_path.read_text(encoding="utf-8")
+    assert "volume=96" in config_path.read_text(encoding="utf-8")
+
+
 def test_missing_config_must_be_created_by_open_agb_firm_first(tmp_path: Path):
     with pytest.raises(FileNotFoundError, match="Launch open_agb_firm once"):
         write_open_agb_config(tmp_path, {("general", "directBoot"): True})
