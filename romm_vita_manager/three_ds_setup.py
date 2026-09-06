@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
 import tempfile
-import webbrowser
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
@@ -27,7 +25,7 @@ from PySide6.QtWidgets import (
 
 from .config import save_config
 from .design_tokens import DARK, brand_for_platform
-from .platform_services import temp_dir
+from .platform_services import is_web_url, open_external_url, temp_dir
 from .storage_detection import detect_3ds_sd_candidates
 from .storage_validation import validate_3ds_sd
 from .three_ds_apps import APP_BY_KEY, detect_three_ds_app
@@ -114,11 +112,6 @@ def component_presence(root: Path, component: SetupComponent) -> tuple[bool, str
         if _case_insensitive_exists(root, marker):
             return True, marker
     return False, None
-
-
-def is_web_url(value: str) -> bool:
-    parsed = urlparse(value)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 def qr_image(url: str, size: int = 320) -> QPixmap:
@@ -532,14 +525,28 @@ class ThreeDSSetupDialog(QDialog):
         self.validate_sd()
         self.refresh_components()
 
+    def _open_web_url(self, url: str, label: str) -> None:
+        if not is_web_url(url):
+            QMessageBox.warning(
+                self,
+                "Invalid upstream URL",
+                f"{label} does not have a valid HTTP(S) URL configured.",
+            )
+            return
+        if not open_external_url(url):
+            QMessageBox.warning(
+                self,
+                "Unable to open browser",
+                f"RommHeld could not open {label} in your default browser.\n\n"
+                f"{url}\n\n"
+                "Copy the URL above and open it manually.",
+            )
+
     def open_ftpd_upstream(self) -> None:
-        if is_web_url(FTPD_RELEASE_URL):
-            webbrowser.open(FTPD_RELEASE_URL)
+        self._open_web_url(FTPD_RELEASE_URL, "the ftpd release page")
 
     def open_fbi_upstream(self) -> None:
-        url = COMPONENTS[0].upstream_url
-        if is_web_url(url):
-            webbrowser.open(url)
+        self._open_web_url(COMPONENTS[0].upstream_url, "the FBI release page")
 
     def open_upstream(self) -> None:
         item = self.component_list.currentItem()
@@ -547,10 +554,7 @@ class ThreeDSSetupDialog(QDialog):
             QMessageBox.information(self, "Select a component", "Select a component first.")
             return
         url = str(item.data(Qt.ItemDataRole.UserRole) or "")
-        if not is_web_url(url):
-            QMessageBox.warning(self, "Invalid upstream URL", "The selected component has no valid upstream URL.")
-            return
-        webbrowser.open(url)
+        self._open_web_url(url, "the selected component release page")
 
     def show_qr(self) -> None:
         url = self.url_edit.text().strip()
