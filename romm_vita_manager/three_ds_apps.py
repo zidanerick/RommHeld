@@ -270,10 +270,14 @@ def detect_three_ds_app(
         for raw_title_id in definition.installed_title_ids:
             normalized = raw_title_id.strip().upper()
             if bytes.fromhex(normalized) in title_ids:
+                title_tree_marker = (
+                    "Nintendo 3DS/<ID0>/<ID1>/title/"
+                    f"{normalized[:8]}/{normalized[8:]}"
+                )
                 return ThreeDSAppStatus(
                     definition,
                     True,
-                    None,
+                    title_tree_marker,
                     normalized,
                 )
 
