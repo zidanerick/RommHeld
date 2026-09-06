@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-import webbrowser
 from pathlib import Path
 from typing import Iterable
 
@@ -21,6 +20,7 @@ from PySide6.QtWidgets import (
 from .design_tokens import DARK, brand_for_platform
 from .open_agb_config import detect_open_agb_config_format, open_agb_config_path
 from .open_agb_settings import OpenAgbSettingsDialog
+from .platform_services import is_web_url, open_external_url
 from .three_ds_apps import APP_BY_KEY, THREE_DS_APPS, ThreeDSAppStatus, scan_three_ds_apps
 from .three_ds_packages import download_package, package_for_app, resolve_package, stage_package
 from .three_ds_readiness import ReadinessRequirement, evaluate_readiness
@@ -359,7 +359,7 @@ class ThreeDSReadinessDialog(QDialog):
             detail += f"\n\n{runtime_detail}"
         self.detail_title.setText(f"{app.name} · {importance} · {state}")
         self.detail_text.setText(detail)
-        self.open_upstream_button.setEnabled(bool(app.upstream_url))
+        self.open_upstream_button.setEnabled(is_web_url(app.upstream_url))
         self.configure_button.setEnabled(
             app_key == "open-agb-firm" and self._open_agb_config_is_current()
         )
@@ -384,9 +384,23 @@ class ThreeDSReadinessDialog(QDialog):
         app_key = self._selected_app_key()
         if app_key is None:
             return
-        url = APP_BY_KEY[app_key].upstream_url
-        if url.startswith(("https://", "http://")):
-            webbrowser.open(url)
+        app = APP_BY_KEY[app_key]
+        url = app.upstream_url
+        if not is_web_url(url):
+            QMessageBox.warning(
+                self,
+                "Invalid upstream URL",
+                f"{app.name} does not have a valid HTTP(S) upstream URL configured.",
+            )
+            return
+        if not open_external_url(url):
+            QMessageBox.warning(
+                self,
+                "Unable to open browser",
+                f"RommHeld could not open the {app.name} upstream page in your default browser.\n\n"
+                f"{url}\n\n"
+                "Copy the URL above and open it manually.",
+            )
 
     def configure_selected(self) -> None:
         app_key = self._selected_app_key()
