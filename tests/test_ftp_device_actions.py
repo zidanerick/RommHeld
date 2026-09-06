@@ -13,7 +13,8 @@ def test_device_page_exposes_contextual_ftp_files_for_vita_and_3ds_only():
     assert "workspace_3ds_ftp_files_action" in source
     assert "open_vita_ftp_files" in source
     assert "open_3ds_ftp_files" in source
-    assert "ds_ftp_files" not in source
+    assert "workspace_ds_ftp_files_action" not in source
+    assert "def open_ds_ftp_files" not in source
 
 
 def test_contextual_ftp_actions_follow_endpoint_presence():
