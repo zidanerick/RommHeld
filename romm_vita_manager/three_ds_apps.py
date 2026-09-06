@@ -41,6 +41,7 @@ class ThreeDSAppStatus:
     detected: bool
     marker: str | None = None
     title_id: str | None = None
+    source: str = "mounted_sd"
 
     @property
     def state(self) -> str:
@@ -48,15 +49,33 @@ class ThreeDSAppStatus:
 
     @property
     def detection_note(self) -> str:
+        if self.source == "unchecked":
+            return "No mounted-SD or live-FTP inventory has been checked yet."
+        if self.detected and self.source == "ftp_live":
+            return "A live ftpd connection is active on the console."
         if self.detected and self.title_id:
+            if self.source == "ftp":
+                return (
+                    "Installed CIA title is visible in the live FTP SD title tree: "
+                    f"{self.title_id}."
+                )
             return (
                 "Installed CIA title is visible in the mounted SD title tree: "
                 f"{self.title_id}."
             )
         if self.detected and self.marker:
+            if self.source == "ftp":
+                return f"Live FTP evidence found at {self.marker}."
             return f"SD evidence found at {self.marker}."
         if self.definition.installed_title_may_exist_without_sd_marker:
+            if self.source == "ftp":
+                return (
+                    "No known FTP-visible SD marker was found; an installed CIA title may "
+                    "still be present on the console."
+                )
             return "No SD marker was found; an installed CIA title may still be present on the console."
+        if self.source == "ftp":
+            return "No known FTP-visible SD marker was found."
         return "No known SD marker was found."
 
 
