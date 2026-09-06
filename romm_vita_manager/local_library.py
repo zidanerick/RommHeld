@@ -27,7 +27,13 @@ from .ui_components import AccentButton, SurfaceCard
 from .vita import free_space, is_vita_mount
 from .vita_ftp import VitaFtpSettings
 from .vita_ftp_library import VitaFtpCopyWorker, ftp_destination_target
-from .vita_library_support import CopyWorker, destination_for_game, game_status, human_size
+from .vita_library_support import (
+    CopyWorker,
+    destination_for_game,
+    game_status,
+    human_size,
+    required_usb_batch_space,
+)
 
 
 STATUS_LABELS = {
@@ -607,14 +613,15 @@ class LocalLibraryWidget(QWidget):
 
         try:
             available = free_space(self.vita)
+            required_space = required_usb_batch_space(jobs)
         except OSError as exc:
             QMessageBox.critical(self, "Storage check failed", str(exc))
             return
-        if total > available:
+        if required_space > available:
             QMessageBox.warning(
                 self,
                 "Not enough Vita storage",
-                f"Selected transfers need {human_size(total)}, but the Vita has only {human_size(available)} free.",
+                f"Safe staged copying needs up to {human_size(required_space)} free, but the Vita has only {human_size(available)} free.",
             )
             return
 
