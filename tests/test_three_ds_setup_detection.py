@@ -7,7 +7,7 @@ def _component(key: str):
     return next(component for component in COMPONENTS if component.key == key)
 
 
-def test_setup_twilight_quick_check_requires_frontend_and_nds_bootstrap(tmp_path: Path):
+def test_setup_twilight_quick_check_preserves_assets_without_claiming_launcher(tmp_path: Path):
     twilight = _component("twilight")
     (tmp_path / "_nds" / "TWiLightMenu").mkdir(parents=True)
 
@@ -17,7 +17,7 @@ def test_setup_twilight_quick_check_requires_frontend_and_nds_bootstrap(tmp_path
 
     (tmp_path / "_nds" / "nds-bootstrap").mkdir()
     detected, marker = component_presence(tmp_path, twilight)
-    assert detected
+    assert not detected
     assert marker is not None
     assert "_nds/TWiLightMenu" in marker
     assert "_nds/nds-bootstrap" in marker
