@@ -78,7 +78,9 @@ def test_dsvita_app_on_ux0_keeps_ur0_dependencies_not_checked(
 
     labels = _labels(dialog)
     assert any(
-        text.startswith("Present · launch not verified · Native DS emulator")
+        text.startswith(
+            "Present · launch not verified · Requires libshacccg.suprx + kubridge >= 0.3.1 (*KERNEL)"
+        )
         for text in labels
     )
     assert any(text.startswith("Not checked · Runtime shader compiler") for text in labels)
