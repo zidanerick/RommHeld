@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
 from romm_vita_manager import send_file_dialog as send_file_module
-from romm_vita_manager import vita_setup as setup_module
+from romm_vita_manager import vita_setup as vita_setup_module
 from romm_vita_manager.send_file_dialog import SendFileDialog
 from romm_vita_manager.vita_setup import VitaSetupDialog
 
@@ -70,8 +70,8 @@ def test_send_file_dialog_blocks_accept_reject_and_close_until_worker_finishes(m
 
 def test_vita_setup_dialog_blocks_accept_reject_and_close_until_worker_finishes(monkeypatch) -> None:
     qt_app = app()
-    monkeypatch.setattr(setup_module, "load_config", empty_config)
-    monkeypatch.setattr(setup_module.QMessageBox, "information", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(vita_setup_module, "load_config", empty_config)
+    monkeypatch.setattr(vita_setup_module.QMessageBox, "information", lambda *_args, **_kwargs: None)
     dialog = VitaSetupDialog(None)
     worker = RunningWorker()
     dialog.worker = worker
