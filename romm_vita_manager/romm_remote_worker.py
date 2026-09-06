@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QThread, Signal
 
+from .romm_library_cache import load_cached_page
 from .romm_remote import _as_int, _items, _json_request, _list_games_for_platform_slugs
 from .three_ds_targets import RETROARCH_PLATFORM_SLUGS
 
@@ -71,6 +72,35 @@ class RomMLibraryWorker(QThread):
             ),
         )
 
+    def _cached_platform_options(self) -> list[dict[str, str]]:
+        """Return platform labels recoverable from the cached page shown by the UI.
+
+        The 3DS library displays cached games before a fresh RomM request completes.
+        Emitting these options immediately keeps the platform filter consistent with
+        the rows already visible instead of leaving it at only "All compatible
+        platforms" until the remote /platforms request returns.
+        """
+        try:
+            cached = load_cached_page(
+                self.instance_url,
+                self.search_term,
+                self.platform_slug,
+            )
+        except Exception:
+            return []
+
+        by_slug: dict[str, str] = {}
+        for game in cached:
+            slug = str(game.platform_slug or game.platform).strip().lower()
+            if not slug or slug not in RETROARCH_PLATFORM_SLUGS:
+                continue
+            label = str(game.platform or slug).strip() or slug
+            by_slug.setdefault(slug, label)
+        return [
+            {"slug": slug, "name": by_slug[slug]}
+            for slug in sorted(by_slug, key=lambda value: by_slug[value].casefold())
+        ]
+
     def _fetch_platform(self, platform: dict, *, limit: int | None = None):
         if self.isInterruptionRequested():
             return []
@@ -106,6 +136,9 @@ class RomMLibraryWorker(QThread):
         try:
             if self.isInterruptionRequested():
                 return
+            cached_platforms = self._cached_platform_options()
+            if cached_platforms:
+                self.platforms_loaded.emit(cached_platforms)
             self.progress.emit("Connecting to RomM…")
             platforms = _items(_json_request(self.instance_url, self.token, "platforms"))
             if self.isInterruptionRequested():
@@ -185,6 +218,9 @@ class RomM3DSLibraryWorker(RomMLibraryWorker):
         try:
             if self.isInterruptionRequested():
                 return
+            cached_platforms = self._cached_platform_options()
+            if cached_platforms:
+                self.platforms_loaded.emit(cached_platforms)
             platforms = _items(_json_request(self.instance_url, self.token, "platforms"))
             if self.isInterruptionRequested():
                 return
