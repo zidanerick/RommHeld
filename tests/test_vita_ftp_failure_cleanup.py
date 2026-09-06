@@ -16,13 +16,23 @@ class FakeVitaFTP:
     files: dict[str, bytes] = {}
     dirs: set[str] = {"/", "/ux0:", "/ux0:/data"}
 
-    def __init__(self, *args, fail_temp_size: bool = False, fail_stor: bool = False, fail_connect: bool = False, **kwargs):
+    def __init__(
+        self,
+        *args,
+        fail_temp_size: bool = False,
+        fail_final_size: bool = False,
+        fail_stor: bool = False,
+        fail_connect: bool = False,
+        **kwargs,
+    ):
         self.cwd_path = "/"
         self.rename_from = None
         self.closed = False
         self.fail_temp_size = fail_temp_size
+        self.fail_final_size = fail_final_size
         self.fail_stor = fail_stor
         self.fail_connect = fail_connect
+        self.final_rename_complete = False
 
     def connect(self, host, port, timeout=None):
         if self.fail_connect:
@@ -51,6 +61,13 @@ class FakeVitaFTP:
             if self.fail_temp_size and ".rommheld-" in path and path.endswith(".part"):
                 self.fail_temp_size = False
                 raise OSError("control connection lost during SIZE")
+            if (
+                self.fail_final_size
+                and self.final_rename_complete
+                and path == "/ux0:/data/game.bin"
+            ):
+                self.fail_final_size = False
+                raise OSError("control connection lost during final SIZE")
             if path not in self.files:
                 raise ftplib.error_perm("550 The file doesn't exist")
             return f"213: {len(self.files[path])}"
@@ -78,6 +95,8 @@ class FakeVitaFTP:
                 raise ftplib.error_perm("550 Rename source missing")
             self.files[destination] = self.files.pop(self.rename_from)
             self.rename_from = None
+            if destination == "/ux0:/data/game.bin":
+                self.final_rename_complete = True
             return "226 Rename completed"
         raise ftplib.error_perm("502 command not implemented")
 
@@ -183,3 +202,25 @@ def test_cleanup_reconnect_failure_does_not_mask_original_verification_error(tmp
     assert not ftp_backend.connected
     assert len(factory.instances) == 2
     assert all(client.closed for client in factory.instances)
+
+
+def test_final_size_connection_loss_reconnects_verifies_and_cleans_backup(tmp_path: Path):
+    source = tmp_path / "game.bin"
+    source.write_bytes(b"replacement-data")
+    FakeVitaFTP.files["/ux0:/data/game.bin"] = b"known-good"
+    factory = SequencedFactory({"fail_final_size": True}, {})
+    ftp_backend = backend(factory)
+
+    result, written = ftp_backend.upload(source, "data/game.bin", overwrite=True)
+
+    assert result == "copied"
+    assert written == len(b"replacement-data")
+    assert FakeVitaFTP.files["/ux0:/data/game.bin"] == b"replacement-data"
+    assert hidden_transfer_files() == []
+    assert ftp_backend.connected
+    assert len(factory.instances) == 2
+    assert factory.instances[0].closed
+    assert not factory.instances[1].closed
+
+    ftp_backend.close()
+    assert factory.instances[1].closed
