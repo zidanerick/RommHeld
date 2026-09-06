@@ -22,9 +22,11 @@ def detect_3ds_sd_candidates() -> list[StorageCandidate]:
             validation = validate_3ds_sd(root)
         except (OSError, ValueError):
             continue
-        # A 3DS SD candidate needs more than an empty FAT volume. Require at
-        # least one strong boot/runtime marker or a recognizable homebrew tree.
-        if validation.matched_count == 0:
+        # Automatic suggestions must meet the same confidence threshold used
+        # for actual 3DS SD writes. Generic ROM libraries often contain
+        # directories named ``roms`` or ``3ds`` and must not be presented as
+        # possible console media on that evidence alone.
+        if validation.confidence not in {"medium", "high"}:
             continue
         info = volume_info(root)
         candidates.append(
