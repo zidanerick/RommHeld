@@ -64,6 +64,24 @@ PACKAGES: dict[str, ThreeDSPackageSpec] = {
         "3ds/RedViper/RedViper.3dsx",
         "Dedicated Virtual Boy emulator for the Nintendo 3DS.",
     ),
+    "fbi-3dsx": ThreeDSPackageSpec(
+        "fbi-3dsx",
+        "fbi",
+        "FBI",
+        "Steveice10/FBI",
+        "FBI.3dsx",
+        "3ds/FBI/FBI.3dsx",
+        "Homebrew Launcher build of FBI used to bootstrap CIA and Remote Install workflows.",
+    ),
+    "checkpoint-3dsx": ThreeDSPackageSpec(
+        "checkpoint-3dsx",
+        "checkpoint",
+        "Checkpoint",
+        "BernardoGiordano/Checkpoint",
+        "Checkpoint.3dsx",
+        "3ds/Checkpoint/Checkpoint.3dsx",
+        "Save manager used for backups before title/runtime changes.",
+    ),
 }
 
 
@@ -71,6 +89,8 @@ PACKAGE_FOR_APP = {
     "ftpd": "ftpd-3dsx",
     "universal-updater": "universal-updater-3dsx",
     "red-viper": "red-viper-3dsx",
+    "fbi": "fbi-3dsx",
+    "checkpoint": "checkpoint-3dsx",
 }
 
 
