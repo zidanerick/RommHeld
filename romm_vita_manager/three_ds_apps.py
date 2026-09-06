@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .three_ds_targets import RETROARCH_TARGET_PLATFORM_SLUGS
+from .three_ds_title_inventory import mounted_sd_title_ids
 
 
 @dataclass(frozen=True)
@@ -19,10 +20,19 @@ class ThreeDSAppDefinition:
     platform_slugs: tuple[str, ...] = ()
     installed_title_may_exist_without_sd_marker: bool = False
     marker_policy: str = "any"
+    installed_title_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if self.marker_policy not in {"any", "all"}:
             raise ValueError(f"Unknown marker policy: {self.marker_policy}")
+        for raw_title_id in self.installed_title_ids:
+            title_id = raw_title_id.strip()
+            if len(title_id) != 16 or any(
+                character not in "0123456789abcdefABCDEF" for character in title_id
+            ):
+                raise ValueError(
+                    f"Invalid installed Title ID for {self.key}: {raw_title_id!r}"
+                )
 
 
 @dataclass(frozen=True)
@@ -30,6 +40,7 @@ class ThreeDSAppStatus:
     definition: ThreeDSAppDefinition
     detected: bool
     marker: str | None = None
+    title_id: str | None = None
 
     @property
     def state(self) -> str:
@@ -37,6 +48,11 @@ class ThreeDSAppStatus:
 
     @property
     def detection_note(self) -> str:
+        if self.detected and self.title_id:
+            return (
+                "Installed CIA title is visible in the mounted SD title tree: "
+                f"{self.title_id}."
+            )
         if self.detected and self.marker:
             return f"SD evidence found at {self.marker}."
         if self.definition.installed_title_may_exist_without_sd_marker:
@@ -72,6 +88,7 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         "https://github.com/Steveice10/FBI/releases",
         "manual_or_existing",
         installed_title_may_exist_without_sd_marker=True,
+        installed_title_ids=("000400000F800100",),
     ),
     ThreeDSAppDefinition(
         "ftpd",
@@ -82,6 +99,7 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         "https://github.com/mtheall/ftpd/releases",
         "universal_updater_or_manual",
         installed_title_may_exist_without_sd_marker=True,
+        installed_title_ids=("000400000BEEF500",),
     ),
     ThreeDSAppDefinition(
         "universal-updater",
@@ -95,6 +113,7 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         "https://github.com/Universal-Team/Universal-Updater/releases",
         "manual_bootstrap",
         installed_title_may_exist_without_sd_marker=True,
+        installed_title_ids=("0004000004391700",),
     ),
     ThreeDSAppDefinition(
         "godmode9",
@@ -160,6 +179,7 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         "universal_updater_or_manual",
         ("virtualboy",),
         installed_title_may_exist_without_sd_marker=True,
+        installed_title_ids=("000400000FE7CB00",),
     ),
     ThreeDSAppDefinition(
         "daedalusx64",
@@ -181,6 +201,7 @@ THREE_DS_APPS: tuple[ThreeDSAppDefinition, ...] = (
         "https://github.com/BernardoGiordano/Checkpoint/releases",
         "universal_updater_or_manual",
         installed_title_may_exist_without_sd_marker=True,
+        installed_title_ids=("000400000BCFFF00",),
     ),
 )
 
@@ -218,7 +239,12 @@ def _case_insensitive_exists(root: Path, marker: str) -> bool:
     return current.exists()
 
 
-def detect_three_ds_app(root: Path, definition: ThreeDSAppDefinition) -> ThreeDSAppStatus:
+def detect_three_ds_app(
+    root: Path,
+    definition: ThreeDSAppDefinition,
+    *,
+    visible_title_ids: frozenset[bytes] | None = None,
+) -> ThreeDSAppStatus:
     root = root.expanduser()
     if not root.is_dir():
         return ThreeDSAppStatus(definition, False, None)
@@ -231,12 +257,40 @@ def detect_three_ds_app(root: Path, definition: ThreeDSAppDefinition) -> ThreeDS
         if definition.marker_policy == "all"
         else bool(matched)
     )
-    marker = "; ".join(matched) if detected and matched else None
-    return ThreeDSAppStatus(definition, detected, marker)
+    if detected:
+        marker = "; ".join(matched) if matched else None
+        return ThreeDSAppStatus(definition, True, marker)
+
+    if definition.installed_title_ids:
+        title_ids = (
+            mounted_sd_title_ids(root)
+            if visible_title_ids is None
+            else visible_title_ids
+        )
+        for raw_title_id in definition.installed_title_ids:
+            normalized = raw_title_id.strip().upper()
+            if bytes.fromhex(normalized) in title_ids:
+                return ThreeDSAppStatus(
+                    definition,
+                    True,
+                    None,
+                    normalized,
+                )
+
+    return ThreeDSAppStatus(definition, False, None)
 
 
 def scan_three_ds_apps(root: Path) -> dict[str, ThreeDSAppStatus]:
-    return {app.key: detect_three_ds_app(root, app) for app in THREE_DS_APPS}
+    root = root.expanduser()
+    visible_title_ids = mounted_sd_title_ids(root)
+    return {
+        app.key: detect_three_ds_app(
+            root,
+            app,
+            visible_title_ids=visible_title_ids,
+        )
+        for app in THREE_DS_APPS
+    }
 
 
 def recommended_runtime_keys(platform_slugs: Iterable[str]) -> tuple[str, ...]:
