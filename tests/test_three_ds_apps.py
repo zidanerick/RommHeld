@@ -76,7 +76,9 @@ def test_known_cia_titles_are_detected_from_mounted_sd_title_tree(tmp_path: Path
     for app_key, title_id in known_titles.items():
         status = statuses[app_key]
         assert status.detected
-        assert status.marker is None
+        assert status.marker == (
+            f"Nintendo 3DS/<ID0>/<ID1>/title/{title_id[:8]}/{title_id[8:]}"
+        )
         assert status.title_id == title_id
         assert title_id in status.detection_note
         assert "Installed CIA title" in status.detection_note
