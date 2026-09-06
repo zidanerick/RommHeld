@@ -21,6 +21,7 @@ from .design_tokens import DARK, brand_for_platform
 from .open_agb_config import detect_open_agb_config_format, open_agb_config_path
 from .open_agb_settings import OpenAgbSettingsDialog
 from .platform_services import is_web_url, open_external_url
+from .three_ds_app_health import assess_three_ds_app_health
 from .three_ds_apps import APP_BY_KEY, THREE_DS_APPS, ThreeDSAppStatus, scan_three_ds_apps
 from .three_ds_ftp import ThreeDSFtpSettings
 from .three_ds_ftp_inventory import (
@@ -147,6 +148,7 @@ class ThreeDSReadinessDialog(QDialog):
         self.ftp_scan_worker: ThreeDSFtpInventoryWorker | None = None
         self._assist_target_app_key: str | None = None
         self._closing_requested = False
+        self._last_ftp_scan_error: str | None = None
         self._requirements: dict[str, ReadinessRequirement] = {}
         self._local_statuses: dict[str, ThreeDSAppStatus] = {}
         self._statuses: dict[str, ThreeDSAppStatus] = {}
@@ -176,7 +178,7 @@ class ThreeDSReadinessDialog(QDialog):
             f"color:{DARK.text_primary};font-size:15px;font-weight:700;background:transparent;"
         )
         inventory_note = QLabel(
-            "Detected means RommHeld found reliable mounted-SD, live-FTP, or known SD title-tree evidence. Some installed applications still cannot be proven from filesystem evidence alone and remain a console-confirmation state."
+            "Detected means RommHeld found reliable mounted-SD, live-FTP, or known SD title-tree evidence. Presence does not prove an application launches correctly. Select a component to see its separate health confidence and repair steps."
         )
         inventory_note.setWordWrap(True)
         inventory_note.setProperty("secondary", True)
@@ -408,6 +410,7 @@ class ThreeDSReadinessDialog(QDialog):
         if self.ftp_scan_worker is not None and self.ftp_scan_worker.isRunning():
             return
 
+        self._last_ftp_scan_error = None
         selected_key = self._selected_app_key()
         if self.sd_root is not None and self.sd_root.is_dir():
             self._local_statuses = scan_three_ds_apps(self.sd_root)
@@ -430,6 +433,7 @@ class ThreeDSReadinessDialog(QDialog):
     def _ftp_scan_completed(self, remote_statuses: object) -> None:
         if not isinstance(remote_statuses, dict):
             return
+        self._last_ftp_scan_error = None
         self._statuses = merge_three_ds_app_inventories(
             self._local_statuses,
             remote_statuses,
@@ -443,6 +447,7 @@ class ThreeDSReadinessDialog(QDialog):
         self._render_inventory()
 
     def _ftp_scan_failed(self, message: str) -> None:
+        self._last_ftp_scan_error = message
         self.operation_status.setText(f"Live FTP readiness scan failed: {message}")
         self._render_inventory()
 
@@ -471,6 +476,14 @@ class ThreeDSReadinessDialog(QDialog):
         state = self._state_label(app_key, status) if status is not None else "Not checked"
         reason = requirement.reason if requirement is not None else app.description
         detection = status.detection_note if status is not None else "Not checked."
+        health = (
+            assess_three_ds_app_health(
+                status,
+                ftp_error=self._last_ftp_scan_error if app_key == "ftpd" else None,
+            )
+            if status is not None
+            else None
+        )
         package = package_for_app(app_key)
         updater_assist = self._uses_universal_updater_assist(app_key)
 
@@ -513,7 +526,10 @@ class ThreeDSReadinessDialog(QDialog):
             policy = policy_notes.get(app.install_policy, app.install_policy)
 
         runtime_detail = self._runtime_detail(app_key)
-        detail = f"{reason}\n\n{detection}\n\n{policy}"
+        detail = f"{reason}\n\n{detection}"
+        if health is not None:
+            detail += f"\n\nHealth: {health.label}\n{health.troubleshooting_text}"
+        detail += f"\n\n{policy}"
         if runtime_detail:
             detail += f"\n\n{runtime_detail}"
         self.detail_title.setText(f"{app.name} · {importance} · {state}")
