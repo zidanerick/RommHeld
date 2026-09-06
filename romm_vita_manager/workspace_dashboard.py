@@ -32,6 +32,7 @@ from .preferences import get_device_preference, preference_options, set_device_p
 from .romm_api import normalize_romm_url
 from .romm_remote import RomMRemoteGame
 from .storage_validation import validate_3ds_sd, validate_storage
+from .three_ds_ftp import ThreeDSFtpSettings
 from .three_ds_library import ThreeDSLibraryWidget
 from .three_ds_manager import ThreeDSManagerDialog
 from .three_ds_readiness_ui import ThreeDSReadinessDialog
@@ -772,6 +773,23 @@ class WorkspaceDashboardWindow(QMainWindow):
             return None
         return root.resolve()
 
+    @staticmethod
+    def _three_ds_ftp_settings(saved: dict) -> ThreeDSFtpSettings | None:
+        host = str(saved.get("host", "")).strip()
+        if not host:
+            return None
+        try:
+            port = int(saved.get("port", 5000))
+        except (TypeError, ValueError):
+            port = 5000
+        return ThreeDSFtpSettings(
+            host=host,
+            port=port,
+            username=str(saved.get("username", "anonymous")).strip() or "anonymous",
+            password=str(saved.get("password", "")),
+            remote_root=str(saved.get("remote_root", "/")).strip() or "/",
+        )
+
     def change_workspace(self) -> None:
         if self._settings_test_running():
             self.statusBar().showMessage(
@@ -917,12 +935,14 @@ class WorkspaceDashboardWindow(QMainWindow):
     def open_3ds_readiness(self) -> None:
         saved = self._reload_config().get("devices", {}).get("3ds", {})
         root = self._safe_3ds_storage_root(saved)
-        if root is None:
+        ftp_settings = self._three_ds_ftp_settings(saved)
+        if root is None and ftp_settings is None:
             root = self._choose_3ds_storage_root()
-        if root is None:
+        if root is None and ftp_settings is None:
             return
         ThreeDSReadinessDialog(
             root,
+            ftp_settings=ftp_settings,
             needs_ftp=True,
             needs_cia_install=False,
             parent=self,
