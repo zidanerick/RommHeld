@@ -5,7 +5,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPoint, QThread
 from PySide6.QtWidgets import QApplication, QWidget
 
 from romm_vita_manager import local_library as local_library_module
@@ -13,6 +13,7 @@ from romm_vita_manager.local_library import LocalLibraryWidget
 from romm_vita_manager.management_shell import ManagementShell, WORKSPACE_PROFILES
 from romm_vita_manager.models import Game
 from romm_vita_manager.theme import apply_application_theme
+from romm_vita_manager.three_ds_manager import ThreeDSManagerDialog, _DETACHED_WORKERS
 
 
 _APP: QApplication | None = None
@@ -200,4 +201,38 @@ def test_vita_status_filter_resets_when_usb_storage_disappears(
 
     widget.close()
     widget.deleteLater()
+    app.processEvents()
+
+
+class _SlowWorker(QThread):
+    def run(self) -> None:
+        self.msleep(250)
+
+
+def test_3ds_manager_closes_immediately_while_library_worker_finishes() -> None:
+    app = _app()
+    dialog = ThreeDSManagerDialog(
+        {
+            "library_source": {"mode": "local", "local_root": ""},
+            "devices": {"3ds": {}},
+        }
+    )
+    worker = _SlowWorker()
+    dialog.library_worker = worker
+    dialog.show()
+    worker.start()
+    app.processEvents()
+
+    assert worker.isRunning()
+    dialog.close()
+    app.processEvents()
+
+    assert not dialog.isVisible()
+    assert worker in _DETACHED_WORKERS
+
+    assert worker.wait(2000)
+    app.processEvents()
+    assert worker not in _DETACHED_WORKERS
+
+    dialog.deleteLater()
     app.processEvents()
