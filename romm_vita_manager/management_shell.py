@@ -412,6 +412,9 @@ class ManagementShell(QWidget):
             border:none;
             font-weight:700;
         }}
+        QPushButton#navButton:focus {{
+            border:1px solid {DARK.text_primary};
+        }}
 
         QFrame#deviceStatus {{
             background:transparent;
@@ -432,6 +435,9 @@ class ManagementShell(QWidget):
             background:{DARK.surface};
             color:{DARK.text_primary};
             border-color:#4A4A4D;
+        }}
+        QPushButton#changeButton:focus {{
+            border-color:{DARK.text_primary};
         }}
 
         QFrame#workspaceContent {{ background:{DARK.background}; }}
