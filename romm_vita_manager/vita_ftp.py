@@ -317,7 +317,20 @@ class VitaFtpBackend:
                 self._cleanup_remote_file(temporary)
             raise
 
-        final_size = self.remote_size(remote)
+        try:
+            final_size = self.remote_size(remote)
+        except Exception as verification_error:
+            # The temporary upload was already size-verified before the rename. If
+            # only the control connection died during final verification, reconnect
+            # once so a healthy completed transfer can remain successful and the
+            # worker can continue its batch.
+            self._drop_connection()
+            try:
+                self.ftp = self._new_client()
+                final_size = self.remote_size(remote)
+            except Exception:
+                self._drop_connection()
+                raise verification_error
         if final_size != source_size:
             try:
                 self._restore_backup(backup, remote)
@@ -329,7 +342,7 @@ class VitaFtpBackend:
 
         if backup is not None:
             try:
-                self._delete(ftp, backup)
+                self._delete(self._require_connection(), backup)
             except Exception:
                 # The replacement is already verified and live. A stale hidden
                 # backup is preferable to reporting the successful transfer as failed.
