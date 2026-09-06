@@ -281,7 +281,15 @@ class VitaFtpBackend:
             self._cleanup_remote_file(temporary)
             return "cancelled", transferred
 
-        temp_size = self.remote_size(temporary)
+        try:
+            temp_size = self.remote_size(temporary)
+        except Exception:
+            # A successful STOR can still be followed by a dead control connection.
+            # Fail closed before any destination swap and clean the verified-staging
+            # candidate through a fresh VitaShell FTP session when possible.
+            self._drop_connection()
+            self._cleanup_remote_file(temporary)
+            raise
         if temp_size != source_size:
             self._cleanup_remote_file(temporary)
             raise IOError(
