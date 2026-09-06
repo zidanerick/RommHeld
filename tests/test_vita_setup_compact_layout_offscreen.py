@@ -36,7 +36,9 @@ def test_vita_setup_scrolls_instead_of_compressing_runtime_rows(monkeypatch) -> 
         if frame.objectName() == "vitaPackageRow"
     ]
 
-    assert len(rows) == len(EMULATORS)
+    # Package/runtime rows plus VitaShell, RetroArch-core, libshacccg and kubridge
+    # evidence rows all share the compact row contract.
+    assert len(rows) == len(EMULATORS) + 4
     assert dialog.setup_scroll.verticalScrollBar().maximum() > 0
     assert all(row.height() >= 40 for row in rows)
     assert dialog.transport_combo.height() >= dialog.transport_combo.sizeHint().height()
