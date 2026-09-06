@@ -132,3 +132,17 @@ def test_manager_propagates_cancel_to_romm_download_and_handles_interrupt_cleanl
     assert "progress=lambda done, _total: self.progress.emit(done)" in source
     assert "except InterruptedError:" in source
     assert 'self.completed.emit("cancelled")' in source
+
+
+def test_manager_close_detaches_background_workers_instead_of_waiting():
+    source = MANAGER_PATH.read_text(encoding="utf-8")
+
+    assert "_DETACHED_WORKERS" in source
+    assert "def _keep_worker_alive" in source
+    assert "def _request_background_shutdown" in source
+    assert "def reject(self)" in source
+    close_event = source.split("def closeEvent(self, event) -> None:", 1)[1]
+    assert "event.ignore()" not in close_event
+    assert "self.setEnabled(False)" not in close_event
+    assert "self._request_background_shutdown()" in close_event
+    assert "super().closeEvent(event)" in close_event
