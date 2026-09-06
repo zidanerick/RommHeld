@@ -23,6 +23,7 @@ from .classic_vc_deploy import ClassicVcDeployDialog
 from .config import load_config, reset_config, save_config
 from .console_selector import PlatformSelectorDialog, RomMConnectionWorker
 from .design_tokens import DARK
+from .ftp_file_manager_ui import FtpFileManagerDialog
 from .gba_vc_deploy import GbaVcDeployDialog
 from .library_sources import LibrarySource, get_library_source, save_library_source
 from .local_library import LocalLibraryWidget
@@ -39,6 +40,7 @@ from .three_ds_readiness_ui import ThreeDSReadinessDialog
 from .three_ds_setup import ThreeDSSetupDialog
 from .ui_components import AccentButton, SurfaceCard
 from .vita import find_vita_mounts, free_space, total_space
+from .vita_ftp import VitaFtpSettings
 from .vita_library_support import human_size
 from .vita_setup import VitaSetupDialog
 
@@ -173,12 +175,16 @@ class WorkspaceDashboardWindow(QMainWindow):
             refresh.clicked.connect(self.refresh_device_page)
             self.workspace_vita_send_action = AccentButton("Send file / configure FTP", accent)
             self.workspace_vita_send_action.clicked.connect(self.open_vita_send_file)
+            self.workspace_vita_ftp_files_action = QPushButton("FTP files")
+            self.workspace_vita_ftp_files_action.setEnabled(bool(ftp_host))
+            self.workspace_vita_ftp_files_action.clicked.connect(self.open_vita_ftp_files)
             self.workspace_vita_setup_action = AccentButton("Vita setup", accent)
             self.workspace_vita_setup_action.clicked.connect(self.open_vita_setup)
             self.workspace_vita_send_action.set_emphasized(not bool(ftp_host))
             self.workspace_vita_setup_action.set_emphasized(bool(ftp_host))
             actions.addWidget(refresh)
             actions.addWidget(self.workspace_vita_send_action)
+            actions.addWidget(self.workspace_vita_ftp_files_action)
             actions.addStretch()
             actions.addWidget(self.workspace_vita_setup_action)
             card.content.addLayout(actions)
@@ -221,6 +227,9 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.workspace_3ds_setup_action.clicked.connect(self.open_3ds_setup)
             storage = QPushButton("Mounted SD files")
             storage.clicked.connect(self.open_3ds_storage)
+            self.workspace_3ds_ftp_files_action = QPushButton("FTP files")
+            self.workspace_3ds_ftp_files_action.setEnabled(bool(host))
+            self.workspace_3ds_ftp_files_action.clicked.connect(self.open_3ds_ftp_files)
             readiness = QPushButton("Runtime readiness")
             readiness.clicked.connect(self.open_3ds_readiness)
             self.workspace_3ds_manage_action = AccentButton("Open 3DS manager", accent)
@@ -230,6 +239,7 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.workspace_3ds_manage_action.set_emphasized(route_ready)
             actions.addWidget(self.workspace_3ds_setup_action)
             actions.addWidget(storage)
+            actions.addWidget(self.workspace_3ds_ftp_files_action)
             actions.addWidget(readiness)
             actions.addStretch()
             actions.addWidget(self.workspace_3ds_manage_action)
@@ -694,6 +704,7 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.workspace_vita_ftp.setText(
                 f"ftp://{ftp_host}:{ftp_port}" if ftp_host else "Not configured"
             )
+            self.workspace_vita_ftp_files_action.setEnabled(bool(ftp_host))
             route_ready = self.vita is not None or bool(ftp_host)
             self.workspace_vita_send_action.set_emphasized(not route_ready)
             self.workspace_vita_setup_action.set_emphasized(route_ready)
@@ -715,6 +726,7 @@ class WorkspaceDashboardWindow(QMainWindow):
             self.workspace_3ds_endpoint.setText(
                 f"ftp://{host}:{port}" if host else "Not configured"
             )
+            self.workspace_3ds_ftp_files_action.setEnabled(bool(host))
             route_ready = bool(host) or mounted_root is not None
             self.workspace_3ds_setup_action.set_emphasized(not route_ready)
             self.workspace_3ds_manage_action.set_emphasized(route_ready)
@@ -790,6 +802,23 @@ class WorkspaceDashboardWindow(QMainWindow):
             remote_root=str(saved.get("remote_root", "/")).strip() or "/",
         )
 
+    @staticmethod
+    def _vita_ftp_settings(saved: dict) -> VitaFtpSettings | None:
+        host = str(saved.get("host", "")).strip()
+        if not host:
+            return None
+        try:
+            port = int(saved.get("port", 1337))
+        except (TypeError, ValueError):
+            port = 1337
+        return VitaFtpSettings(
+            host=host,
+            port=port,
+            username=str(saved.get("username", "anonymous")).strip() or "anonymous",
+            password=str(saved.get("password", "")),
+            remote_root=str(saved.get("remote_root", "/ux0:")).strip() or "/ux0:",
+        )
+
     def change_workspace(self) -> None:
         if self._settings_test_running():
             self.statusBar().showMessage(
@@ -846,9 +875,37 @@ class WorkspaceDashboardWindow(QMainWindow):
         self.refresh_device_page()
         self.refresh_games()
 
+    def open_vita_ftp_files(self) -> None:
+        if self._block_for_library_transfer("opening FTP files"):
+            return
+        saved = self._reload_config().get("devices", {}).get("vita_ftp", {})
+        settings = self._vita_ftp_settings(saved)
+        if settings is None:
+            QMessageBox.information(
+                self,
+                "Configure VitaShell FTP",
+                "Configure the VitaShell FTP endpoint in Send file / configure FTP first.",
+            )
+            return
+        FtpFileManagerDialog("vita", settings, self).exec()
+        self.refresh_device_page()
+
     def open_3ds_storage(self) -> None:
         MountedStorageDialog(self._reload_config(), "3ds", "Nintendo 3DS", self).exec()
         self.config = self._reload_config()
+        self.refresh_device_page()
+
+    def open_3ds_ftp_files(self) -> None:
+        saved = self._reload_config().get("devices", {}).get("3ds", {})
+        settings = self._three_ds_ftp_settings(saved)
+        if settings is None:
+            QMessageBox.information(
+                self,
+                "Configure 3DS FTP",
+                "Configure the ftpd endpoint in Connection setup first.",
+            )
+            return
+        FtpFileManagerDialog("3ds", settings, self).exec()
         self.refresh_device_page()
 
     def open_3ds(
