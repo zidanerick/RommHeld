@@ -8,7 +8,17 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
+from romm_vita_manager.three_ds_apps import APP_BY_KEY
 from romm_vita_manager.three_ds_readiness_ui import ThreeDSReadinessDialog
+
+
+ASSISTED_APPS = (
+    "daedalusx64",
+    "twilight",
+    "retroarch",
+    "open-agb-firm",
+    "godmode9",
+)
 
 
 def _app() -> QApplication:
@@ -49,11 +59,17 @@ def test_readiness_installer_actions_match_package_safety_boundary(tmp_path: Pat
     assert dialog.stage_button.isEnabled()
     assert dialog.stage_button.text() == "Prepare FBI"
 
-    _select(dialog, "daedalusx64")
-    assert dialog.stage_button.isEnabled()
-    assert dialog.stage_button.text() == "Prepare Universal-Updater"
+    for app_key in ASSISTED_APPS:
+        _select(dialog, app_key)
+        assert dialog.stage_button.isEnabled()
+        assert dialog.stage_button.text() == "Prepare Universal-Updater"
+        assert f"search for {APP_BY_KEY[app_key].name}" in dialog.detail_text.text()
 
     _select(dialog, "luma")
+    assert not dialog.stage_button.isEnabled()
+    assert dialog.stage_button.text() == "No automatic install"
+
+    _select(dialog, "homebrew-launcher")
     assert not dialog.stage_button.isEnabled()
     assert dialog.stage_button.text() == "No automatic install"
 
@@ -65,7 +81,7 @@ def test_readiness_installer_actions_match_package_safety_boundary(tmp_path: Pat
     app.processEvents()
 
 
-def test_complex_app_switches_to_updater_steps_when_updater_is_present(tmp_path: Path) -> None:
+def test_complex_apps_switch_to_updater_steps_when_updater_is_present(tmp_path: Path) -> None:
     app = _app()
     sd_root = tmp_path / "sd"
     sd_root.mkdir()
@@ -78,11 +94,13 @@ def test_complex_app_switches_to_updater_steps_when_updater_is_present(tmp_path:
     dialog.show()
     app.processEvents()
 
-    _select(dialog, "daedalusx64")
-    assert dialog.stage_button.isEnabled()
-    assert dialog.stage_button.text() == "Show updater steps"
-    assert "launch Universal-Updater on the 3DS" in dialog.detail_text.text()
-    assert "search for DaedalusX64" in dialog.detail_text.text()
+    for app_key in ASSISTED_APPS:
+        _select(dialog, app_key)
+        app_name = APP_BY_KEY[app_key].name
+        assert dialog.stage_button.isEnabled()
+        assert dialog.stage_button.text() == "Show updater steps"
+        assert "launch Universal-Updater on the 3DS" in dialog.detail_text.text()
+        assert f"search for {app_name}" in dialog.detail_text.text()
 
     dialog.close()
     app.processEvents()
