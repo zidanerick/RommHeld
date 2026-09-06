@@ -148,6 +148,8 @@ Status: complete for the structural refactor; deployment expansion remains hardw
 
 Local 3DS browsing deliberately filters out package-generation targets that require RomM metadata/package preparation where the direct local route does not support them safely. A local `.cia` can expose the native CIA route; arbitrary local 3DS files are not relabelled as installable CIA content.
 
+The separate `ThreeDSManagerDialog` no longer holds its modal window open while an in-flight network request reaches its timeout. Close, window-manager close and Escape request interruption/cancellation and dismiss the dialog immediately. Any still-running `QThread` is retained by a detached-worker lifetime keeper until its `finished` signal arrives, avoiding both a frozen-looking modal and unsafe `QThread` destruction.
+
 Further 3DS deployment changes should be coordinated with hardware/runtime work. Avoid reintroducing a second generic library UI merely because the source can now be local: the 3DS master/detail surface remains target-specific and owns its compatibility/runtime choices.
 
 ## Phase 4: device readiness and contextual setup
@@ -307,11 +309,12 @@ Current regression areas include:
 - shared keyboard-focus styling
 - Vita Library transfer lifecycle guards across workspace-changing actions
 - offscreen Qt runtime construction/navigation for the real shell and local-library widgets
+- offscreen 3DS Manager dismissal while a background worker is still active, including detached QThread lifetime until safe completion
 - compact-layout bounds with long Vita library content and USB status-filter transitions
 - stable RommHeld `QStandardPaths` identity before and after `QApplication` creation
 - guarded migration of recognizable pre-identity RommHeld configuration
 
-CI remains headless, but it now installs the minimal EGL runtime needed for PySide6 and runs an offscreen Qt smoke layer. That layer constructs the real `ManagementShell` and `LocalLibraryWidget`, applies the shared application theme, exercises navigation, compact layout bounds with long content, selection/action state and USB status-filter transitions. This catches runtime widget-construction and state/layout regressions that source-contract tests cannot. It still does not validate native desktop compositor/theme/font rendering, DPI behavior, platform-specific window management or real-device interaction; those remain desktop and hardware responsibilities.
+CI remains headless, but it now installs the minimal EGL runtime needed for PySide6 and runs an offscreen Qt smoke layer. That layer constructs the real `ManagementShell` and `LocalLibraryWidget`, applies the shared application theme, exercises navigation, compact layout bounds with long content, selection/action state and USB status-filter transitions, and verifies that the 3DS Manager can dismiss while a worker remains alive safely in the background. This catches runtime widget-construction and state/layout regressions that source-contract tests cannot. It still does not validate native desktop compositor/theme/font rendering, DPI behavior, platform-specific window management or real-device interaction; those remain desktop and hardware responsibilities.
 
 ## Remaining validation
 
@@ -322,6 +325,7 @@ CI remains headless, but it now installs the minimal EGL runtime needed for PySi
 - close selector during RomM verification
 - close the main window during a Settings RomM verification
 - close deployment dialogs during transfer/cleanup
+- close the 3DS Manager during an active RomM library scan and confirm the native dialog disappears immediately without a crash or `QThread` destruction warning
 - switch handheld workspaces repeatedly
 - quit while artwork/library workers are active
 - confirm Library, Device and Settings render correctly at target desktop scales/themes
